@@ -11,24 +11,42 @@ steps:
       - cargo build --release
     env:
       RUSTFLAGS: "-D warnings"
+    on_failure:
+      strategy: auto_fix
+      max_retries: 3
+      context_paths:
+        - src/
+        - Cargo.toml
 
   - name: lint
     image: rust:1.78-slim
     commands:
       - rustup component add clippy
       - cargo clippy -- -D warnings
+    on_failure:
+      strategy: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
 
   - name: test
     image: rust:1.78-slim
     depends_on: [build]
     commands:
       - cargo test --release
+    on_failure:
+      strategy: notify
 
   - name: fmt-check
     image: rust:1.78-slim
     commands:
       - rustup component add rustfmt
       - cargo fmt -- --check
+    on_failure:
+      strategy: auto_fix
+      max_retries: 1
+      context_paths:
+        - src/
 
   - name: security-audit
     image: rust:1.78-slim

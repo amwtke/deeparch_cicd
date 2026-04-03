@@ -14,30 +14,37 @@ Executor (bollard)       → Docker container lifecycle management
 Output (console)         → Real-time colored terminal output
 ```
 
-## Planned: LLM Executor Layer
+## Implemented: Run-Exit-Fix-Retry Loop
 
 ```
-Executor Layer
-    ├── DockerExecutor      ← existing: run commands in Docker containers
-    └── ClaudeExecutor      ← planned: invoke Claude Code CLI as sub-agent
+pipelight run --output json
+    → execute steps in DAG order
+    → step fails (strategy: auto_fix)
+    → save state to ~/.pipelight/runs/<run-id>/status.json
+    → output JSON with error details + on_failure metadata
+    → exit (code 1 = retryable)
+
+LLM agent reads JSON, fixes code...
+
+pipelight retry --run-id <id> --step <name> --output json
+    → load state from status.json
+    → re-execute failed step
+    → if success: run downstream steps
+    → output updated JSON
+    → exit (code 0 = success, 1 = still retryable, 2 = final failure)
 ```
 
-### ClaudeExecutor design
+### Exit Codes
 
-Invocation method: spawn `claude` CLI process in headless mode (`-p` flag).
+| Code | Meaning |
+|------|---------|
+| 0 | All steps succeeded |
+| 1 | Step failed, retryable (auto_fix with retries remaining) |
+| 2 | Step failed, final (abort, notify, or max_retries exhausted) |
 
-```
-pipelight detects step failure
-    → collects error log + relevant source code
-    → spawns: claude -p "Fix this build error: {context}" --allowedTools Edit,Bash
-    → Claude Code reads/edits files, runs commands
-    → pipelight re-runs the failed step
-    → repeat up to max_retries
-```
+## Future: LLM Integration
 
-Billing: uses existing Claude Code subscription (Max plan or API key), no extra cost.
-
-### MCP Server (future)
+### MCP Server (planned)
 
 Expose pipelight as MCP tools to Claude Code:
 
@@ -45,18 +52,23 @@ Expose pipelight as MCP tools to Claude Code:
 - `pipelight.status` — check pipeline status  
 - `pipelight.logs` — get step logs
 
-This enables Claude Code to natively trigger and monitor CI/CD within a conversation.
-
 ## Directory Structure
 
 ```
 src/
-  main.rs              → entry point
-  cli/mod.rs           → clap command definitions
-  pipeline/mod.rs      → YAML parsing & Pipeline data model
+  main.rs              → entry point, exit code handling
+  cli/mod.rs           → clap commands: run, validate, list, retry, status
+  pipeline/mod.rs      → YAML parsing, Pipeline/Step/OnFailure/Strategy model
   scheduler/mod.rs     → DAG construction & topological sort scheduling
-  executor/mod.rs      → Docker container executor
-  output/mod.rs        → terminal log output formatting
+  executor/mod.rs      → Docker container executor (bollard)
+  run_state/mod.rs     → RunState/StepState model, status.json persistence
+  output/
+    mod.rs             → OutputMode enum (Tty/Plain/Json), auto-detection
+    tty.rs             → colored terminal output with progress
+    json.rs            → structured JSON output for LLM agents
+    plain.rs           → plain text output (no ANSI codes)
+tests/
+  integration_test.rs  → CLI integration tests
 ```
 
 ## Key Crates
