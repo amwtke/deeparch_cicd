@@ -108,9 +108,8 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             cmd_retry(run_id, step, mode, file).await
         }
         Command::Status { run_id, output } => {
-            let _mode = resolve_output_mode(output);
-            // Placeholder: status logic will be implemented later
-            Ok(0)
+            let mode = resolve_output_mode(output);
+            cmd_status(run_id, mode).await
         }
     }
 }
@@ -480,3 +479,14 @@ async fn cmd_retry(
     }
 }
 
+async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
+    let base = RunState::default_base_dir();
+    let state = RunState::load(&base, &run_id)?;
+
+    match mode {
+        OutputMode::Json => json::print_run_state(&state),
+        OutputMode::Plain | OutputMode::Tty => plain::print_run_state(&state),
+    }
+
+    Ok(0)
+}
