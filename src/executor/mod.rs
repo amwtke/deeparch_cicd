@@ -59,8 +59,7 @@ pub struct DockerExecutor {
 
 impl DockerExecutor {
     pub async fn new() -> Result<Self> {
-        let docker =
-            Docker::connect_with_local_defaults().context("Failed to connect to Docker daemon")?;
+        let docker = Self::connect().await?;
 
         // Verify connection
         docker
@@ -69,6 +68,52 @@ impl DockerExecutor {
             .context("Cannot reach Docker daemon. Is Docker running?")?;
 
         Ok(Self { docker })
+    }
+
+    /// Try to connect to Docker daemon, probing multiple socket locations.
+    /// Priority: $DOCKER_HOST env var → platform-specific paths → bollard defaults.
+    async fn connect() -> Result<Docker> {
+        // If DOCKER_HOST is set, let bollard handle it
+        if std::env::var("DOCKER_HOST").is_ok() {
+            return Docker::connect_with_local_defaults()
+                .context("Failed to connect to Docker daemon via $DOCKER_HOST");
+        }
+
+        // Probe known socket paths
+        let candidates = Self::socket_candidates();
+        for path in &candidates {
+            if std::path::Path::new(path).exists() {
+                return Docker::connect_with_unix(path, 120, bollard::API_DEFAULT_VERSION)
+                    .context(format!("Failed to connect to Docker daemon at {}", path));
+            }
+        }
+
+        // Fallback to bollard defaults
+        Docker::connect_with_local_defaults()
+            .context(format!(
+                "Failed to connect to Docker daemon: Socket not found. Tried: {}",
+                candidates.join(", ")
+            ))
+    }
+
+    /// Return candidate Docker socket paths for the current platform.
+    fn socket_candidates() -> Vec<String> {
+        let mut paths = vec![];
+
+        // macOS: Docker Desktop puts socket in ~/.docker/run/
+        if let Some(home) = dirs::home_dir() {
+            paths.push(format!("{}/.docker/run/docker.sock", home.display()));
+        }
+
+        // Linux standard path / macOS fallback
+        paths.push("/var/run/docker.sock".to_string());
+
+        // Colima (macOS alternative)
+        if let Some(home) = dirs::home_dir() {
+            paths.push(format!("{}/.colima/default/docker.sock", home.display()));
+        }
+
+        paths
     }
 
     /// Execute a single pipeline step inside a Docker container.
