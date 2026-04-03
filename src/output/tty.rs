@@ -1,6 +1,5 @@
 use console::{style, Emoji};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::collections::HashMap;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
 use crate::executor::{LogLine, LogStream, StepResult};
@@ -14,130 +13,109 @@ static CROSS: Emoji<'_, '_> = Emoji("❌ ", "[FAIL] ");
 static ARROW: Emoji<'_, '_> = Emoji("▸ ", "> ");
 static CLOCK: Emoji<'_, '_> = Emoji("⏱  ", "");
 static PENDING: Emoji<'_, '_> = Emoji("⬚  ", "[ ] ");
-static SPINNER: Emoji<'_, '_> = Emoji("⏳ ", "[..] ");
 static CHART: Emoji<'_, '_> = Emoji("📊 ", "");
 
-/// Multi-line progress UI for TTY mode pipeline execution.
+/// Multi-step progress UI for TTY mode.
+/// Uses a single spinner for the active step, prints completed steps as static lines.
 pub struct PipelineProgressUI {
-    multi: MultiProgress,
-    bars: HashMap<String, ProgressBar>,
-    step_order: Vec<String>,
-    log_bars: HashMap<String, Vec<ProgressBar>>,
+    pending_steps: Vec<String>,
+    current_spinner: Option<ProgressBar>,
     verbose: bool,
 }
 
 impl PipelineProgressUI {
-    /// Create progress UI with one bar per step.
     pub fn new(step_names: &[String], verbose: bool) -> Self {
-        let multi = MultiProgress::new();
-        let mut bars = HashMap::new();
-        let step_order = step_names.to_vec();
-
-        for name in step_names {
-            let pb = multi.add(ProgressBar::new_spinner());
-            pb.set_style(ProgressStyle::default_spinner()
-                .template("{msg}")
-                .unwrap());
-            pb.set_message(format!("{}{}      -", PENDING, style(name).dim()));
-            bars.insert(name.clone(), pb);
-        }
-
         Self {
-            multi,
-            bars,
-            step_order,
-            log_bars: HashMap::new(),
+            pending_steps: step_names.to_vec(),
+            current_spinner: None,
             verbose,
         }
     }
 
-    /// Mark a step as started (show spinner).
-    pub fn start_step(&self, name: &str) {
-        if let Some(pb) = self.bars.get(name) {
-            pb.set_style(ProgressStyle::default_spinner()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("{spinner} {msg}")
-                .unwrap());
-            pb.enable_steady_tick(Duration::from_millis(100));
-            pb.set_message(format!("{} {}  Running...", style(name).bold(), style("0.0s").dim()));
-        }
-    }
-
-    /// Update the running step's elapsed time.
-    pub fn update_elapsed(&self, name: &str, elapsed: Duration) {
-        if let Some(pb) = self.bars.get(name) {
-            pb.set_message(format!("{} {}  Running...",
-                style(name).bold(),
-                style(format_duration(elapsed)).dim()));
-        }
-    }
-
-    /// Add a log line under the current step.
-    pub fn log_line(&mut self, name: &str, line: &LogLine) {
-        let max_lines = if self.verbose { usize::MAX } else { 3 };
-
-        let logs = self.log_bars.entry(name.to_string()).or_insert_with(Vec::new);
-
-        // If not verbose and we already have max_lines, remove the oldest
-        if !self.verbose && logs.len() >= max_lines {
-            if let Some(old) = logs.first() {
-                old.finish_and_clear();
-            }
-            logs.remove(0);
-        }
-
-        let prefix = match line.stream {
-            LogStream::Stdout => style("   │ ").dim().to_string(),
-            LogStream::Stderr => style("   │ ").red().dim().to_string(),
-        };
-        let msg = line.message.trim_end();
-
-        // Insert log bar after the step's main bar
-        if let Some(step_pb) = self.bars.get(name) {
-            let log_pb = self.multi.insert_after(step_pb, ProgressBar::new_spinner());
-            log_pb.set_style(ProgressStyle::default_spinner().template("{msg}").unwrap());
-            log_pb.set_message(format!("{}{}", prefix, msg));
-            logs.push(log_pb);
-        }
-    }
-
-    /// Mark step as finished, clear its log lines.
-    pub fn finish_step(&mut self, name: &str, success: bool, duration: Duration) {
-        // Clear log bars for this step
-        if let Some(logs) = self.log_bars.remove(name) {
-            for pb in logs {
-                pb.finish_and_clear();
-            }
-        }
-
-        if let Some(pb) = self.bars.get(name) {
-            pb.set_style(ProgressStyle::default_spinner().template("{msg}").unwrap());
-            let icon = if success { CHECK.to_string() } else { CROSS.to_string() };
-            let name_styled = if success {
-                style(name).green().bold().to_string()
-            } else {
-                style(name).red().bold().to_string()
-            };
-            pb.finish_with_message(format!("{}{} {}",
-                icon, name_styled,
-                style(format_duration(duration)).dim()));
-        }
-    }
-
-    /// Print the pipeline header above progress bars.
+    /// Print header and pending step list.
     pub fn print_header(&self, pipeline_name: &str, step_count: usize) {
         println!();
-        println!("{} {} {} ({} steps)", ROCKET, style("Pipeline:").bold(),
-            style(pipeline_name).cyan().bold(), step_count);
+        println!(
+            "{} {} {} ({} steps)",
+            ROCKET,
+            style("Pipeline:").bold(),
+            style(pipeline_name).cyan().bold(),
+            step_count
+        );
         println!("{}", style("─".repeat(56)).dim());
     }
 
-    /// Print test summary after pipeline completes.
+    /// Mark a step as started — show a spinner on that line.
+    pub fn start_step(&mut self, name: &str) {
+        // Stop any previous spinner cleanly
+        if let Some(pb) = self.current_spinner.take() {
+            pb.finish_and_clear();
+        }
+
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                .template("{spinner} {msg}")
+                .unwrap(),
+        );
+        pb.set_message(format!(
+            "{} {}  Running...",
+            style(name).bold(),
+            style("0.0s").dim()
+        ));
+        pb.enable_steady_tick(Duration::from_millis(100));
+        self.current_spinner = Some(pb);
+    }
+
+    /// Print a log line below the spinner (only stderr in non-verbose, all in verbose).
+    pub fn print_log(&self, line: &LogLine) {
+        if self.verbose || line.stream == LogStream::Stderr {
+            let prefix = match line.stream {
+                LogStream::Stdout => style("   │ ").dim(),
+                LogStream::Stderr => style("   │ ").red().dim(),
+            };
+            if let Some(ref pb) = self.current_spinner {
+                pb.suspend(|| {
+                    print!("{}{}", prefix, line.message);
+                });
+            }
+        }
+    }
+
+    /// Mark step as finished — clear spinner, print a static result line.
+    pub fn finish_step(&mut self, name: &str, success: bool, duration: Duration) {
+        // Clear the spinner
+        if let Some(pb) = self.current_spinner.take() {
+            pb.finish_and_clear();
+        }
+
+        let icon = if success {
+            CHECK.to_string()
+        } else {
+            CROSS.to_string()
+        };
+        let name_styled = if success {
+            style(name).green().bold().to_string()
+        } else {
+            style(name).red().bold().to_string()
+        };
+        println!(
+            "{}{:<16} {}",
+            icon,
+            name_styled,
+            style(format_duration(duration)).dim()
+        );
+    }
+
+    /// Print test summary.
     pub fn print_test_summary(&self, summary: &TestSummary) {
         println!();
         let passed = style(format!("{} passed", summary.passed)).green();
         let failed = if summary.failed > 0 {
-            style(format!("{} failed", summary.failed)).red().to_string()
+            style(format!("{} failed", summary.failed))
+                .red()
+                .to_string()
         } else {
             format!("{} failed", summary.failed)
         };
@@ -152,14 +130,32 @@ impl PipelineProgressUI {
     /// Print step duration statistics table.
     pub fn print_stats_table(&self, results: &[(String, Duration, bool)], total: Duration) {
         println!();
-        println!("{} {:<16} {:<12} {}", CLOCK,
-            style("Step").bold(), style("Duration").bold(), style("Status").bold());
+        println!(
+            "{} {:<16} {:<12} {}",
+            CLOCK,
+            style("Step").bold(),
+            style("Duration").bold(),
+            style("Status").bold()
+        );
         for (name, dur, success) in results {
-            let status = if *success { CHECK.to_string() } else { CROSS.to_string() };
-            println!("   {:<16} {:<12} {}", name, format_duration(*dur), status);
+            let status = if *success {
+                CHECK.to_string()
+            } else {
+                CROSS.to_string()
+            };
+            println!(
+                "   {:<16} {:<12} {}",
+                name,
+                format_duration(*dur),
+                status
+            );
         }
         println!("{}", style("─".repeat(56)).dim());
-        println!("   {:<16} {}", "Total", style(format_duration(total)).bold());
+        println!(
+            "   {:<16} {}",
+            "Total",
+            style(format_duration(total)).bold()
+        );
         println!();
     }
 }
@@ -252,7 +248,6 @@ impl PipelineReporter {
         );
         println!();
 
-        let depths = scheduler.step_depths();
         let schedule = scheduler.resolve(None).unwrap_or_default();
 
         for (batch_idx, batch) in schedule.iter().enumerate() {

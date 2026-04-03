@@ -197,7 +197,7 @@ async fn cmd_run(
             let step = pipeline.get_step(step_name).expect("step must exist").clone();
 
             // Signal step start
-            if let Some(ref progress) = progress {
+            if let Some(ref mut progress) = progress {
                 progress.start_step(step_name);
             }
             if mode == OutputMode::Plain {
