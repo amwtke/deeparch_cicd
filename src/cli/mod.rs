@@ -75,6 +75,17 @@ pub enum Command {
         file: PathBuf,
     },
 
+    /// Auto-detect project type and generate pipeline.yml
+    Init {
+        /// Project directory to scan
+        #[arg(short, long, default_value = ".")]
+        dir: PathBuf,
+
+        /// Output file path
+        #[arg(short, long, default_value = "pipeline.yml")]
+        output: PathBuf,
+    },
+
     /// Show status of a pipeline run
     Status {
         /// Run ID to check
@@ -96,6 +107,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             output,
             run_id,
         } => cmd_run(file, step, dry_run, output, run_id).await,
+        Command::Init { dir, output } => cmd_init(dir, output).await,
         Command::Validate { file } => cmd_validate(file).await,
         Command::List { file } => cmd_list(file).await,
         Command::Retry {
@@ -477,6 +489,38 @@ async fn cmd_retry(
         PipelineStatus::Retryable => Ok(1),
         _ => Ok(2),
     }
+}
+
+async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
+    use crate::detector;
+
+    let (info, pipeline) = detector::detect_and_generate(&dir)?;
+
+    // Print detection results
+    println!("Detected project: {}", info.project_type);
+    if let Some(ref ver) = info.language_version {
+        println!("Language version: {}", ver);
+    }
+    if let Some(ref fw) = info.framework {
+        println!("Framework: {}", fw);
+    }
+    println!("Docker image: {}", info.image);
+    println!("Steps: {}", pipeline.steps.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+
+    for warning in &info.warnings {
+        eprintln!("WARNING: {}", warning);
+    }
+
+    // Serialize to YAML
+    let yaml = serde_yaml::to_string(&pipeline)
+        .context("Failed to serialize pipeline to YAML")?;
+
+    // Write file
+    std::fs::write(&output_path, &yaml)
+        .context(format!("Failed to write {}", output_path.display()))?;
+
+    println!("\nGenerated: {}", output_path.display());
+    Ok(0)
 }
 
 async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {

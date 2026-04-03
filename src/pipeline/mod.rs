@@ -9,7 +9,7 @@ pub struct Pipeline {
     pub name: String,
 
     /// Global environment variables available to all steps
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
 
     /// Pipeline steps
@@ -30,32 +30,40 @@ pub struct Step {
     pub commands: Vec<String>,
 
     /// Steps that must complete before this one
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
 
     /// Step-level environment variables (merged with global)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
 
     /// Working directory inside the container
-    #[serde(default = "default_workdir")]
+    #[serde(default = "default_workdir", skip_serializing_if = "is_default_workdir")]
     pub workdir: String,
 
     /// Continue pipeline even if this step fails
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub allow_failure: bool,
 
     /// Conditional execution expression
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition: Option<String>,
 
     /// Failure handling configuration
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<OnFailure>,
 }
 
 fn default_workdir() -> String {
     "/workspace".to_string()
+}
+
+fn is_default_workdir(s: &str) -> bool {
+    s == "/workspace"
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
