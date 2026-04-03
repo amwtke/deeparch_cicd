@@ -1,0 +1,6 @@
+name: test-success
+steps:
+  - name: hello
+    image: alpine:latest
+    commands:
+      - echo "hello from integration test"

@@ -1,0 +1,11 @@
+name: test-retryable
+steps:
+  - name: fixable
+    image: alpine:latest
+    commands:
+      - exit 1
+    on_failure:
+      strategy: auto_fix
+      max_retries: 3
+      context_paths:
+        - src/

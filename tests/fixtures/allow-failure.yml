@@ -1,0 +1,13 @@
+name: test-allow-failure
+steps:
+  - name: flaky
+    image: alpine:latest
+    allow_failure: true
+    commands:
+      - exit 1
+
+  - name: after-flaky
+    image: alpine:latest
+    depends_on: [flaky]
+    commands:
+      - echo "I still run"

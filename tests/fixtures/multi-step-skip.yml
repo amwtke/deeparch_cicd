@@ -1,0 +1,14 @@
+name: test-skip
+steps:
+  - name: step-a
+    image: alpine:latest
+    commands:
+      - exit 1
+    on_failure:
+      strategy: abort
+
+  - name: step-b
+    image: alpine:latest
+    depends_on: [step-a]
+    commands:
+      - echo "should be skipped"

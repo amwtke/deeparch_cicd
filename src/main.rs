@@ -25,11 +25,13 @@ async fn main() {
                     .add_directive("pipelight=info".parse().unwrap()),
             )
             .with_target(false)
+            .with_writer(std::io::stderr)
             .init();
     } else {
         tracing_subscriber::fmt()
             .with_env_filter("pipelight=warn")
             .with_target(false)
+            .with_writer(std::io::stderr)
             .init();
     }
 
