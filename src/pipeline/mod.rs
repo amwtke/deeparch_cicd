@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -48,10 +48,38 @@ pub struct Step {
     /// Conditional execution expression
     #[serde(default)]
     pub condition: Option<String>,
+
+    /// Failure handling configuration
+    #[serde(default)]
+    pub on_failure: Option<OnFailure>,
 }
 
 fn default_workdir() -> String {
     "/workspace".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Strategy {
+    Abort,
+    AutoFix,
+    Notify,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnFailure {
+    #[serde(default = "default_strategy")]
+    pub strategy: Strategy,
+
+    #[serde(default)]
+    pub max_retries: u32,
+
+    #[serde(default)]
+    pub context_paths: Vec<String>,
+}
+
+fn default_strategy() -> Strategy {
+    Strategy::Abort
 }
 
 impl Pipeline {
@@ -124,6 +152,65 @@ impl Pipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_on_failure() {
+        let yaml = r#"
+name: test-pipeline
+steps:
+  - name: build
+    image: rust:1.78
+    commands:
+      - cargo build
+    on_failure:
+      strategy: auto_fix
+      max_retries: 3
+      context_paths:
+        - src/
+        - Cargo.toml
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let step = &pipeline.steps[0];
+        let on_failure = step.on_failure.as_ref().unwrap();
+        assert_eq!(on_failure.strategy, Strategy::AutoFix);
+        assert_eq!(on_failure.max_retries, 3);
+        assert_eq!(on_failure.context_paths, vec!["src/", "Cargo.toml"]);
+    }
+
+    #[test]
+    fn test_on_failure_defaults() {
+        let yaml = r#"
+name: test-pipeline
+steps:
+  - name: build
+    image: rust:1.78
+    commands:
+      - cargo build
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let step = &pipeline.steps[0];
+        assert!(step.on_failure.is_none());
+    }
+
+    #[test]
+    fn test_on_failure_notify_strategy() {
+        let yaml = r#"
+name: test-pipeline
+steps:
+  - name: test
+    image: rust:1.78
+    commands:
+      - cargo test
+    on_failure:
+      strategy: notify
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let step = &pipeline.steps[0];
+        let on_failure = step.on_failure.as_ref().unwrap();
+        assert_eq!(on_failure.strategy, Strategy::Notify);
+        assert_eq!(on_failure.max_retries, 0);
+        assert!(on_failure.context_paths.is_empty());
+    }
 
     #[test]
     fn test_parse_basic_pipeline() {
