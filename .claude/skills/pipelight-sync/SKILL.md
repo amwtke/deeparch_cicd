@@ -71,14 +71,48 @@ claude --version     # Claude Code CLI (optional)
   - Others: print install instructions
 - **Installed but not running** (Docker daemon) → warn user to start Docker
 
-After environment check, verify the project builds:
+After environment check, build the release binary and install it:
 
 ```bash
-cargo build 2>&1
+cargo build --release 2>&1
 ```
 
-- **Build succeeds** → `OK: cargo build passed`
-- **Build fails** → show error, suggest `cargo clean && cargo build`
+- **Build succeeds** → proceed to install
+- **Build fails** → show error, suggest `cargo clean && cargo build --release`
+
+### Step 2b: Install pipelight binary
+
+After a successful release build, copy the binary to a directory on PATH so it can be invoked as `pipelight` from anywhere.
+
+**macOS:**
+
+```bash
+# Prefer /usr/local/bin (no sudo needed on most macOS setups)
+cp target/release/pipelight /usr/local/bin/pipelight
+```
+
+If `/usr/local/bin` is not writable, fall back to `~/.cargo/bin/` (which is already on PATH if Rust is installed via rustup):
+
+```bash
+cp target/release/pipelight ~/.cargo/bin/pipelight
+```
+
+**Linux:**
+
+```bash
+# Try /usr/local/bin first (may need sudo)
+sudo cp target/release/pipelight /usr/local/bin/pipelight 2>/dev/null \
+  || cp target/release/pipelight ~/.cargo/bin/pipelight
+```
+
+**Verify installation:**
+
+```bash
+pipelight --version
+```
+
+- **Works** → `OK: pipelight 0.1.0 (installed to /usr/local/bin/pipelight)`
+- **Not found** → warn user to add `~/.cargo/bin` to PATH
 
 ### Step 3: Sync Knowledge Base
 
@@ -118,7 +152,8 @@ Environment:
   claude       OK 1.x.x (optional)
 
 Build:
-  cargo build  OK (N warnings)
+  cargo build  OK (release, N warnings)
+  pipelight    OK installed (/usr/local/bin/pipelight or ~/.cargo/bin/pipelight)
 
 Knowledge:
   docs/        OK (N documents loaded)
