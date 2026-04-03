@@ -193,4 +193,103 @@ steps:
         assert!(all_steps.contains(&"test"));
         assert!(!all_steps.contains(&"deploy"));
     }
+
+    #[test]
+    fn test_linear_dependency_chain() {
+        let yaml = r#"
+name: test
+steps:
+  - name: a
+    image: alpine
+    commands: [echo a]
+  - name: b
+    image: alpine
+    depends_on: [a]
+    commands: [echo b]
+  - name: c
+    image: alpine
+    depends_on: [b]
+    commands: [echo c]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let scheduler = Scheduler::new(&pipeline).unwrap();
+        let schedule = scheduler.resolve(None).unwrap();
+        assert_eq!(schedule.len(), 3); // 3 batches, one per step
+        assert_eq!(schedule[0], vec!["a"]);
+        assert_eq!(schedule[1], vec!["b"]);
+        assert_eq!(schedule[2], vec!["c"]);
+    }
+
+    #[test]
+    fn test_all_independent_steps() {
+        let yaml = r#"
+name: test
+steps:
+  - name: a
+    image: alpine
+    commands: [echo a]
+  - name: b
+    image: alpine
+    commands: [echo b]
+  - name: c
+    image: alpine
+    commands: [echo c]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let scheduler = Scheduler::new(&pipeline).unwrap();
+        let schedule = scheduler.resolve(None).unwrap();
+        assert_eq!(schedule.len(), 1); // all in one batch
+        assert_eq!(schedule[0].len(), 3);
+    }
+
+    #[test]
+    fn test_diamond_dependency() {
+        let yaml = r#"
+name: test
+steps:
+  - name: start
+    image: alpine
+    commands: [echo start]
+  - name: left
+    image: alpine
+    depends_on: [start]
+    commands: [echo left]
+  - name: right
+    image: alpine
+    depends_on: [start]
+    commands: [echo right]
+  - name: end
+    image: alpine
+    depends_on: [left, right]
+    commands: [echo end]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let scheduler = Scheduler::new(&pipeline).unwrap();
+        let schedule = scheduler.resolve(None).unwrap();
+        assert_eq!(schedule.len(), 3);
+        assert_eq!(schedule[0], vec!["start"]);
+        assert!(schedule[1].contains(&"left".to_string()));
+        assert!(schedule[1].contains(&"right".to_string()));
+        assert_eq!(schedule[2], vec!["end"]);
+    }
+
+    #[test]
+    fn test_step_depths() {
+        let yaml = r#"
+name: test
+steps:
+  - name: build
+    image: alpine
+    commands: [echo build]
+  - name: test
+    image: alpine
+    depends_on: [build]
+    commands: [echo test]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let scheduler = Scheduler::new(&pipeline).unwrap();
+        let depths = scheduler.step_depths();
+        assert_eq!(depths["build"], 0);
+        assert_eq!(depths["test"], 1);
+    }
 }

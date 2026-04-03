@@ -233,3 +233,53 @@ impl DockerExecutor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stdout_string() {
+        let result = StepResult {
+            step_name: "test".into(),
+            exit_code: 0,
+            logs: vec![
+                LogLine { stream: LogStream::Stdout, message: "line1\n".into() },
+                LogLine { stream: LogStream::Stderr, message: "err\n".into() },
+                LogLine { stream: LogStream::Stdout, message: "line2\n".into() },
+            ],
+            duration: std::time::Duration::from_secs(1),
+            success: true,
+        };
+        assert_eq!(result.stdout_string(), "line1\nline2\n");
+    }
+
+    #[test]
+    fn test_stderr_string() {
+        let result = StepResult {
+            step_name: "test".into(),
+            exit_code: 1,
+            logs: vec![
+                LogLine { stream: LogStream::Stdout, message: "ok\n".into() },
+                LogLine { stream: LogStream::Stderr, message: "error1\n".into() },
+                LogLine { stream: LogStream::Stderr, message: "error2\n".into() },
+            ],
+            duration: std::time::Duration::from_secs(1),
+            success: false,
+        };
+        assert_eq!(result.stderr_string(), "error1\nerror2\n");
+    }
+
+    #[test]
+    fn test_empty_logs() {
+        let result = StepResult {
+            step_name: "test".into(),
+            exit_code: 0,
+            logs: vec![],
+            duration: std::time::Duration::from_secs(0),
+            success: true,
+        };
+        assert_eq!(result.stdout_string(), "");
+        assert_eq!(result.stderr_string(), "");
+    }
+}

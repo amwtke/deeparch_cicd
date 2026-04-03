@@ -261,4 +261,109 @@ steps:
 "#;
         assert!(Pipeline::from_str(yaml).is_err());
     }
+
+    #[test]
+    fn test_merged_env() {
+        let yaml = r#"
+name: test
+env:
+  GLOBAL_VAR: global_value
+  SHARED: from_global
+steps:
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+    env:
+      STEP_VAR: step_value
+      SHARED: from_step
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let step = &pipeline.steps[0];
+        let env = pipeline.merged_env(step);
+        assert_eq!(env.get("GLOBAL_VAR").unwrap(), "global_value");
+        assert_eq!(env.get("STEP_VAR").unwrap(), "step_value");
+        assert_eq!(env.get("SHARED").unwrap(), "from_step"); // step overrides global
+    }
+
+    #[test]
+    fn test_empty_pipeline_fails() {
+        let yaml = r#"
+name: empty
+steps: []
+"#;
+        assert!(Pipeline::from_str(yaml).is_err());
+    }
+
+    #[test]
+    fn test_self_dependency_fails() {
+        let yaml = r#"
+name: bad
+steps:
+  - name: loop
+    image: rust:1.78
+    depends_on: [loop]
+    commands: [echo hi]
+"#;
+        assert!(Pipeline::from_str(yaml).is_err());
+    }
+
+    #[test]
+    fn test_default_workdir() {
+        let yaml = r#"
+name: test
+steps:
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        assert_eq!(pipeline.steps[0].workdir, "/workspace");
+    }
+
+    #[test]
+    fn test_allow_failure_default() {
+        let yaml = r#"
+name: test
+steps:
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        assert!(!pipeline.steps[0].allow_failure);
+    }
+
+    #[test]
+    fn test_on_failure_abort_strategy() {
+        let yaml = r#"
+name: test
+steps:
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+    on_failure:
+      strategy: abort
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let of = pipeline.steps[0].on_failure.as_ref().unwrap();
+        assert_eq!(of.strategy, Strategy::Abort);
+    }
+
+    #[test]
+    fn test_get_step_by_name() {
+        let yaml = r#"
+name: test
+steps:
+  - name: build
+    image: rust:1.78
+    commands: [echo build]
+  - name: test
+    image: rust:1.78
+    commands: [echo test]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        assert!(pipeline.get_step("build").is_some());
+        assert!(pipeline.get_step("test").is_some());
+        assert!(pipeline.get_step("nonexistent").is_none());
+    }
 }

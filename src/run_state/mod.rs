@@ -202,4 +202,142 @@ mod tests {
         let step = state.get_step("build").unwrap();
         assert_eq!(step.on_failure.as_ref().unwrap().retries_remaining, 2);
     }
+
+    #[test]
+    fn test_load_nonexistent_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = RunState::load(dir.path(), "nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_load_roundtrip_with_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = RunState::new("roundtrip-1", "my-pipeline");
+        state.status = PipelineStatus::Retryable;
+        state.duration_ms = Some(5000);
+        state.add_step(StepState {
+            name: "build".into(),
+            status: StepStatus::Success,
+            exit_code: Some(0),
+            duration_ms: Some(2000),
+            image: "rust:1.78".into(),
+            command: "cargo build".into(),
+            stdout: Some("compiled OK".into()),
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+        });
+        state.add_step(StepState {
+            name: "test".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: Some(3000),
+            image: "rust:1.78".into(),
+            command: "cargo test".into(),
+            stdout: None,
+            stderr: Some("assertion failed".into()),
+            error_context: Some(ErrorContext {
+                files: vec!["src/lib.rs".into()],
+                lines: vec![42],
+                error_type: "test_failure".into(),
+            }),
+            on_failure: Some(OnFailureState {
+                strategy: "auto_fix".into(),
+                max_retries: 3,
+                retries_remaining: 2,
+                context_paths: vec!["src/".into()],
+            }),
+        });
+
+        state.save(dir.path()).unwrap();
+        let loaded = RunState::load(dir.path(), "roundtrip-1").unwrap();
+
+        assert_eq!(loaded.run_id, "roundtrip-1");
+        assert_eq!(loaded.pipeline, "my-pipeline");
+        assert_eq!(loaded.status, PipelineStatus::Retryable);
+        assert_eq!(loaded.duration_ms, Some(5000));
+        assert_eq!(loaded.steps.len(), 2);
+
+        let build = loaded.get_step("build").unwrap();
+        assert_eq!(build.status, StepStatus::Success);
+        assert_eq!(build.stdout, Some("compiled OK".into()));
+
+        let test = loaded.get_step("test").unwrap();
+        assert_eq!(test.status, StepStatus::Failed);
+        assert_eq!(test.stderr, Some("assertion failed".into()));
+        let ec = test.error_context.as_ref().unwrap();
+        assert_eq!(ec.files, vec!["src/lib.rs"]);
+        assert_eq!(ec.lines, vec![42]);
+        let of = test.on_failure.as_ref().unwrap();
+        assert_eq!(of.retries_remaining, 2);
+    }
+
+    #[test]
+    fn test_decrement_retries_to_zero() {
+        let mut state = RunState::new("run-1", "p");
+        state.add_step(StepState {
+            name: "s".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "alpine".into(),
+            command: "exit 1".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: Some(OnFailureState {
+                strategy: "auto_fix".into(),
+                max_retries: 1,
+                retries_remaining: 1,
+                context_paths: vec![],
+            }),
+        });
+
+        state.decrement_retries("s");
+        assert_eq!(state.get_step("s").unwrap().on_failure.as_ref().unwrap().retries_remaining, 0);
+
+        // Decrementing at 0 should stay at 0
+        state.decrement_retries("s");
+        assert_eq!(state.get_step("s").unwrap().on_failure.as_ref().unwrap().retries_remaining, 0);
+    }
+
+    #[test]
+    fn test_decrement_retries_no_on_failure() {
+        let mut state = RunState::new("run-1", "p");
+        state.add_step(StepState {
+            name: "s".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "alpine".into(),
+            command: "exit 1".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+        });
+        // Should not panic
+        state.decrement_retries("s");
+        assert!(state.get_step("s").unwrap().on_failure.is_none());
+    }
+
+    #[test]
+    fn test_default_base_dir() {
+        let base = RunState::default_base_dir();
+        assert!(base.to_string_lossy().contains(".pipelight"));
+        assert!(base.to_string_lossy().contains("runs"));
+    }
+
+    #[test]
+    fn test_pipeline_status_serialization() {
+        let state = RunState::new("ser-1", "p");
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"running\""));
+
+        let mut state2 = RunState::new("ser-2", "p");
+        state2.status = PipelineStatus::Retryable;
+        let json2 = serde_json::to_string(&state2).unwrap();
+        assert!(json2.contains("\"retryable\""));
+    }
 }

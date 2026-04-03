@@ -28,3 +28,37 @@ pub fn resolve_output_mode(flag: Option<String>) -> OutputMode {
         _ => OutputMode::detect(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_output_mode_json() {
+        assert_eq!(resolve_output_mode(Some("json".into())), OutputMode::Json);
+    }
+
+    #[test]
+    fn test_resolve_output_mode_plain() {
+        assert_eq!(resolve_output_mode(Some("plain".into())), OutputMode::Plain);
+    }
+
+    #[test]
+    fn test_resolve_output_mode_tty() {
+        assert_eq!(resolve_output_mode(Some("tty".into())), OutputMode::Tty);
+    }
+
+    #[test]
+    fn test_resolve_output_mode_none_defaults() {
+        // When None, should auto-detect (will be Plain in test environment since not a TTY)
+        let mode = resolve_output_mode(None);
+        assert!(mode == OutputMode::Tty || mode == OutputMode::Plain);
+    }
+
+    #[test]
+    fn test_resolve_output_mode_unknown_defaults() {
+        // Unknown value should auto-detect
+        let mode = resolve_output_mode(Some("unknown".into()));
+        assert!(mode == OutputMode::Tty || mode == OutputMode::Plain);
+    }
+}
