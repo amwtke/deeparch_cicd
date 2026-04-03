@@ -18,7 +18,8 @@ static CHART: Emoji<'_, '_> = Emoji("📊 ", "");
 /// Multi-step progress UI for TTY mode.
 /// Uses a single spinner for the active step, prints completed steps as static lines.
 pub struct PipelineProgressUI {
-    pending_steps: Vec<String>,
+    total_steps: usize,
+    current_index: usize,
     current_spinner: Option<ProgressBar>,
     verbose: bool,
 }
@@ -26,7 +27,8 @@ pub struct PipelineProgressUI {
 impl PipelineProgressUI {
     pub fn new(step_names: &[String], verbose: bool) -> Self {
         Self {
-            pending_steps: step_names.to_vec(),
+            total_steps: step_names.len(),
+            current_index: 0,
             current_spinner: None,
             verbose,
         }
@@ -52,6 +54,9 @@ impl PipelineProgressUI {
             pb.finish_and_clear();
         }
 
+        self.current_index += 1;
+        let progress_tag = format!("[{}/{}]", self.current_index, self.total_steps);
+
         let pb = ProgressBar::new_spinner();
         pb.set_style(
             ProgressStyle::default_spinner()
@@ -60,7 +65,8 @@ impl PipelineProgressUI {
                 .unwrap(),
         );
         pb.set_message(format!(
-            "{} {}  Running...",
+            "{} {} {}  Running...",
+            style(&progress_tag).dim(),
             style(name).bold(),
             style("0.0s").dim()
         ));
@@ -90,6 +96,7 @@ impl PipelineProgressUI {
             pb.finish_and_clear();
         }
 
+        let progress_tag = format!("[{}/{}]", self.current_index, self.total_steps);
         let icon = if success {
             CHECK.to_string()
         } else {
@@ -101,8 +108,9 @@ impl PipelineProgressUI {
             style(name).red().bold().to_string()
         };
         println!(
-            "{}{:<16} {}",
+            "{}{} {:<16} {}",
             icon,
+            style(&progress_tag).dim(),
             name_styled,
             style(format_duration(duration)).dim()
         );
