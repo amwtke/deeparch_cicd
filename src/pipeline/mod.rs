@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Top-level pipeline definition, maps directly from YAML
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
     pub name: String,
 
@@ -17,7 +17,7 @@ pub struct Pipeline {
 }
 
 /// A single step in the pipeline
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
     /// Unique step name
     pub name: String,

@@ -1,4 +1,5 @@
 mod cli;
+mod detector;
 mod executor;
 mod output;
 mod pipeline;
