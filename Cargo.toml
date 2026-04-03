@@ -1,0 +1,37 @@
+[package]
+name = "pipelight"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight CLI CI/CD tool with Docker isolation"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Pipeline YAML parsing
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Docker API
+bollard = "0.18"
+
+# DAG scheduling
+petgraph = "0.6"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging & output
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+console = "0.15"
+indicatif = "0.17"
+
+# Utils
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+futures-util = "0.3"

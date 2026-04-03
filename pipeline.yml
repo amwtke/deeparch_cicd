@@ -1,0 +1,39 @@
+name: rust-ci
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+steps:
+  - name: build
+    image: rust:1.78-slim
+    commands:
+      - cargo build --release
+    env:
+      RUSTFLAGS: "-D warnings"
+
+  - name: lint
+    image: rust:1.78-slim
+    commands:
+      - rustup component add clippy
+      - cargo clippy -- -D warnings
+
+  - name: test
+    image: rust:1.78-slim
+    depends_on: [build]
+    commands:
+      - cargo test --release
+
+  - name: fmt-check
+    image: rust:1.78-slim
+    commands:
+      - rustup component add rustfmt
+      - cargo fmt -- --check
+
+  - name: security-audit
+    image: rust:1.78-slim
+    depends_on: [build]
+    allow_failure: true
+    commands:
+      - cargo install cargo-audit
+      - cargo audit
