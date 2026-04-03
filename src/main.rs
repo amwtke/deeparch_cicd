@@ -2,22 +2,29 @@ mod cli;
 mod executor;
 mod output;
 mod pipeline;
+mod run_state;
 mod scheduler;
 
-use anyhow::Result;
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
 
 use cli::Cli;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    // Initialize tracing
+async fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("pipelight=info".parse()?))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("pipelight=info".parse().unwrap()),
+        )
         .with_target(false)
         .init();
 
     let cli = Cli::parse();
-    cli::dispatch(cli).await
+    match cli::dispatch(cli).await {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("Error: {:#}", e);
+            std::process::exit(2);
+        }
+    }
 }
