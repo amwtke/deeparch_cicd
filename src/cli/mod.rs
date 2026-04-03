@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use crate::executor::DockerExecutor;
 use crate::output::tty::PipelineReporter;
-use crate::output::resolve_output_mode;
-use crate::pipeline::Pipeline;
+use crate::output::{resolve_output_mode, OutputMode};
+use crate::output::{json, plain};
+use crate::pipeline::{Pipeline, Strategy};
+use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 use crate::scheduler::Scheduler;
 
 #[derive(Parser)]
@@ -121,8 +123,7 @@ async fn cmd_run(
     output: Option<String>,
     run_id: Option<String>,
 ) -> Result<i32> {
-    let _mode = resolve_output_mode(output);
-    let _run_id = run_id;
+    let mode = resolve_output_mode(output);
 
     let pipeline =
         Pipeline::from_file(&file).context(format!("Failed to load pipeline: {}", file.display()))?;
@@ -130,20 +131,33 @@ async fn cmd_run(
     let scheduler = Scheduler::new(&pipeline)?;
 
     if dry_run {
-        let reporter = PipelineReporter::new();
-        reporter.print_execution_plan(&pipeline, &scheduler);
+        if mode == OutputMode::Tty {
+            let reporter = PipelineReporter::new();
+            reporter.print_execution_plan(&pipeline, &scheduler);
+        }
         return Ok(0);
     }
+
+    let run_id = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()[..8].to_string());
+    let mut state = RunState::new(&run_id, &pipeline.name);
+    let pipeline_start = std::time::Instant::now();
 
     let executor = DockerExecutor::new().await?;
     let reporter = PipelineReporter::new();
 
-    reporter.print_header(&pipeline);
+    if mode == OutputMode::Tty {
+        reporter.print_header(&pipeline);
+    }
 
     let schedule = scheduler.resolve(step_filter.as_deref())?;
 
-    for batch in &schedule {
-        // Each batch contains steps that can run in parallel
+    let mut has_final_failure = false;
+    let mut has_retryable_failure = false;
+    let mut current_batch_index = 0;
+
+    'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
+        current_batch_index = batch_idx;
+
         let handles: Vec<_> = batch
             .iter()
             .map(|step_name| {
@@ -157,14 +171,124 @@ async fn cmd_run(
             })
             .collect();
 
-        for handle in handles {
+        for (i, handle) in handles.into_iter().enumerate() {
             let result = handle.await??;
-            reporter.print_step_result(&result);
+            let step_name = &batch[i];
+            let pipeline_step = pipeline.get_step(step_name);
+
+            if mode == OutputMode::Tty {
+                reporter.print_step_result(&result);
+            }
+
+            // Build on_failure state from pipeline config
+            let on_failure_state = pipeline_step
+                .and_then(|s| s.on_failure.as_ref())
+                .map(|of| OnFailureState {
+                    strategy: format!("{:?}", of.strategy).to_lowercase(),
+                    max_retries: of.max_retries,
+                    retries_remaining: of.max_retries,
+                    context_paths: of.context_paths.clone(),
+                });
+
+            let step_status = if result.success {
+                StepStatus::Success
+            } else {
+                StepStatus::Failed
+            };
+
+            let stdout = result.stdout_string();
+            let stderr = result.stderr_string();
+
+            state.add_step(StepState {
+                name: result.step_name.clone(),
+                status: step_status,
+                exit_code: Some(result.exit_code),
+                duration_ms: Some(result.duration.as_millis() as u64),
+                image: pipeline_step.map(|s| s.image.clone()).unwrap_or_default(),
+                command: pipeline_step.map(|s| s.commands.join(" && ")).unwrap_or_default(),
+                stdout: if stdout.is_empty() { None } else { Some(stdout) },
+                stderr: if stderr.is_empty() { None } else { Some(stderr) },
+                error_context: None,
+                on_failure: on_failure_state,
+            });
+
+            // Handle failure
+            let allow_failure = pipeline_step.map(|s| s.allow_failure).unwrap_or(false);
+            if !result.success && !allow_failure {
+                let strategy = pipeline_step
+                    .and_then(|s| s.on_failure.as_ref())
+                    .map(|of| &of.strategy)
+                    .unwrap_or(&Strategy::Abort);
+
+                match strategy {
+                    Strategy::AutoFix => {
+                        has_retryable_failure = true;
+                        break 'outer;
+                    }
+                    Strategy::Abort | Strategy::Notify => {
+                        has_final_failure = true;
+                        break 'outer;
+                    }
+                }
+            }
         }
     }
 
-    reporter.print_summary();
-    Ok(0)
+    // Mark remaining unexecuted steps as Skipped
+    if has_final_failure || has_retryable_failure {
+        for remaining_batch in &schedule[current_batch_index + 1..] {
+            for step_name in remaining_batch {
+                state.add_step(StepState {
+                    name: step_name.clone(),
+                    status: StepStatus::Skipped,
+                    exit_code: None,
+                    duration_ms: None,
+                    image: pipeline.get_step(step_name).map(|s| s.image.clone()).unwrap_or_default(),
+                    command: pipeline.get_step(step_name).map(|s| s.commands.join(" && ")).unwrap_or_default(),
+                    stdout: None,
+                    stderr: None,
+                    error_context: None,
+                    on_failure: None,
+                });
+            }
+        }
+    }
+
+    // Set final pipeline status
+    state.status = if has_retryable_failure {
+        PipelineStatus::Retryable
+    } else if has_final_failure {
+        PipelineStatus::Failed
+    } else {
+        PipelineStatus::Success
+    };
+
+    state.duration_ms = Some(pipeline_start.elapsed().as_millis() as u64);
+
+    // Save state
+    state.save(&RunState::default_base_dir())?;
+
+    // Output based on mode
+    match mode {
+        OutputMode::Json => json::print_run_state(&state),
+        OutputMode::Plain => plain::print_run_state(&state),
+        OutputMode::Tty => {
+            if has_final_failure || has_retryable_failure {
+                // Summary already shown via step results in TTY mode
+            } else {
+                reporter.print_summary();
+            }
+        }
+    }
+
+    // Exit code
+    if has_retryable_failure {
+        Ok(1)
+    } else if has_final_failure {
+        Ok(2)
+    } else {
+        Ok(0)
+    }
 }
 
 async fn cmd_validate(file: PathBuf) -> Result<i32> {

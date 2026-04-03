@@ -32,6 +32,24 @@ pub enum LogStream {
     Stderr,
 }
 
+impl StepResult {
+    pub fn stdout_string(&self) -> String {
+        self.logs.iter()
+            .filter(|l| l.stream == LogStream::Stdout)
+            .map(|l| l.message.as_str())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    pub fn stderr_string(&self) -> String {
+        self.logs.iter()
+            .filter(|l| l.stream == LogStream::Stderr)
+            .map(|l| l.message.as_str())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+}
+
 /// Executes pipeline steps in Docker containers
 #[derive(Clone)]
 pub struct DockerExecutor {
