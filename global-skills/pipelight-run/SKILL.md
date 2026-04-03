@@ -1,0 +1,147 @@
+---
+name: pipelight-run
+description: Use when user asks to run CI/CD pipeline, build project, compile check, run tests via pipelight, or when user says "run pipeline", "pipelight", "CI check". Also use when a pipelight run fails and needs auto-fix retry loop. Covers the full run-parse-fix-retry cycle with JSON output mode.
+---
+
+# /pipelight-run
+
+## Overview
+
+Pipelight is the project's lightweight CLI CI/CD tool. This skill defines the interaction protocol: run pipeline with JSON output, parse results, auto-fix on retryable failures, and retry until success or exhaustion.
+
+## When to Use
+
+- User says "run pipeline" / "build" / "CI check" / "pipelight"
+- User wants to verify code changes compile/pass tests
+- After making code changes that need validation
+- When a previous pipelight run returned `retryable` and you need to fix + retry
+
+## Core Flow
+
+```dot
+digraph pipelight {
+    "Run pipelight\n--output json" [shape=box];
+    "Parse JSON" [shape=box];
+    "status?" [shape=diamond];
+    "Done - report success" [shape=doublecircle];
+    "Done - report failure" [shape=doublecircle];
+    "Read stderr +\ncontext_paths" [shape=box];
+    "Fix code" [shape=box];
+    "retries_remaining > 0?" [shape=diamond];
+    "pipelight retry\n--output json" [shape=box];
+
+    "Run pipelight\n--output json" -> "Parse JSON";
+    "Parse JSON" -> "status?";
+    "status?" -> "Done - report success" [label="success"];
+    "status?" -> "Done - report failure" [label="failed"];
+    "status?" -> "Read stderr +\ncontext_paths" [label="retryable"];
+    "Read stderr +\ncontext_paths" -> "Fix code";
+    "Fix code" -> "retries_remaining > 0?";
+    "retries_remaining > 0?" -> "pipelight retry\n--output json" [label="yes"];
+    "retries_remaining > 0?" -> "Done - report failure" [label="no"];
+    "pipelight retry\n--output json" -> "Parse JSON";
+}
+```
+
+## Step 1: Check pipeline.yml Exists
+
+If the project has no `pipeline.yml`, generate one:
+
+```bash
+pipelight init -d .
+```
+
+Review the generated file and adjust if needed.
+
+## Step 2: Run Pipeline
+
+```bash
+pipelight run -f pipeline.yml --output json --run-id <short-id>
+```
+
+- Always use `--output json` so output is machine-parseable
+- Always provide `--run-id` (e.g. `run-001`) to enable retry
+- Use `-f` to point to the correct pipeline file if not `pipeline.yml`
+
+## Step 3: Parse JSON Result
+
+JSON structure:
+
+```json
+{
+  "run_id": "run-001",
+  "pipeline": "rust-ci",
+  "status": "success | failed | retryable",
+  "duration_ms": 5000,
+  "steps": [
+    {
+      "name": "build",
+      "status": "success | failed | skipped | pending | running",
+      "exit_code": 0,
+      "duration_ms": 3000,
+      "image": "rust:1.78-slim",
+      "command": "cargo build --release",
+      "stdout": "...",
+      "stderr": "...",
+      "error_context": { "files": [...], "lines": [...], "error_type": "..." },
+      "on_failure": {
+        "strategy": "autofix | abort | notify",
+        "max_retries": 3,
+        "retries_remaining": 3,
+        "context_paths": ["src/", "Cargo.toml"]
+      },
+      "test_summary": { "passed": 42, "failed": 3, "skipped": 1 }
+    }
+  ]
+}
+```
+
+## Step 4: Act on Status
+
+### `status: "success"`
+
+Report success to user. Show step durations if relevant.
+
+### `status: "failed"`
+
+Pipeline failed with no auto-fix strategy. Report the error:
+- Show which step failed
+- Show `stderr` content
+- Show `error_context` if present
+- Do NOT attempt auto-fix (strategy is `abort` or `notify`)
+
+### `status: "retryable"`
+
+Pipeline failed but auto-fix is configured. Enter fix-retry loop:
+
+1. Find the failed step (the one with `status: "failed"`)
+2. Read `stderr` to understand the error
+3. Read files listed in `on_failure.context_paths` to understand context
+4. Fix the code
+5. Check `retries_remaining > 0` before retrying
+6. Run retry:
+
+```bash
+pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml --output json
+```
+
+7. Parse the new JSON result and repeat from Step 4
+
+## Exit Code Reference
+
+| Exit Code | Meaning |
+|-----------|---------|
+| 0 | Pipeline succeeded |
+| 1 | Pipeline retryable (has auto_fix steps with retries left) |
+| 2 | Pipeline failed (abort/notify, or retries exhausted) |
+
+## Common Mistakes
+
+| Mistake | Correct Approach |
+|---------|-----------------|
+| Omit `--output json` | Always use `--output json` for machine parsing |
+| Omit `--run-id` | Always set `--run-id` so retry can reference it |
+| Retry without `--step` | `--step` is required for retry command |
+| Retry when `retries_remaining == 0` | Check before retrying, report failure instead |
+| Fix code without reading `context_paths` | Always read context files first for full understanding |
+| Retry `failed` (non-retryable) pipeline | Only retry when status is `retryable` |

@@ -114,6 +114,37 @@ pipelight --version
 - **Works** → `OK: pipelight 0.1.0 (installed to /usr/local/bin/pipelight)`
 - **Not found** → warn user to add `~/.cargo/bin` to PATH
 
+### Step 2c: Install Global Skills
+
+Install skills from the repo's `global-skills/` directory to `~/.claude/skills/` so they are available in all projects.
+
+```bash
+# List all skills in global-skills/
+ls global-skills/
+```
+
+For each subdirectory in `global-skills/`:
+
+```bash
+# Copy skill to global location (overwrites if exists)
+cp -r global-skills/<skill-name> ~/.claude/skills/<skill-name>
+```
+
+**Example:**
+
+```bash
+cp -r global-skills/pipelight-run ~/.claude/skills/pipelight-run
+```
+
+Report what was installed:
+
+```
+Global skills:
+  pipelight-run   OK (installed to ~/.claude/skills/pipelight-run)
+```
+
+If `global-skills/` directory doesn't exist, skip this step silently.
+
 ### Step 3: Sync Knowledge Base
 
 Read the shared knowledge base to restore project context:
@@ -154,6 +185,9 @@ Environment:
 Build:
   cargo build  OK (release, N warnings)
   pipelight    OK installed (/usr/local/bin/pipelight or ~/.cargo/bin/pipelight)
+
+Global Skills:
+  pipelight-run  OK (installed to ~/.claude/skills/)
 
 Knowledge:
   docs/        OK (N documents loaded)
