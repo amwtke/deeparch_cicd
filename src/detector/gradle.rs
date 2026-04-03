@@ -8,16 +8,26 @@ use super::{ProjectDetector, ProjectInfo, ProjectType};
 pub struct GradleDetector;
 
 impl GradleDetector {
+    /// Normalize legacy Java version strings: "1.8" → "8", "1.7" → "7".
+    /// Modern versions like "17" or "21" pass through unchanged.
+    fn normalize_java_version(version: &str) -> String {
+        if let Some(minor) = version.strip_prefix("1.") {
+            minor.to_string()
+        } else {
+            version.to_string()
+        }
+    }
+
     /// Extract JDK version from build.gradle / build.gradle.kts content.
     /// Priority order:
-    /// 1. sourceCompatibility = '17' or sourceCompatibility = 17
-    /// 2. JavaVersion.VERSION_17
+    /// 1. sourceCompatibility = '17' or sourceCompatibility = 17 or '1.8'
+    /// 2. JavaVersion.VERSION_17 or VERSION_1_8
     /// 3. jvmToolchain(17)
     /// 4. Default "17"
     fn extract_jdk_version(content: &str) -> String {
         let patterns = [
-            r#"sourceCompatibility\s*=\s*['"]?(\d+)['"]?"#,
-            r"JavaVersion\.VERSION_(\d+)",
+            r#"sourceCompatibility\s*=\s*['"]?([\d.]+)['"]?"#,
+            r"JavaVersion\.VERSION_([\d_]+)",
             r"jvmToolchain\((\d+)\)",
         ];
 
@@ -25,7 +35,8 @@ impl GradleDetector {
             if let Ok(re) = Regex::new(pattern) {
                 if let Some(caps) = re.captures(content) {
                     if let Some(version) = caps.get(1) {
-                        return version.as_str().to_string();
+                        let v = version.as_str().replace('_', ".");
+                        return Self::normalize_java_version(&v);
                     }
                 }
             }
@@ -188,6 +199,28 @@ sourceCompatibility = '17'
         fs::write(dir.path().join("build.gradle"), content).unwrap();
         let info = GradleDetector.analyze(dir.path()).unwrap();
         assert_eq!(info.framework, Some("spring-boot 3.2.0".into()));
+    }
+
+    #[test]
+    fn test_analyze_legacy_jdk_1_8() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("build.gradle"), "sourceCompatibility = '1.8'").unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert_eq!(info.language_version, Some("8".into()));
+        assert_eq!(info.image, "gradle:8-jdk8");
+    }
+
+    #[test]
+    fn test_analyze_java_version_enum_1_8() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("build.gradle"),
+            "sourceCompatibility = JavaVersion.VERSION_1_8",
+        )
+        .unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert_eq!(info.language_version, Some("8".into()));
+        assert_eq!(info.image, "gradle:8-jdk8");
     }
 
     #[test]

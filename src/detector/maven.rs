@@ -8,6 +8,16 @@ use super::{ProjectDetector, ProjectInfo, ProjectType};
 pub struct MavenDetector;
 
 impl MavenDetector {
+    /// Normalize legacy Java version strings: "1.8" → "8", "1.7" → "7".
+    /// Modern versions like "17" or "21" pass through unchanged.
+    fn normalize_java_version(version: &str) -> String {
+        if let Some(minor) = version.strip_prefix("1.") {
+            minor.to_string()
+        } else {
+            version.to_string()
+        }
+    }
+
     /// Extract JDK version from pom.xml content using priority order:
     /// 1. <java.version>
     /// 2. <maven.compiler.source>
@@ -15,16 +25,16 @@ impl MavenDetector {
     /// 4. Default "17"
     fn extract_jdk_version(content: &str) -> String {
         let patterns = [
-            r"<java\.version>\s*(\d+)\s*</java\.version>",
-            r"<maven\.compiler\.source>\s*(\d+)\s*</maven\.compiler\.source>",
-            r"<maven\.compiler\.release>\s*(\d+)\s*</maven\.compiler\.release>",
+            r"<java\.version>\s*([\d.]+)\s*</java\.version>",
+            r"<maven\.compiler\.source>\s*([\d.]+)\s*</maven\.compiler\.source>",
+            r"<maven\.compiler\.release>\s*([\d.]+)\s*</maven\.compiler\.release>",
         ];
 
         for pattern in &patterns {
             if let Ok(re) = Regex::new(pattern) {
                 if let Some(caps) = re.captures(content) {
                     if let Some(version) = caps.get(1) {
-                        return version.as_str().to_string();
+                        return Self::normalize_java_version(version.as_str());
                     }
                 }
             }
@@ -208,6 +218,37 @@ mod tests {
         let info = detector.analyze(dir.path()).unwrap();
         assert!(!info.warnings.is_empty());
         assert!(info.warnings[0].contains("17"));
+    }
+
+    #[test]
+    fn test_analyze_legacy_jdk_version_1_8() {
+        let dir = tempfile::tempdir().unwrap();
+        let pom = r#"
+<project>
+  <properties>
+    <java.version>1.8</java.version>
+  </properties>
+</project>"#;
+        fs::write(dir.path().join("pom.xml"), pom).unwrap();
+        let detector = MavenDetector;
+        let info = detector.analyze(dir.path()).unwrap();
+        assert_eq!(info.language_version, Some("8".into()));
+        assert!(info.image.contains("8"));
+    }
+
+    #[test]
+    fn test_analyze_legacy_compiler_source_1_7() {
+        let dir = tempfile::tempdir().unwrap();
+        let pom = r#"
+<project>
+  <properties>
+    <maven.compiler.source>1.7</maven.compiler.source>
+  </properties>
+</project>"#;
+        fs::write(dir.path().join("pom.xml"), pom).unwrap();
+        let detector = MavenDetector;
+        let info = detector.analyze(dir.path()).unwrap();
+        assert_eq!(info.language_version, Some("7".into()));
     }
 
     #[test]
