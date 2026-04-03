@@ -1,4 +1,10 @@
 pub mod base;
+pub mod maven;
+pub mod gradle;
+pub mod rust_lang;
+pub mod node;
+pub mod python;
+pub mod go;
 
 use std::collections::HashMap;
 
@@ -55,7 +61,12 @@ pub trait PipelineStrategy {
 
 fn strategy_for(project_type: &ProjectType) -> Box<dyn PipelineStrategy> {
     match project_type {
-        _ => Box::new(base::BaseOnlyStrategy),
+        ProjectType::Maven => Box::new(maven::MavenStrategy),
+        ProjectType::Gradle => Box::new(gradle::GradleStrategy),
+        ProjectType::Rust => Box::new(rust_lang::RustStrategy),
+        ProjectType::Node => Box::new(node::NodeStrategy),
+        ProjectType::Python => Box::new(python::PythonStrategy),
+        ProjectType::Go => Box::new(go::GoStrategy),
     }
 }
 
