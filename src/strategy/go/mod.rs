@@ -1,14 +1,27 @@
 pub mod vet;
 
+use regex::Regex;
 use crate::detector::ProjectInfo;
 use crate::strategy::{PipelineStrategy, StepDef};
 use crate::strategy::base::BaseStrategy;
+use crate::strategy::test_parser::TestSummary;
 
 pub struct GoStrategy;
 
 impl PipelineStrategy for GoStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "go-ci".into()
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+        let ok_re = Regex::new(r"(?m)^ok\s+").unwrap();
+        let fail_re = Regex::new(r"(?m)^FAIL\s+").unwrap();
+        let passed = ok_re.find_iter(output).count() as u32;
+        let failed = fail_re.find_iter(output).count() as u32;
+        if passed == 0 && failed == 0 {
+            return None;
+        }
+        Some(TestSummary::new(passed, failed, 0))
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -95,5 +108,37 @@ mod tests {
         let info = make_go_info_no_lint();
         let strategy = GoStrategy;
         assert_eq!(strategy.pipeline_name(&info), "go-ci");
+    }
+
+    #[test]
+    fn test_parse_test_output_mixed() {
+        let output = "\
+ok  \tgithub.com/example/foo\t0.012s
+ok  \tgithub.com/example/bar\t0.005s
+FAIL\tgithub.com/example/baz\t0.034s";
+        let strategy = GoStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 2);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_all_ok() {
+        let output = "\
+ok  \tgithub.com/example/a\t0.001s
+ok  \tgithub.com/example/b\t0.002s";
+        let strategy = GoStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 2);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_no_match() {
+        let output = "go: downloading github.com/example/dep v1.0.0";
+        let strategy = GoStrategy;
+        assert!(strategy.parse_test_output(output).is_none());
     }
 }

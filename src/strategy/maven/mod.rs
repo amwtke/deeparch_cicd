@@ -1,15 +1,39 @@
 pub mod checkstyle;
 pub mod package;
 
+use regex::Regex;
 use crate::detector::ProjectInfo;
 use crate::strategy::{PipelineStrategy, StepDef};
 use crate::strategy::base::BaseStrategy;
+use crate::strategy::test_parser::TestSummary;
 
 pub struct MavenStrategy;
 
 impl PipelineStrategy for MavenStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "maven-java-ci".into()
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+        let re = Regex::new(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)")
+            .unwrap();
+        let mut total_run: u32 = 0;
+        let mut total_failures: u32 = 0;
+        let mut total_errors: u32 = 0;
+        let mut total_skipped: u32 = 0;
+        let mut found = false;
+        for cap in re.captures_iter(output) {
+            found = true;
+            total_run += cap[1].parse::<u32>().unwrap_or(0);
+            total_failures += cap[2].parse::<u32>().unwrap_or(0);
+            total_errors += cap[3].parse::<u32>().unwrap_or(0);
+            total_skipped += cap[4].parse::<u32>().unwrap_or(0);
+        }
+        if !found {
+            return None;
+        }
+        let passed = total_run.saturating_sub(total_failures + total_errors + total_skipped);
+        Some(TestSummary::new(passed, total_failures + total_errors, total_skipped))
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -102,5 +126,36 @@ mod tests {
         let info = make_maven_info_with_lint();
         let step = checkstyle::step(&info);
         assert_eq!(step.depends_on, vec!["build"]);
+    }
+
+    #[test]
+    fn test_parse_test_output_single_module() {
+        let output = "Tests run: 42, Failures: 0, Errors: 0, Skipped: 2";
+        let strategy = MavenStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 40);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 2);
+    }
+
+    #[test]
+    fn test_parse_test_output_multi_module() {
+        let output = "\
+Tests run: 10, Failures: 1, Errors: 0, Skipped: 0
+Tests run: 20, Failures: 0, Errors: 2, Skipped: 1
+Tests run: 5, Failures: 0, Errors: 0, Skipped: 0";
+        let strategy = MavenStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        // total_run=35, failures=1, errors=2, skipped=1 => passed=35-3-1=31, failed=3
+        assert_eq!(summary.passed, 31);
+        assert_eq!(summary.failed, 3);
+        assert_eq!(summary.skipped, 1);
+    }
+
+    #[test]
+    fn test_parse_test_output_no_tests() {
+        let output = "BUILD SUCCESS";
+        let strategy = MavenStrategy;
+        assert!(strategy.parse_test_output(output).is_none());
     }
 }

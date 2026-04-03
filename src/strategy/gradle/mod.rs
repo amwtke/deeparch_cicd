@@ -1,14 +1,30 @@
 pub mod checkstyle;
 
+use regex::Regex;
 use crate::detector::ProjectInfo;
 use crate::strategy::{PipelineStrategy, StepDef};
 use crate::strategy::base::BaseStrategy;
+use crate::strategy::test_parser::TestSummary;
 
 pub struct GradleStrategy;
 
 impl PipelineStrategy for GradleStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "gradle-java-ci".into()
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+        let re = Regex::new(r"(\d+) tests completed, (\d+) failed").unwrap();
+        let cap = re.captures(output)?;
+        let total: u32 = cap[1].parse().unwrap_or(0);
+        let failed: u32 = cap[2].parse().unwrap_or(0);
+        let skipped_re = Regex::new(r"(\d+) skipped").unwrap();
+        let skipped: u32 = skipped_re
+            .captures(output)
+            .and_then(|c| c[1].parse().ok())
+            .unwrap_or(0);
+        let passed = total.saturating_sub(failed + skipped);
+        Some(TestSummary::new(passed, failed, skipped))
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -84,5 +100,42 @@ mod tests {
         let info = make_gradle_info_with_lint();
         let strategy = GradleStrategy;
         assert_eq!(strategy.pipeline_name(&info), "gradle-java-ci");
+    }
+
+    #[test]
+    fn test_parse_test_output_basic() {
+        let output = "10 tests completed, 0 failed";
+        let strategy = GradleStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 10);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_with_failures() {
+        let output = "15 tests completed, 3 failed";
+        let strategy = GradleStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 12);
+        assert_eq!(summary.failed, 3);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_with_skipped() {
+        let output = "20 tests completed, 1 failed, 2 skipped";
+        let strategy = GradleStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 17);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.skipped, 2);
+    }
+
+    #[test]
+    fn test_parse_test_output_no_match() {
+        let output = "BUILD SUCCESSFUL";
+        let strategy = GradleStrategy;
+        assert!(strategy.parse_test_output(output).is_none());
     }
 }

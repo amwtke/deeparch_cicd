@@ -1,8 +1,10 @@
 pub mod typecheck;
 
+use regex::Regex;
 use crate::detector::ProjectInfo;
 use crate::strategy::{PipelineStrategy, StepDef};
 use crate::strategy::base::BaseStrategy;
+use crate::strategy::test_parser::TestSummary;
 
 pub struct NodeStrategy;
 
@@ -20,6 +22,24 @@ impl NodeStrategy {
 impl PipelineStrategy for NodeStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "node-ci".into()
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+        // Try Jest format first
+        let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").unwrap();
+        if let Some(cap) = jest_re.captures(output) {
+            let failed: u32 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let passed: u32 = cap[2].parse().unwrap_or(0);
+            let skipped: u32 = 0;
+            return Some(TestSummary::new(passed, failed, skipped));
+        }
+        // Fallback: Mocha format
+        let mocha_re = Regex::new(r"(\d+) passing").unwrap();
+        if let Some(cap) = mocha_re.captures(output) {
+            let passed: u32 = cap[1].parse().unwrap_or(0);
+            return Some(TestSummary::new(passed, 0, 0));
+        }
+        None
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -105,5 +125,42 @@ mod tests {
         let info = make_node_no_typescript_info();
         let strategy = NodeStrategy;
         assert_eq!(strategy.pipeline_name(&info), "node-ci");
+    }
+
+    #[test]
+    fn test_parse_test_output_jest_with_failures() {
+        let output = "Tests: 3 failed, 10 passed, 13 total";
+        let strategy = NodeStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 10);
+        assert_eq!(summary.failed, 3);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_jest_pass_only() {
+        let output = "Tests: 20 passed, 20 total";
+        let strategy = NodeStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 20);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_mocha_format() {
+        let output = "  15 passing (2s)\n  1 failing";
+        let strategy = NodeStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 15);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_no_match() {
+        let output = "npm run test\n> jest";
+        let strategy = NodeStrategy;
+        assert!(strategy.parse_test_output(output).is_none());
     }
 }

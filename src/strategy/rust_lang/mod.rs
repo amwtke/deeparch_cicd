@@ -1,14 +1,26 @@
 pub mod clippy;
 
+use regex::Regex;
 use crate::detector::ProjectInfo;
 use crate::strategy::{PipelineStrategy, StepDef};
 use crate::strategy::base::BaseStrategy;
+use crate::strategy::test_parser::TestSummary;
 
 pub struct RustStrategy;
 
 impl PipelineStrategy for RustStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "rust-ci".into()
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+        let re = Regex::new(r"test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored")
+            .unwrap();
+        let cap = re.captures(output)?;
+        let passed: u32 = cap[1].parse().unwrap_or(0);
+        let failed: u32 = cap[2].parse().unwrap_or(0);
+        let skipped: u32 = cap[3].parse().unwrap_or(0);
+        Some(TestSummary::new(passed, failed, skipped))
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -73,5 +85,32 @@ mod tests {
         let info = make_rust_info();
         let strategy = RustStrategy;
         assert_eq!(strategy.pipeline_name(&info), "rust-ci");
+    }
+
+    #[test]
+    fn test_parse_test_output_all_pass() {
+        let output = "test result: ok. 42 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out";
+        let strategy = RustStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 42);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 3);
+    }
+
+    #[test]
+    fn test_parse_test_output_with_failures() {
+        let output = "test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured";
+        let strategy = RustStrategy;
+        let summary = strategy.parse_test_output(output).unwrap();
+        assert_eq!(summary.passed, 8);
+        assert_eq!(summary.failed, 2);
+        assert_eq!(summary.skipped, 0);
+    }
+
+    #[test]
+    fn test_parse_test_output_no_match() {
+        let output = "Compiling pipelight v0.1.0";
+        let strategy = RustStrategy;
+        assert!(strategy.parse_test_output(output).is_none());
     }
 }
