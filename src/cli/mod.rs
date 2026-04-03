@@ -3,7 +3,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use crate::executor::DockerExecutor;
-use crate::output::PipelineReporter;
+use crate::output::tty::PipelineReporter;
+use crate::output::resolve_output_mode;
 use crate::pipeline::Pipeline;
 use crate::scheduler::Scheduler;
 
@@ -29,6 +30,14 @@ pub enum Command {
         /// Dry run - validate and show execution plan without running
         #[arg(long)]
         dry_run: bool,
+
+        /// Output mode: tty, plain, json
+        #[arg(long)]
+        output: Option<String>,
+
+        /// Run ID for this execution
+        #[arg(long)]
+        run_id: Option<String>,
     },
 
     /// Validate pipeline config
@@ -44,21 +53,77 @@ pub enum Command {
         #[arg(short, long, default_value = "pipeline.yml")]
         file: PathBuf,
     },
+
+    /// Retry a failed pipeline run
+    Retry {
+        /// Run ID of the failed run to retry
+        #[arg(long)]
+        run_id: String,
+
+        /// Retry only a specific step
+        #[arg(long)]
+        step: Option<String>,
+
+        /// Output mode: tty, plain, json
+        #[arg(long)]
+        output: Option<String>,
+
+        /// Path to pipeline config file
+        #[arg(short, long, default_value = "pipeline.yml")]
+        file: PathBuf,
+    },
+
+    /// Show status of a pipeline run
+    Status {
+        /// Run ID to check
+        #[arg(long)]
+        run_id: String,
+
+        /// Output mode: tty, plain, json
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
-pub async fn dispatch(cli: Cli) -> Result<()> {
+pub async fn dispatch(cli: Cli) -> Result<i32> {
     match cli.command {
         Command::Run {
             file,
             step,
             dry_run,
-        } => cmd_run(file, step, dry_run).await,
+            output,
+            run_id,
+        } => cmd_run(file, step, dry_run, output, run_id).await,
         Command::Validate { file } => cmd_validate(file).await,
         Command::List { file } => cmd_list(file).await,
+        Command::Retry {
+            run_id,
+            step,
+            output,
+            file,
+        } => {
+            let _mode = resolve_output_mode(output);
+            // Placeholder: retry logic will be implemented later
+            Ok(0)
+        }
+        Command::Status { run_id, output } => {
+            let _mode = resolve_output_mode(output);
+            // Placeholder: status logic will be implemented later
+            Ok(0)
+        }
     }
 }
 
-async fn cmd_run(file: PathBuf, step_filter: Option<String>, dry_run: bool) -> Result<()> {
+async fn cmd_run(
+    file: PathBuf,
+    step_filter: Option<String>,
+    dry_run: bool,
+    output: Option<String>,
+    run_id: Option<String>,
+) -> Result<i32> {
+    let _mode = resolve_output_mode(output);
+    let _run_id = run_id;
+
     let pipeline =
         Pipeline::from_file(&file).context(format!("Failed to load pipeline: {}", file.display()))?;
 
@@ -67,7 +132,7 @@ async fn cmd_run(file: PathBuf, step_filter: Option<String>, dry_run: bool) -> R
     if dry_run {
         let reporter = PipelineReporter::new();
         reporter.print_execution_plan(&pipeline, &scheduler);
-        return Ok(());
+        return Ok(0);
     }
 
     let executor = DockerExecutor::new().await?;
@@ -99,22 +164,22 @@ async fn cmd_run(file: PathBuf, step_filter: Option<String>, dry_run: bool) -> R
     }
 
     reporter.print_summary();
-    Ok(())
+    Ok(0)
 }
 
-async fn cmd_validate(file: PathBuf) -> Result<()> {
+async fn cmd_validate(file: PathBuf) -> Result<i32> {
     let pipeline = Pipeline::from_file(&file)?;
     let _scheduler = Scheduler::new(&pipeline)?;
 
     let reporter = PipelineReporter::new();
     reporter.print_validation_ok(&pipeline);
-    Ok(())
+    Ok(0)
 }
 
-async fn cmd_list(file: PathBuf) -> Result<()> {
+async fn cmd_list(file: PathBuf) -> Result<i32> {
     let pipeline = Pipeline::from_file(&file)?;
 
     let reporter = PipelineReporter::new();
     reporter.print_step_list(&pipeline);
-    Ok(())
+    Ok(0)
 }
