@@ -4,6 +4,7 @@ use bollard::container::{
     WaitContainerOptions,
 };
 use bollard::image::CreateImageOptions;
+use bollard::models::HostConfig;
 use bollard::Docker;
 use futures_util::StreamExt;
 use tracing::{debug, info, warn};
@@ -70,8 +71,9 @@ impl DockerExecutor {
         Ok(Self { docker })
     }
 
-    /// Execute a single pipeline step inside a Docker container
-    pub async fn run_step(&self, pipeline_name: &str, step: &Step) -> Result<StepResult> {
+    /// Execute a single pipeline step inside a Docker container.
+    /// `project_dir` is bind-mounted into the container at the step's workdir.
+    pub async fn run_step(&self, pipeline_name: &str, step: &Step, project_dir: &std::path::Path) -> Result<StepResult> {
         let start = std::time::Instant::now();
         let container_name = format!("pipelight-{}-{}-{}", pipeline_name, step.name, uuid::Uuid::new_v4().to_string()[..8].to_string());
 
@@ -92,6 +94,16 @@ impl DockerExecutor {
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
 
+        // Bind mount project directory into container workdir
+        let host_path = project_dir.canonicalize()
+            .context("Failed to resolve project directory")?;
+        let bind = format!("{}:{}", host_path.display(), step.workdir);
+
+        let host_config = HostConfig {
+            binds: Some(vec![bind]),
+            ..Default::default()
+        };
+
         // Create container
         let config = Config {
             image: Some(step.image.clone()),
@@ -99,6 +111,7 @@ impl DockerExecutor {
             cmd: Some(cmd),
             working_dir: Some(step.workdir.clone()),
             env: Some(env),
+            host_config: Some(host_config),
             ..Default::default()
         };
 

@@ -138,6 +138,13 @@ async fn cmd_run(
     let pipeline =
         Pipeline::from_file(&file).context(format!("Failed to load pipeline: {}", file.display()))?;
 
+    // Resolve project directory from pipeline file location
+    let project_dir = file.canonicalize()
+        .context("Failed to resolve pipeline file path")?
+        .parent()
+        .expect("pipeline file must have a parent directory")
+        .to_path_buf();
+
     let scheduler = Scheduler::new(&pipeline)?;
 
     if dry_run {
@@ -177,7 +184,8 @@ async fn cmd_run(
                     .expect("step must exist")
                     .clone();
                 let pipeline_name = pipeline.name.clone();
-                tokio::spawn(async move { executor.run_step(&pipeline_name, &step).await })
+                let dir = project_dir.clone();
+                tokio::spawn(async move { executor.run_step(&pipeline_name, &step, &dir).await })
             })
             .collect();
 
@@ -361,6 +369,11 @@ async fn cmd_retry(
     // Load pipeline and create executor
     let pipeline = Pipeline::from_file(&file)
         .context(format!("Failed to load pipeline: {}", file.display()))?;
+    let project_dir = file.canonicalize()
+        .context("Failed to resolve pipeline file path")?
+        .parent()
+        .expect("pipeline file must have a parent directory")
+        .to_path_buf();
     let executor = DockerExecutor::new().await?;
 
     let pipeline_start = std::time::Instant::now();
@@ -370,7 +383,7 @@ async fn cmd_retry(
         .get_step(&step_name)
         .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in pipeline config", step_name))?;
 
-    let result = executor.run_step(&pipeline.name, pipeline_step).await?;
+    let result = executor.run_step(&pipeline.name, pipeline_step, &project_dir).await?;
 
     // Update step state
     {
@@ -424,7 +437,7 @@ async fn cmd_retry(
                 None => continue,
             };
 
-            let sr = executor.run_step(&pipeline.name, skipped_step).await?;
+            let sr = executor.run_step(&pipeline.name, skipped_step, &project_dir).await?;
 
             // Update state
             {
