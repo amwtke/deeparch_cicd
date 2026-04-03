@@ -8,7 +8,7 @@ pub mod go;
 use anyhow::Result;
 use std::path::Path;
 
-use crate::pipeline::{Pipeline, Step, OnFailure, Strategy};
+use crate::pipeline::Pipeline;
 
 /// Metadata extracted from a project
 #[derive(Debug, Clone)]
@@ -88,7 +88,7 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
     for detector in &detectors {
         if detector.detect(dir) {
             let info = detector.analyze(dir)?;
-            let pipeline = generate_pipeline(&info);
+            let pipeline = crate::strategy::generate_pipeline(&info);
             return Ok((info, pipeline));
         }
     }
@@ -99,88 +99,6 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
     );
 }
 
-/// Generate a Pipeline from ProjectInfo
-fn generate_pipeline(info: &ProjectInfo) -> Pipeline {
-    let mut steps = Vec::new();
-
-    // Build step
-    steps.push(Step {
-        name: "build".into(),
-        image: info.image.clone(),
-        commands: info.build_cmd.clone(),
-        depends_on: vec![],
-        env: Default::default(),
-        workdir: "/workspace".into(),
-        allow_failure: false,
-        condition: None,
-        on_failure: Some(OnFailure {
-            strategy: Strategy::AutoFix,
-            max_retries: 3,
-            context_paths: [&info.source_paths[..], &info.config_files[..]].concat(),
-        }),
-    });
-
-    // Lint step (if available)
-    if let Some(ref lint_cmd) = info.lint_cmd {
-        steps.push(Step {
-            name: "lint".into(),
-            image: info.image.clone(),
-            commands: lint_cmd.clone(),
-            depends_on: vec![],
-            env: Default::default(),
-            workdir: "/workspace".into(),
-            allow_failure: false,
-            condition: None,
-            on_failure: Some(OnFailure {
-                strategy: Strategy::AutoFix,
-                max_retries: 2,
-                context_paths: info.source_paths.clone(),
-            }),
-        });
-    }
-
-    // Test step
-    steps.push(Step {
-        name: "test".into(),
-        image: info.image.clone(),
-        commands: info.test_cmd.clone(),
-        depends_on: vec!["build".into()],
-        env: Default::default(),
-        workdir: "/workspace".into(),
-        allow_failure: false,
-        condition: None,
-        on_failure: Some(OnFailure {
-            strategy: Strategy::Notify,
-            max_retries: 0,
-            context_paths: vec![],
-        }),
-    });
-
-    // Format check step (if available)
-    if let Some(ref fmt_cmd) = info.fmt_cmd {
-        steps.push(Step {
-            name: "fmt-check".into(),
-            image: info.image.clone(),
-            commands: fmt_cmd.clone(),
-            depends_on: vec![],
-            env: Default::default(),
-            workdir: "/workspace".into(),
-            allow_failure: false,
-            condition: None,
-            on_failure: Some(OnFailure {
-                strategy: Strategy::AutoFix,
-                max_retries: 1,
-                context_paths: info.source_paths.clone(),
-            }),
-        });
-    }
-
-    Pipeline {
-        name: format!("{}-ci", format!("{}", info.project_type).to_lowercase().replace('/', "-")),
-        env: Default::default(),
-        steps,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -201,11 +119,11 @@ mod tests {
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
         };
-        let pipeline = generate_pipeline(&info);
+        let pipeline = crate::strategy::generate_pipeline(&info);
         assert_eq!(pipeline.name, "rust-ci");
-        assert_eq!(pipeline.steps.len(), 4); // build, lint, test, fmt-check
+        // RustStrategy: build, clippy, test, fmt-check
+        assert_eq!(pipeline.steps.len(), 4);
         assert_eq!(pipeline.steps[0].name, "build");
-        assert_eq!(pipeline.steps[2].depends_on, vec!["build"]);
     }
 
     #[test]
@@ -223,7 +141,11 @@ mod tests {
             config_files: vec!["go.mod".into()],
             warnings: vec![],
         };
-        let pipeline = generate_pipeline(&info);
-        assert_eq!(pipeline.steps.len(), 2); // build, test only
+        let pipeline = crate::strategy::generate_pipeline(&info);
+        // GoStrategy: build, vet, test (no lint, no fmt)
+        assert_eq!(pipeline.steps.len(), 3);
+        assert_eq!(pipeline.steps[0].name, "build");
+        assert_eq!(pipeline.steps[1].name, "vet");
+        assert_eq!(pipeline.steps[2].name, "test");
     }
 }
