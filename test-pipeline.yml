@@ -1,0 +1,26 @@
+name: demo-test
+
+steps:
+  - name: hello
+    image: alpine:latest
+    commands:
+      - echo "Hello from pipelight!"
+      - echo "Current date:" && date
+
+  - name: fail-step
+    image: alpine:latest
+    depends_on: [hello]
+    commands:
+      - echo "This step will fail"
+      - echo "Fixed! Now passing"
+    on_failure:
+      strategy: auto_fix
+      max_retries: 2
+      context_paths:
+        - test-pipeline.yml
+
+  - name: downstream
+    image: alpine:latest
+    depends_on: [fail-step]
+    commands:
+      - echo "This should be skipped on first run"
