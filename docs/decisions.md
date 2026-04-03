@@ -16,6 +16,12 @@
 - **Decision**: Project knowledge and architecture decisions live in `docs/` committed to Git, not in Claude Code local memory
 - **Reason**: Three development machines need the same context. Local `.claude/memory/` is per-machine and not shared.
 
+### D005: Plugin system deferred
+- **Decision**: Plugin system (reusable check templates for build/UT/lint/compliance) is planned but deferred
+- **Reason**: Core run-exit-retry loop must be stable first. Current step-based YAML already supports arbitrary checks via different Docker images and commands.
+- **When to build**: After core features (JSON output, on_failure, retry, status.json) are complete and tested
+- **Scope**: Abstract common CI checks (Spring Boot build, Maven checkstyle, SonarQube, etc.) into reusable plugin templates that can be referenced in pipeline.yml with one line
+
 ### D004: Docker as isolation layer
 - **Decision**: All pipeline steps execute in Docker containers via bollard crate
 - **Reason**: Environment consistency, isolation between steps, artifact sharing via volumes
