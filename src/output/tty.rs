@@ -1,4 +1,4 @@
-use console::{style, Emoji};
+use console::{style, Emoji, Term};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
@@ -8,55 +8,127 @@ use crate::scheduler::Scheduler;
 use crate::strategy::test_parser::TestSummary;
 
 static ROCKET: Emoji<'_, '_> = Emoji("🚀 ", ">> ");
-static CHECK: Emoji<'_, '_> = Emoji("✅ ", "[OK] ");
-static CROSS: Emoji<'_, '_> = Emoji("❌ ", "[FAIL] ");
+static CHECK: Emoji<'_, '_> = Emoji("✅", "[OK]");
+static CROSS: Emoji<'_, '_> = Emoji("❌", "[FAIL]");
 static ARROW: Emoji<'_, '_> = Emoji("▸ ", "> ");
 static CLOCK: Emoji<'_, '_> = Emoji("⏱  ", "");
-static PENDING: Emoji<'_, '_> = Emoji("⬚  ", "[ ] ");
+static PENDING: Emoji<'_, '_> = Emoji("⬚", "[ ]");
 static CHART: Emoji<'_, '_> = Emoji("📊 ", "");
+static RUNNING: Emoji<'_, '_> = Emoji("⏳", "[..]");
 
-/// Multi-step progress UI for TTY mode.
-/// Uses a single spinner for the active step, prints completed steps as static lines.
+/// Two-line progress UI for TTY mode.
+///
+/// Line 1 (static, reprinted): pipeline flow showing all steps with status icons
+///   🚀 maven-java-ci: ✅build → ⏳test → ⬚package
+///
+/// Line 2 (spinner): current step with latest log line
+///   ⠹ [2/3] test 45.3s | [INFO] Running com.example.UserTest
 pub struct PipelineProgressUI {
-    total_steps: usize,
+    step_names: Vec<String>,
+    step_status: Vec<StepStage>,
     current_index: usize,
-    current_spinner: Option<ProgressBar>,
+    spinner: Option<ProgressBar>,
+    pipeline_name: String,
+    last_log: String,
     verbose: bool,
+}
+
+#[derive(Clone, PartialEq)]
+enum StepStage {
+    Pending,
+    Running,
+    Success,
+    Failed,
 }
 
 impl PipelineProgressUI {
     pub fn new(step_names: &[String], verbose: bool) -> Self {
+        let step_status = vec![StepStage::Pending; step_names.len()];
         Self {
-            total_steps: step_names.len(),
+            step_names: step_names.to_vec(),
+            step_status,
             current_index: 0,
-            current_spinner: None,
+            spinner: None,
+            pipeline_name: String::new(),
+            last_log: String::new(),
             verbose,
         }
     }
 
-    /// Print header and pending step list.
-    pub fn print_header(&self, pipeline_name: &str, step_count: usize) {
+    /// Print initial header.
+    pub fn print_header(&mut self, pipeline_name: &str, _step_count: usize) {
+        self.pipeline_name = pipeline_name.to_string();
         println!();
-        println!(
-            "{} {} {} ({} steps)",
-            ROCKET,
-            style("Pipeline:").bold(),
-            style(pipeline_name).cyan().bold(),
-            step_count
-        );
-        println!("{}", style("─".repeat(56)).dim());
+        // Print the pipeline flow line (will be reprinted on updates)
+        println!("{}", self.format_flow_line());
     }
 
-    /// Mark a step as started — show a spinner on that line.
+    /// Build the flow line: 🚀 maven-java-ci: ✅build → ⏳test → ⬚package
+    fn format_flow_line(&self) -> String {
+        let mut parts = Vec::new();
+        for (i, name) in self.step_names.iter().enumerate() {
+            let icon = match self.step_status[i] {
+                StepStage::Pending => PENDING.to_string(),
+                StepStage::Running => RUNNING.to_string(),
+                StepStage::Success => CHECK.to_string(),
+                StepStage::Failed => CROSS.to_string(),
+            };
+            let name_styled = match self.step_status[i] {
+                StepStage::Pending => style(name).dim().to_string(),
+                StepStage::Running => style(name).yellow().bold().to_string(),
+                StepStage::Success => style(name).green().to_string(),
+                StepStage::Failed => style(name).red().to_string(),
+            };
+            parts.push(format!("{}{}", icon, name_styled));
+        }
+        format!(
+            "{} {}: {}",
+            ROCKET,
+            style(&self.pipeline_name).cyan().bold(),
+            parts.join(&format!(" {} ", style("→").dim()))
+        )
+    }
+
+    /// Reprint the flow line by moving cursor up and overwriting.
+    fn refresh_flow_line(&self) {
+        let term = Term::stderr();
+        // Move up 2 lines (flow line + spinner line), clear, reprint flow
+        let _ = term.move_cursor_up(1);
+        let _ = term.clear_line();
+        // We use the spinner's suspend to print above it
+        if let Some(ref pb) = self.spinner {
+            pb.suspend(|| {
+                let term = Term::stderr();
+                let _ = term.move_cursor_up(1);
+                let _ = term.clear_line();
+                println!("{}", self.format_flow_line());
+            });
+        }
+    }
+
+    /// Mark a step as started.
     pub fn start_step(&mut self, name: &str) {
-        // Stop any previous spinner cleanly
-        if let Some(pb) = self.current_spinner.take() {
+        // Find step index
+        if let Some(idx) = self.step_names.iter().position(|n| n == name) {
+            self.step_status[idx] = StepStage::Running;
+            self.current_index = idx + 1;
+        }
+
+        self.last_log.clear();
+
+        // Stop previous spinner
+        if let Some(pb) = self.spinner.take() {
             pb.finish_and_clear();
         }
 
-        self.current_index += 1;
-        let progress_tag = format!("[{}/{}]", self.current_index, self.total_steps);
+        // Reprint flow line with updated status
+        // Clear previous flow line and print new one
+        let term = Term::stderr();
+        let _ = term.move_cursor_up(1);
+        let _ = term.clear_line();
+        println!("{}", self.format_flow_line());
 
+        // Start new spinner
         let pb = ProgressBar::new_spinner();
         pb.set_style(
             ProgressStyle::default_spinner()
@@ -64,39 +136,83 @@ impl PipelineProgressUI {
                 .template("{spinner} {msg}")
                 .unwrap(),
         );
+        let progress_tag = format!("[{}/{}]", self.current_index, self.step_names.len());
         pb.set_message(format!(
-            "{} {} {}  Running...",
+            "{} {} {}",
             style(&progress_tag).dim(),
             style(name).bold(),
-            style("0.0s").dim()
+            style("Running...").dim()
         ));
         pb.enable_steady_tick(Duration::from_millis(100));
-        self.current_spinner = Some(pb);
+        self.spinner = Some(pb);
     }
 
-    /// Print a log line below the spinner (only stderr in non-verbose, all in verbose).
-    pub fn print_log(&self, line: &LogLine) {
-        if self.verbose || line.stream == LogStream::Stderr {
-            let prefix = match line.stream {
-                LogStream::Stdout => style("   │ ").dim(),
-                LogStream::Stderr => style("   │ ").red().dim(),
-            };
-            if let Some(ref pb) = self.current_spinner {
+    /// Update spinner with latest log line.
+    pub fn update_log(&mut self, name: &str, line: &LogLine) {
+        let msg = line.message.trim_end();
+        if msg.is_empty() {
+            return;
+        }
+        self.last_log = msg.to_string();
+
+        // Truncate log to fit terminal
+        let max_log_len = 60;
+        let log_display = if msg.len() > max_log_len {
+            format!("{}...", &msg[..max_log_len])
+        } else {
+            msg.to_string()
+        };
+
+        if let Some(ref pb) = self.spinner {
+            let progress_tag = format!("[{}/{}]", self.current_index, self.step_names.len());
+            pb.set_message(format!(
+                "{} {} {} {}",
+                style(&progress_tag).dim(),
+                style(name).bold(),
+                style("|").dim(),
+                style(&log_display).dim()
+            ));
+        }
+
+        // In verbose mode, also print full log lines above spinner
+        if self.verbose {
+            if let Some(ref pb) = self.spinner {
+                let prefix = match line.stream {
+                    LogStream::Stdout => style("   │ ").dim(),
+                    LogStream::Stderr => style("   │ ").red().dim(),
+                };
                 pb.suspend(|| {
+                    // Reprint flow line first since suspend clears spinner area
                     print!("{}{}", prefix, line.message);
                 });
             }
         }
     }
 
-    /// Mark step as finished — clear spinner, print a static result line.
+    /// Mark step as finished.
     pub fn finish_step(&mut self, name: &str, success: bool, duration: Duration) {
-        // Clear the spinner
-        if let Some(pb) = self.current_spinner.take() {
+        // Update status
+        if let Some(idx) = self.step_names.iter().position(|n| n == name) {
+            self.step_status[idx] = if success {
+                StepStage::Success
+            } else {
+                StepStage::Failed
+            };
+        }
+
+        // Clear spinner
+        if let Some(pb) = self.spinner.take() {
             pb.finish_and_clear();
         }
 
-        let progress_tag = format!("[{}/{}]", self.current_index, self.total_steps);
+        // Reprint flow line with updated status
+        let term = Term::stderr();
+        let _ = term.move_cursor_up(1);
+        let _ = term.clear_line();
+        println!("{}", self.format_flow_line());
+
+        // Print completion line
+        let progress_tag = format!("[{}/{}]", self.current_index, self.step_names.len());
         let icon = if success {
             CHECK.to_string()
         } else {
@@ -108,7 +224,7 @@ impl PipelineProgressUI {
             style(name).red().bold().to_string()
         };
         println!(
-            "{}{} {:<16} {}",
+            " {} {} {:<16} {}",
             icon,
             style(&progress_tag).dim(),
             name_styled,
@@ -175,66 +291,6 @@ impl PipelineReporter {
         Self
     }
 
-    /// Print pipeline header before execution
-    pub fn print_header(&self, pipeline: &Pipeline) {
-        println!();
-        println!(
-            "{} {} {}",
-            ROCKET,
-            style("Pipeline:").bold(),
-            style(&pipeline.name).cyan().bold()
-        );
-        println!(
-            "   {} steps, Docker-isolated execution",
-            pipeline.steps.len()
-        );
-        println!("{}", style("─".repeat(60)).dim());
-    }
-
-    /// Print the result of a single step
-    pub fn print_step_result(&self, result: &StepResult) {
-        let status = if result.success {
-            format!("{}{}", CHECK, style("PASS").green().bold())
-        } else {
-            format!("{}{}", CROSS, style("FAIL").red().bold())
-        };
-
-        println!();
-        println!(
-            "  {} {} [{}] {}{}",
-            ARROW,
-            style(&result.step_name).bold(),
-            status,
-            CLOCK,
-            format_duration(result.duration)
-        );
-
-        // Print last few log lines for context (especially on failure)
-        let lines_to_show = if result.success { 0 } else { 10 };
-        if lines_to_show > 0 {
-            let skip = result.logs.len().saturating_sub(lines_to_show);
-            for line in result.logs.iter().skip(skip) {
-                let prefix = match line.stream {
-                    LogStream::Stdout => style("│ ").dim(),
-                    LogStream::Stderr => style("│ ").red().dim(),
-                };
-                print!("    {}{}", prefix, line.message);
-            }
-        }
-    }
-
-    /// Print final summary
-    pub fn print_summary(&self) {
-        println!();
-        println!("{}", style("─".repeat(60)).dim());
-        println!(
-            "  {} {}",
-            CHECK,
-            style("Pipeline completed").green().bold()
-        );
-        println!();
-    }
-
     /// Print validation success
     pub fn print_validation_ok(&self, pipeline: &Pipeline) {
         println!(
@@ -260,7 +316,7 @@ impl PipelineReporter {
 
         for (batch_idx, batch) in schedule.iter().enumerate() {
             let parallel_hint = if batch.len() > 1 {
-                format!(" ({}parallel{})", style("").bold(), style("").bold())
+                " (parallel)".to_string()
             } else {
                 String::new()
             };

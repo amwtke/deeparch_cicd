@@ -172,12 +172,12 @@ async fn cmd_run(
 
     let executor = DockerExecutor::new().await?;
 
-    // Set up progress UI
+    // Set up progress UI (wrapped in Arc<Mutex> so on_log closure can access it)
     let step_names: Vec<String> = pipeline.steps.iter().map(|s| s.name.clone()).collect();
-    let mut progress: Option<PipelineProgressUI> = if mode == OutputMode::Tty {
-        let p = PipelineProgressUI::new(&step_names, verbose);
+    let progress: Option<std::sync::Arc<std::sync::Mutex<PipelineProgressUI>>> = if mode == OutputMode::Tty {
+        let mut p = PipelineProgressUI::new(&step_names, verbose);
         p.print_header(&pipeline.name, pipeline.steps.len());
-        Some(p)
+        Some(std::sync::Arc::new(std::sync::Mutex::new(p)))
     } else {
         None
     };
@@ -197,8 +197,8 @@ async fn cmd_run(
             let step = pipeline.get_step(step_name).expect("step must exist").clone();
 
             // Signal step start
-            if let Some(ref mut progress) = progress {
-                progress.start_step(step_name);
+            if let Some(ref progress) = progress {
+                progress.lock().unwrap().start_step(step_name);
             }
             if mode == OutputMode::Plain {
                 plain::print_step_start(step_name, &step.image);
@@ -208,12 +208,18 @@ async fn cmd_run(
             let sn = step_name.clone();
             let m = mode.clone();
             let v = verbose;
+            let progress_ref = progress.clone();
             let result = executor.run_step(&pipeline.name, &step, &project_dir, move |line| {
                 match m {
                     OutputMode::Plain => {
                         plain::print_log_line(&sn, line, v);
                     }
-                    _ => {} // TTY uses progress bar; JSON ignores
+                    OutputMode::Tty => {
+                        if let Some(ref p) = progress_ref {
+                            p.lock().unwrap().update_log(&sn, line);
+                        }
+                    }
+                    _ => {}
                 }
             }).await?;
 
@@ -221,8 +227,8 @@ async fn cmd_run(
             step_results.push((step_name.clone(), result.duration, result.success));
 
             // Finish progress for this step
-            if let Some(ref mut progress) = progress {
-                progress.finish_step(step_name, result.success, result.duration);
+            if let Some(ref progress) = progress {
+                progress.lock().unwrap().finish_step(step_name, result.success, result.duration);
             }
             if mode == OutputMode::Plain {
                 plain::print_step_finish(step_name, result.success, result.duration);
@@ -348,10 +354,11 @@ async fn cmd_run(
         }
         OutputMode::Tty => {
             if let Some(ref progress) = progress {
+                let p = progress.lock().unwrap();
                 if let Some(ref ts) = test_summary {
-                    progress.print_test_summary(ts);
+                    p.print_test_summary(ts);
                 }
-                progress.print_stats_table(&step_results, total_duration);
+                p.print_stats_table(&step_results, total_duration);
             }
         }
     }
