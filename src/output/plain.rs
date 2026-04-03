@@ -39,7 +39,7 @@ pub fn print_stats_table(results: &[(String, std::time::Duration, bool)], total:
     println!("{:<16} {:<12} {}", "Step", "Duration", "Status");
     for (name, dur, success) in results {
         let status = if *success { "OK" } else { "FAIL" };
-        println!("{:<16} {:<12.1}s {}", name, dur.as_secs_f64(), status);
+        println!("{:<16} {:<12} {}", name, format!("{:.1}s", dur.as_secs_f64()), status);
     }
     println!("{:<16} {:.1}s", "Total", total.as_secs_f64());
     println!();

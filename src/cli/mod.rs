@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use crate::executor::DockerExecutor;
-use crate::output::tty::PipelineReporter;
+use crate::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::output::{resolve_output_mode, OutputMode};
 use crate::output::{json, plain};
 use crate::pipeline::{Pipeline, Strategy};
@@ -142,7 +142,7 @@ async fn cmd_run(
     dry_run: bool,
     output: Option<String>,
     run_id: Option<String>,
-    _verbose: bool,
+    verbose: bool,
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
@@ -171,43 +171,64 @@ async fn cmd_run(
     let pipeline_start = std::time::Instant::now();
 
     let executor = DockerExecutor::new().await?;
-    let reporter = PipelineReporter::new();
 
-    if mode == OutputMode::Tty {
-        reporter.print_header(&pipeline);
-    }
+    // Set up progress UI
+    let step_names: Vec<String> = pipeline.steps.iter().map(|s| s.name.clone()).collect();
+    let mut progress: Option<PipelineProgressUI> = if mode == OutputMode::Tty {
+        let p = PipelineProgressUI::new(&step_names, verbose);
+        p.print_header(&pipeline.name, pipeline.steps.len());
+        Some(p)
+    } else {
+        None
+    };
 
     let schedule = scheduler.resolve(step_filter.as_deref())?;
 
     let mut has_final_failure = false;
     let mut has_retryable_failure = false;
     let mut current_batch_index = 0;
+    let mut step_results: Vec<(String, std::time::Duration, bool)> = Vec::new();
+    let mut test_summary: Option<crate::strategy::test_parser::TestSummary> = None;
 
     'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
         current_batch_index = batch_idx;
 
-        let handles: Vec<_> = batch
-            .iter()
-            .map(|step_name| {
-                let executor = executor.clone();
-                let step = pipeline
-                    .get_step(step_name)
-                    .expect("step must exist")
-                    .clone();
-                let pipeline_name = pipeline.name.clone();
-                let dir = project_dir.clone();
-                tokio::spawn(async move { executor.run_step(&pipeline_name, &step, &dir, |_| {}).await })
-            })
-            .collect();
+        for step_name in batch {
+            let step = pipeline.get_step(step_name).expect("step must exist").clone();
 
-        for (i, handle) in handles.into_iter().enumerate() {
-            let result = handle.await??;
-            let step_name = &batch[i];
-            let pipeline_step = pipeline.get_step(step_name);
-
-            if mode == OutputMode::Tty {
-                reporter.print_step_result(&result);
+            // Signal step start
+            if let Some(ref progress) = progress {
+                progress.start_step(step_name);
             }
+            if mode == OutputMode::Plain {
+                plain::print_step_start(step_name, &step.image);
+            }
+
+            // Build on_log callback based on mode
+            let sn = step_name.clone();
+            let m = mode.clone();
+            let v = verbose;
+            let result = executor.run_step(&pipeline.name, &step, &project_dir, move |line| {
+                match m {
+                    OutputMode::Plain => {
+                        plain::print_log_line(&sn, line, v);
+                    }
+                    _ => {} // TTY uses progress bar; JSON ignores
+                }
+            }).await?;
+
+            // Record step result for stats
+            step_results.push((step_name.clone(), result.duration, result.success));
+
+            // Finish progress for this step
+            if let Some(ref mut progress) = progress {
+                progress.finish_step(step_name, result.success, result.duration);
+            }
+            if mode == OutputMode::Plain {
+                plain::print_step_finish(step_name, result.success, result.duration);
+            }
+
+            let pipeline_step = pipeline.get_step(step_name);
 
             // Build on_failure state from pipeline config
             let on_failure_state = pipeline_step
@@ -228,6 +249,22 @@ async fn cmd_run(
             let stdout = result.stdout_string();
             let stderr = result.stderr_string();
 
+            // Parse test output if this is a test step
+            let step_test_summary = if step_name == "test" {
+                let full_output = format!("{}{}", &stdout, &stderr);
+                if let Some(strategy) = crate::strategy::strategy_for_pipeline(&pipeline) {
+                    let parsed = strategy.parse_test_output(&full_output);
+                    if parsed.is_some() {
+                        test_summary = parsed.clone();
+                    }
+                    parsed
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             state.add_step(StepState {
                 name: result.step_name.clone(),
                 status: step_status,
@@ -239,7 +276,7 @@ async fn cmd_run(
                 stderr: if stderr.is_empty() { None } else { Some(stderr) },
                 error_context: None,
                 on_failure: on_failure_state,
-                test_summary: None,
+                test_summary: step_test_summary,
             });
 
             // Handle failure
@@ -299,15 +336,22 @@ async fn cmd_run(
     // Save state
     state.save(&RunState::default_base_dir())?;
 
-    // Output based on mode
+    // Print stats and test summary
+    let total_duration = pipeline_start.elapsed();
     match mode {
         OutputMode::Json => json::print_run_state(&state),
-        OutputMode::Plain => plain::print_run_state(&state),
+        OutputMode::Plain => {
+            if let Some(ref ts) = test_summary {
+                plain::print_test_summary(ts);
+            }
+            plain::print_stats_table(&step_results, total_duration);
+        }
         OutputMode::Tty => {
-            if has_final_failure || has_retryable_failure {
-                // Summary already shown via step results in TTY mode
-            } else {
-                reporter.print_summary();
+            if let Some(ref progress) = progress {
+                if let Some(ref ts) = test_summary {
+                    progress.print_test_summary(ts);
+                }
+                progress.print_stats_table(&step_results, total_duration);
             }
         }
     }

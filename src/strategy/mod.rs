@@ -75,6 +75,27 @@ fn strategy_for(project_type: &ProjectType) -> Box<dyn PipelineStrategy> {
     }
 }
 
+/// Get strategy by pipeline name prefix (for parsing test output after pipeline execution).
+/// Returns None if no matching strategy is found.
+pub fn strategy_for_pipeline(pipeline: &Pipeline) -> Option<Box<dyn PipelineStrategy>> {
+    let name = &pipeline.name;
+    if name.starts_with("maven") {
+        Some(Box::new(maven::MavenStrategy))
+    } else if name.starts_with("gradle") {
+        Some(Box::new(gradle::GradleStrategy))
+    } else if name.starts_with("rust") {
+        Some(Box::new(rust_lang::RustStrategy))
+    } else if name.starts_with("node") {
+        Some(Box::new(node::NodeStrategy))
+    } else if name.starts_with("python") {
+        Some(Box::new(python::PythonStrategy))
+    } else if name.starts_with("go") {
+        Some(Box::new(go::GoStrategy))
+    } else {
+        None
+    }
+}
+
 /// Generate a Pipeline from ProjectInfo using the strategy system.
 pub fn generate_pipeline(info: &ProjectInfo) -> Pipeline {
     let strategy = strategy_for(&info.project_type);
