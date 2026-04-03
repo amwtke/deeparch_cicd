@@ -104,9 +104,8 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             output,
             file,
         } => {
-            let _mode = resolve_output_mode(output);
-            // Placeholder: retry logic will be implemented later
-            Ok(0)
+            let mode = resolve_output_mode(output);
+            cmd_retry(run_id, step, mode, file).await
         }
         Command::Status { run_id, output } => {
             let _mode = resolve_output_mode(output);
@@ -307,3 +306,177 @@ async fn cmd_list(file: PathBuf) -> Result<i32> {
     reporter.print_step_list(&pipeline);
     Ok(0)
 }
+
+async fn cmd_retry(
+    run_id: String,
+    step: Option<String>,
+    mode: OutputMode,
+    file: PathBuf,
+) -> Result<i32> {
+    let step_name = step.ok_or_else(|| anyhow::anyhow!("--step is required for retry command"))?;
+
+    let base = RunState::default_base_dir();
+    let mut state = RunState::load(&base, &run_id)?;
+
+    // Validate step exists and is Failed
+    {
+        let step_state = state
+            .get_step(&step_name)
+            .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in run '{}'", step_name, run_id))?;
+
+        if step_state.status != StepStatus::Failed {
+            anyhow::bail!(
+                "Step '{}' is not in Failed status (current: {:?})",
+                step_name,
+                step_state.status
+            );
+        }
+
+        // Check retries remaining
+        if let Some(ref on_failure) = step_state.on_failure {
+            if on_failure.retries_remaining == 0 {
+                anyhow::bail!(
+                    "Step '{}' has exhausted all retries (max: {})",
+                    step_name,
+                    on_failure.max_retries
+                );
+            }
+        }
+    }
+
+    // Decrement retries
+    state.decrement_retries(&step_name);
+
+    // Load pipeline and create executor
+    let pipeline = Pipeline::from_file(&file)
+        .context(format!("Failed to load pipeline: {}", file.display()))?;
+    let executor = DockerExecutor::new().await?;
+
+    let pipeline_start = std::time::Instant::now();
+
+    // Re-execute the failed step
+    let pipeline_step = pipeline
+        .get_step(&step_name)
+        .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in pipeline config", step_name))?;
+
+    let result = executor.run_step(&pipeline.name, pipeline_step).await?;
+
+    // Update step state
+    {
+        let ss = state
+            .get_step_mut(&step_name)
+            .expect("step must exist in state");
+        ss.status = if result.success {
+            StepStatus::Success
+        } else {
+            StepStatus::Failed
+        };
+        ss.exit_code = Some(result.exit_code);
+        ss.duration_ms = Some(result.duration.as_millis() as u64);
+        let stdout = result.stdout_string();
+        let stderr = result.stderr_string();
+        ss.stdout = if stdout.is_empty() { None } else { Some(stdout) };
+        ss.stderr = if stderr.is_empty() { None } else { Some(stderr) };
+    }
+
+    // If retried step succeeded, run downstream Skipped steps
+    if result.success {
+        // Collect skipped step names in order
+        let skipped_names: Vec<String> = state
+            .steps
+            .iter()
+            .filter(|s| s.status == StepStatus::Skipped)
+            .map(|s| s.name.clone())
+            .collect();
+
+        for skipped_name in &skipped_names {
+            // Check if all dependencies are Success
+            let ps = pipeline.get_step(skipped_name);
+            let deps_satisfied = ps
+                .map(|s| {
+                    s.depends_on.iter().all(|dep| {
+                        state
+                            .get_step(dep)
+                            .map(|d| d.status == StepStatus::Success)
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(true);
+
+            if !deps_satisfied {
+                continue;
+            }
+
+            // Execute the skipped step
+            let skipped_step = match pipeline.get_step(skipped_name) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            let sr = executor.run_step(&pipeline.name, skipped_step).await?;
+
+            // Update state
+            {
+                let ss = state
+                    .get_step_mut(skipped_name)
+                    .expect("step must exist in state");
+                ss.status = if sr.success {
+                    StepStatus::Success
+                } else {
+                    StepStatus::Failed
+                };
+                ss.exit_code = Some(sr.exit_code);
+                ss.duration_ms = Some(sr.duration.as_millis() as u64);
+                let stdout = sr.stdout_string();
+                let stderr = sr.stderr_string();
+                ss.stdout = if stdout.is_empty() { None } else { Some(stdout) };
+                ss.stderr = if stderr.is_empty() { None } else { Some(stderr) };
+            }
+
+            // If this step failed, stop based on its strategy
+            if !sr.success {
+                let allow_failure = skipped_step.allow_failure;
+                if !allow_failure {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Determine overall status
+    let all_success = state.steps.iter().all(|s| s.status == StepStatus::Success);
+    let has_retryable = state.steps.iter().any(|s| {
+        s.status == StepStatus::Failed
+            && s.on_failure
+                .as_ref()
+                .map(|of| of.strategy == "auto_fix" && of.retries_remaining > 0)
+                .unwrap_or(false)
+    });
+
+    state.status = if all_success {
+        PipelineStatus::Success
+    } else if has_retryable {
+        PipelineStatus::Retryable
+    } else {
+        PipelineStatus::Failed
+    };
+
+    state.duration_ms = Some(pipeline_start.elapsed().as_millis() as u64);
+
+    // Save state
+    state.save(&base)?;
+
+    // Output based on mode
+    match mode {
+        OutputMode::Json => json::print_run_state(&state),
+        OutputMode::Plain | OutputMode::Tty => plain::print_run_state(&state),
+    }
+
+    // Exit code
+    match state.status {
+        PipelineStatus::Success => Ok(0),
+        PipelineStatus::Retryable => Ok(1),
+        _ => Ok(2),
+    }
+}
+
