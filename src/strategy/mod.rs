@@ -5,11 +5,13 @@ pub mod rust_lang;
 pub mod node;
 pub mod python;
 pub mod go;
+pub mod test_parser;
 
 use std::collections::HashMap;
 
 use crate::detector::{ProjectInfo, ProjectType};
 use crate::pipeline::{OnFailure, Pipeline, Step};
+use crate::strategy::test_parser::TestSummary;
 
 /// Definition of a single pipeline step, produced by strategies.
 #[derive(Debug, Clone)]
@@ -57,6 +59,9 @@ impl From<StepDef> for Step {
 pub trait PipelineStrategy {
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef>;
     fn pipeline_name(&self, info: &ProjectInfo) -> String;
+    fn parse_test_output(&self, _output: &str) -> Option<TestSummary> {
+        None
+    }
 }
 
 fn strategy_for(project_type: &ProjectType) -> Box<dyn PipelineStrategy> {
