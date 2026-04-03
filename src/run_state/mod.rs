@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::strategy::test_parser::TestSummary;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStatus {
@@ -48,6 +50,8 @@ pub struct StepState {
     pub stderr: Option<String>,
     pub error_context: Option<ErrorContext>,
     pub on_failure: Option<OnFailureState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_summary: Option<TestSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +173,7 @@ mod tests {
             stderr: None,
             error_context: None,
             on_failure: None,
+            test_summary: None,
         });
 
         state.update_step("build", StepStatus::Failed, Some(101), Some(8200));
@@ -196,6 +201,7 @@ mod tests {
                 retries_remaining: 3,
                 context_paths: vec!["src/".into()],
             }),
+            test_summary: None,
         });
 
         state.decrement_retries("build");
@@ -227,6 +233,7 @@ mod tests {
             stderr: None,
             error_context: None,
             on_failure: None,
+            test_summary: None,
         });
         state.add_step(StepState {
             name: "test".into(),
@@ -248,6 +255,7 @@ mod tests {
                 retries_remaining: 2,
                 context_paths: vec!["src/".into()],
             }),
+            test_summary: None,
         });
 
         state.save(dir.path()).unwrap();
@@ -292,6 +300,7 @@ mod tests {
                 retries_remaining: 1,
                 context_paths: vec![],
             }),
+            test_summary: None,
         });
 
         state.decrement_retries("s");
@@ -316,6 +325,7 @@ mod tests {
             stderr: None,
             error_context: None,
             on_failure: None,
+            test_summary: None,
         });
         // Should not panic
         state.decrement_retries("s");
