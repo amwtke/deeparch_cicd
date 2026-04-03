@@ -40,6 +40,10 @@ pub enum Command {
         /// Run ID for this execution
         #[arg(long)]
         run_id: Option<String>,
+
+        /// Show full container output
+        #[arg(long)]
+        verbose: bool,
     },
 
     /// Validate pipeline config
@@ -73,6 +77,10 @@ pub enum Command {
         /// Path to pipeline config file
         #[arg(short, long, default_value = "pipeline.yml")]
         file: PathBuf,
+
+        /// Show full container output
+        #[arg(long)]
+        verbose: bool,
     },
 
     /// Auto-detect project type and generate pipeline.yml
@@ -106,7 +114,8 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             dry_run,
             output,
             run_id,
-        } => cmd_run(file, step, dry_run, output, run_id).await,
+            verbose,
+        } => cmd_run(file, step, dry_run, output, run_id, verbose).await,
         Command::Init { dir, output } => cmd_init(dir, output).await,
         Command::Validate { file } => cmd_validate(file).await,
         Command::List { file } => cmd_list(file).await,
@@ -115,9 +124,10 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             step,
             output,
             file,
+            verbose,
         } => {
             let mode = resolve_output_mode(output);
-            cmd_retry(run_id, step, mode, file).await
+            cmd_retry(run_id, step, mode, file, verbose).await
         }
         Command::Status { run_id, output } => {
             let mode = resolve_output_mode(output);
@@ -132,6 +142,7 @@ async fn cmd_run(
     dry_run: bool,
     output: Option<String>,
     run_id: Option<String>,
+    _verbose: bool,
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
@@ -185,7 +196,7 @@ async fn cmd_run(
                     .clone();
                 let pipeline_name = pipeline.name.clone();
                 let dir = project_dir.clone();
-                tokio::spawn(async move { executor.run_step(&pipeline_name, &step, &dir).await })
+                tokio::spawn(async move { executor.run_step(&pipeline_name, &step, &dir, |_| {}).await })
             })
             .collect();
 
@@ -228,6 +239,7 @@ async fn cmd_run(
                 stderr: if stderr.is_empty() { None } else { Some(stderr) },
                 error_context: None,
                 on_failure: on_failure_state,
+                test_summary: None,
             });
 
             // Handle failure
@@ -267,6 +279,7 @@ async fn cmd_run(
                     stderr: None,
                     error_context: None,
                     on_failure: None,
+                    test_summary: None,
                 });
             }
         }
@@ -331,6 +344,7 @@ async fn cmd_retry(
     step: Option<String>,
     mode: OutputMode,
     file: PathBuf,
+    _verbose: bool,
 ) -> Result<i32> {
     let step_name = step.ok_or_else(|| anyhow::anyhow!("--step is required for retry command"))?;
 
@@ -383,7 +397,7 @@ async fn cmd_retry(
         .get_step(&step_name)
         .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in pipeline config", step_name))?;
 
-    let result = executor.run_step(&pipeline.name, pipeline_step, &project_dir).await?;
+    let result = executor.run_step(&pipeline.name, pipeline_step, &project_dir, |_| {}).await?;
 
     // Update step state
     {
@@ -437,7 +451,7 @@ async fn cmd_retry(
                 None => continue,
             };
 
-            let sr = executor.run_step(&pipeline.name, skipped_step, &project_dir).await?;
+            let sr = executor.run_step(&pipeline.name, skipped_step, &project_dir, |_| {}).await?;
 
             // Update state
             {

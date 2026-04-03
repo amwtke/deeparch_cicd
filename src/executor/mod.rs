@@ -73,7 +73,13 @@ impl DockerExecutor {
 
     /// Execute a single pipeline step inside a Docker container.
     /// `project_dir` is bind-mounted into the container at the step's workdir.
-    pub async fn run_step(&self, pipeline_name: &str, step: &Step, project_dir: &std::path::Path) -> Result<StepResult> {
+    pub async fn run_step(
+        &self,
+        pipeline_name: &str,
+        step: &Step,
+        project_dir: &std::path::Path,
+        on_log: impl Fn(&LogLine) + Send,
+    ) -> Result<StepResult> {
         let start = std::time::Instant::now();
         let container_name = format!("pipelight-{}-{}-{}", pipeline_name, step.name, uuid::Uuid::new_v4().to_string()[..8].to_string());
 
@@ -159,7 +165,9 @@ impl DockerExecutor {
                         }
                         _ => continue,
                     };
-                    logs.push(LogLine { stream, message });
+                    let line = LogLine { stream, message };
+                    on_log(&line);
+                    logs.push(line);
                 }
                 Err(e) => {
                     warn!(error = %e, "Error reading container logs");
