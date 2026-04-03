@@ -28,11 +28,18 @@ impl PipelineStrategy for GradleStrategy {
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
+        let cache_volumes = vec!["~/.gradle:/root/.gradle".to_string()];
+
         let mut steps = vec![BaseStrategy::build_step(info)];
         if info.lint_cmd.is_some() {
             steps.push(checkstyle::step(info));
         }
         steps.push(BaseStrategy::test_step(info));
+
+        for step in &mut steps {
+            step.volumes = cache_volumes.clone();
+        }
+
         steps
     }
 }

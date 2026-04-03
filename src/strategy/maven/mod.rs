@@ -37,12 +37,20 @@ impl PipelineStrategy for MavenStrategy {
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
+        let cache_volumes = vec!["~/.m2:/root/.m2".to_string()];
+
         let mut steps = vec![BaseStrategy::build_step(info)];
         if info.lint_cmd.is_some() {
             steps.push(checkstyle::step(info));
         }
         steps.push(BaseStrategy::test_step(info));
         steps.push(package::step(info));
+
+        // Mount Maven cache for all steps
+        for step in &mut steps {
+            step.volumes = cache_volumes.clone();
+        }
+
         steps
     }
 }

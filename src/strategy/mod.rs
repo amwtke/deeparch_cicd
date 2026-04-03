@@ -23,6 +23,7 @@ pub struct StepDef {
     pub workdir: String,
     pub on_failure: Option<OnFailure>,
     pub allow_failure: bool,
+    pub volumes: Vec<String>,
 }
 
 impl Default for StepDef {
@@ -35,6 +36,7 @@ impl Default for StepDef {
             workdir: "/workspace".into(),
             on_failure: None,
             allow_failure: false,
+            volumes: vec![],
         }
     }
 }
@@ -49,6 +51,7 @@ impl From<StepDef> for Step {
             workdir: sd.workdir,
             on_failure: sd.on_failure,
             allow_failure: sd.allow_failure,
+            volumes: sd.volumes,
             env: HashMap::new(),
             condition: None,
         }

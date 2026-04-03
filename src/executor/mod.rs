@@ -148,10 +148,29 @@ impl DockerExecutor {
         // Bind mount project directory into container workdir
         let host_path = project_dir.canonicalize()
             .context("Failed to resolve project directory")?;
-        let bind = format!("{}:{}", host_path.display(), step.workdir);
+        let mut binds = vec![format!("{}:{}", host_path.display(), step.workdir)];
+
+        // Add extra volume mounts from step config (e.g., cache directories)
+        for vol in &step.volumes {
+            // Expand ~ to home directory
+            let expanded = if vol.starts_with("~/") || vol.starts_with("~:") {
+                if let Some(home) = dirs::home_dir() {
+                    vol.replacen('~', &home.display().to_string(), 1)
+                } else {
+                    vol.clone()
+                }
+            } else {
+                vol.clone()
+            };
+            // Only mount if host path exists
+            let host_part = expanded.split(':').next().unwrap_or("");
+            if std::path::Path::new(host_part).exists() {
+                binds.push(expanded);
+            }
+        }
 
         let host_config = HostConfig {
-            binds: Some(vec![bind]),
+            binds: Some(binds),
             ..Default::default()
         };
 

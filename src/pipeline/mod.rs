@@ -52,6 +52,10 @@ pub struct Step {
     /// Failure handling configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<OnFailure>,
+
+    /// Additional volume mounts (host:container format)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<String>,
 }
 
 fn default_workdir() -> String {
