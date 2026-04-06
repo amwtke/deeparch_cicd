@@ -33,16 +33,25 @@ impl PipelineStrategy for GradleStrategy {
         let cache_volumes = vec!["~/.gradle:/root/.gradle".to_string()];
 
         let mut steps = vec![BaseStrategy::build_step(info)];
+        let mut quality_step_names: Vec<String> = vec![];
         if info.lint_cmd.is_some() {
             steps.push(checkstyle::step(info));
+            quality_step_names.push("checkstyle".into());
         }
         if info.quality_plugins.contains(&"spotbugs".to_string()) {
             steps.push(spotbugs::step(info));
+            quality_step_names.push("spotbugs".into());
         }
         if info.quality_plugins.contains(&"pmd".to_string()) {
             steps.push(pmd::step(info));
+            quality_step_names.push("pmd".into());
         }
-        steps.push(BaseStrategy::test_step(info));
+        // Test depends on all quality checks
+        let mut test_step = BaseStrategy::test_step(info);
+        if !quality_step_names.is_empty() {
+            test_step.depends_on = quality_step_names;
+        }
+        steps.push(test_step);
 
         for step in &mut steps {
             step.volumes = cache_volumes.clone();

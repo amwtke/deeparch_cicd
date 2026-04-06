@@ -42,13 +42,21 @@ impl PipelineStrategy for MavenStrategy {
         let cache_volumes = vec!["~/.m2:/root/.m2".to_string()];
 
         let mut steps = vec![BaseStrategy::build_step(info)];
+        // Quality checks run after build, before test
+        let mut quality_step_names: Vec<String> = vec![];
         if info.lint_cmd.is_some() {
             steps.push(checkstyle::step(info));
+            quality_step_names.push("checkstyle".into());
         }
-        // SpotBugs and PMD always run — Maven supports CLI invocation without plugin declaration
         steps.push(spotbugs::step(info));
+        quality_step_names.push("spotbugs".into());
         steps.push(pmd::step(info));
-        steps.push(BaseStrategy::test_step(info));
+        quality_step_names.push("pmd".into());
+
+        // Test depends on all quality checks (not just build)
+        let mut test_step = BaseStrategy::test_step(info);
+        test_step.depends_on = quality_step_names;
+        steps.push(test_step);
         steps.push(package::step(info));
 
         // Mount Maven cache for all steps
@@ -114,6 +122,8 @@ mod tests {
         assert_eq!(steps[3].name, "pmd");
         assert_eq!(steps[4].name, "test");
         assert_eq!(steps[5].name, "package");
+        // test depends on all quality steps
+        assert_eq!(steps[4].depends_on, vec!["checkstyle", "spotbugs", "pmd"]);
     }
 
     #[test]
@@ -127,6 +137,8 @@ mod tests {
         assert_eq!(steps[1].name, "spotbugs");
         assert_eq!(steps[2].name, "pmd");
         assert_eq!(steps[3].name, "test");
+        // test depends on spotbugs and pmd (no checkstyle)
+        assert_eq!(steps[3].depends_on, vec!["spotbugs", "pmd"]);
         assert_eq!(steps[4].name, "package");
     }
 
