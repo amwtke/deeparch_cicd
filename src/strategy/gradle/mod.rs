@@ -62,6 +62,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["build.gradle".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 
@@ -78,6 +79,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["build.gradle".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 

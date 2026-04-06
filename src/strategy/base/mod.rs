@@ -107,6 +107,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 
@@ -123,6 +124,7 @@ mod tests {
             source_paths: vec![".".into()],
             config_files: vec!["go.mod".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 

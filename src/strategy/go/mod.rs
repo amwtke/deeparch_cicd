@@ -58,6 +58,7 @@ mod tests {
             source_paths: vec![".".into()],
             config_files: vec!["go.mod".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 
@@ -74,6 +75,7 @@ mod tests {
             source_paths: vec![".".into()],
             config_files: vec!["go.mod".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 

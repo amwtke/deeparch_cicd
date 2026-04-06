@@ -138,6 +138,7 @@ impl ProjectDetector for MavenDetector {
             ],
             config_files: vec!["pom.xml".to_string()],
             warnings,
+            subdir: None,
         })
     }
 }

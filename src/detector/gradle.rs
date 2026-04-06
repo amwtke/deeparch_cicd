@@ -149,6 +149,7 @@ impl ProjectDetector for GradleDetector {
             ],
             config_files: vec![config_file_name.to_string()],
             warnings,
+            subdir: None,
         })
     }
 }

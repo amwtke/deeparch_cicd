@@ -35,6 +35,8 @@ pub struct ProjectInfo {
     pub config_files: Vec<String>,
     /// Warnings to show the user
     pub warnings: Vec<String>,
+    /// Subdirectory where the project was detected (None if root)
+    pub subdir: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,22 +83,74 @@ fn all_detectors() -> Vec<Box<dyn ProjectDetector>> {
     ]
 }
 
-/// Auto-detect project type and generate pipeline
+/// Auto-detect project type and generate pipeline.
+/// First tries the root directory, then scans immediate subdirectories.
 pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
     let detectors = all_detectors();
 
+    // Try root directory first
     for detector in &detectors {
         if detector.detect(dir) {
-            let info = detector.analyze(dir)?;
+            let mut info = detector.analyze(dir)?;
+            info.subdir = None;
             let pipeline = crate::strategy::generate_pipeline(&info);
             return Ok((info, pipeline));
         }
     }
 
+    // Scan immediate subdirectories
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let subpath = entry.path();
+            if !subpath.is_dir() {
+                continue;
+            }
+            // Skip hidden directories and common non-project dirs
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" || name_str == "dist" || name_str == "build" {
+                continue;
+            }
+            for detector in &detectors {
+                if detector.detect(&subpath) {
+                    let mut info = detector.analyze(&subpath)?;
+                    let subdir_name = name_str.to_string();
+                    info = adapt_for_subdir(info, &subdir_name);
+                    let pipeline = crate::strategy::generate_pipeline(&info);
+                    return Ok((info, pipeline));
+                }
+            }
+        }
+    }
+
     anyhow::bail!(
-        "Could not detect project type in '{}'. Supported: Maven, Gradle, Rust, Node.js, Python, Go",
+        "Could not detect project type in '{}' or its subdirectories. Supported: Maven, Gradle, Rust, Node.js, Python, Go",
         dir.display()
     );
+}
+
+/// Adapt ProjectInfo for a project detected in a subdirectory.
+/// Prefixes commands with `cd <subdir>`, and paths with `<subdir>/`.
+fn adapt_for_subdir(mut info: ProjectInfo, subdir: &str) -> ProjectInfo {
+    let prefix_cmd = |cmds: Vec<String>| -> Vec<String> {
+        cmds.into_iter()
+            .map(|cmd| format!("cd {} && {}", subdir, cmd))
+            .collect()
+    };
+    let prefix_path = |paths: Vec<String>| -> Vec<String> {
+        paths.into_iter()
+            .map(|p| format!("{}/{}", subdir, p))
+            .collect()
+    };
+
+    info.build_cmd = prefix_cmd(info.build_cmd);
+    info.test_cmd = prefix_cmd(info.test_cmd);
+    info.lint_cmd = info.lint_cmd.map(prefix_cmd);
+    info.fmt_cmd = info.fmt_cmd.map(prefix_cmd);
+    info.source_paths = prefix_path(info.source_paths);
+    info.config_files = prefix_path(info.config_files);
+    info.subdir = Some(subdir.to_string());
+    info
 }
 
 
@@ -118,6 +172,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
+            subdir: None,
         };
         let pipeline = crate::strategy::generate_pipeline(&info);
         assert_eq!(pipeline.name, "rust-ci");
@@ -140,6 +195,7 @@ mod tests {
             source_paths: vec![".".into()],
             config_files: vec!["go.mod".into()],
             warnings: vec![],
+            subdir: None,
         };
         let pipeline = crate::strategy::generate_pipeline(&info);
         // GoStrategy: build, vet, test (no lint, no fmt)

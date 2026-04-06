@@ -73,6 +73,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["pom.xml".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 
@@ -89,6 +90,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["pom.xml".into()],
             warnings: vec![],
+            subdir: None,
         }
     }
 

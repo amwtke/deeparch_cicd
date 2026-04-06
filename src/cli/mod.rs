@@ -576,6 +576,9 @@ async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
 
     // Print detection results
     println!("Detected project: {}", info.project_type);
+    if let Some(ref subdir) = info.subdir {
+        println!("Detected in subdirectory: {}/", subdir);
+    }
     if let Some(ref ver) = info.language_version {
         println!("Language version: {}", ver);
     }

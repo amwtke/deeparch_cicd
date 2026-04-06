@@ -57,6 +57,7 @@ impl ProjectDetector for RustDetector {
             source_paths: vec!["src/".to_string()],
             config_files: vec!["Cargo.toml".to_string()],
             warnings: vec![],
+            subdir: None,
         })
     }
 }

@@ -120,6 +120,7 @@ impl ProjectDetector for NodeDetector {
             source_paths: vec!["src/".to_string()],
             config_files: vec!["package.json".to_string()],
             warnings: vec![],
+            subdir: None,
         })
     }
 }
