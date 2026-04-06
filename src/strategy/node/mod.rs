@@ -76,6 +76,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["package.json".into(), "tsconfig.json".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         }
     }
@@ -93,6 +94,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["package.json".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         }
     }

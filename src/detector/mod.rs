@@ -35,6 +35,8 @@ pub struct ProjectInfo {
     pub config_files: Vec<String>,
     /// Warnings to show the user
     pub warnings: Vec<String>,
+    /// Detected quality/defect analysis plugins (e.g., "spotbugs", "pmd")
+    pub quality_plugins: Vec<String>,
     /// Subdirectory where the project was detected (None if root)
     pub subdir: Option<String>,
 }
@@ -172,6 +174,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         };
         let pipeline = crate::strategy::generate_pipeline(&info);
@@ -195,6 +198,7 @@ mod tests {
             source_paths: vec![".".into()],
             config_files: vec!["go.mod".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         };
         let pipeline = crate::strategy::generate_pipeline(&info);

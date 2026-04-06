@@ -54,6 +54,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         }
     }

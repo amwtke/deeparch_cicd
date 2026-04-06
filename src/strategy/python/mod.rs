@@ -67,6 +67,7 @@ mod tests {
             source_paths: vec![".".into()],
             config_files: vec!["pyproject.toml".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         }
     }

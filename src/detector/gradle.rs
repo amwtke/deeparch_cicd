@@ -76,6 +76,16 @@ impl GradleDetector {
         content.contains("checkstyle") || content.contains("pmd")
     }
 
+    /// Check if build file contains spotbugs plugin
+    fn has_spotbugs(content: &str) -> bool {
+        content.contains("spotbugs")
+    }
+
+    /// Check if build file contains pmd plugin
+    fn has_pmd(content: &str) -> bool {
+        content.contains("pmd")
+    }
+
     /// Map JDK version string to the nearest supported Gradle Docker image.
     fn jdk_to_image(version: &str) -> String {
         let v: u32 = version.parse().unwrap_or(17);
@@ -134,6 +144,14 @@ impl ProjectDetector for GradleDetector {
             None
         };
 
+        let mut quality_plugins = Vec::new();
+        if Self::has_spotbugs(&content) {
+            quality_plugins.push("spotbugs".to_string());
+        }
+        if Self::has_pmd(&content) {
+            quality_plugins.push("pmd".to_string());
+        }
+
         Ok(ProjectInfo {
             project_type: ProjectType::Gradle,
             language_version: Some(jdk_version),
@@ -148,6 +166,7 @@ impl ProjectDetector for GradleDetector {
                 "src/main/resources/".to_string(),
             ],
             config_files: vec![config_file_name.to_string()],
+            quality_plugins,
             warnings,
             subdir: None,
         })

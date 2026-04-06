@@ -129,6 +129,7 @@ impl ProjectDetector for PythonDetector {
             source_paths: vec!["src/".to_string(), "app/".to_string()],
             config_files,
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         })
     }

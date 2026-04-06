@@ -59,6 +59,7 @@ impl ProjectDetector for GoDetector {
             source_paths: vec![".".to_string()],
             config_files: vec!["go.mod".to_string()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         })
     }

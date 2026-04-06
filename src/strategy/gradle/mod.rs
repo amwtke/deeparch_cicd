@@ -1,4 +1,6 @@
 pub mod checkstyle;
+pub mod pmd;
+pub mod spotbugs;
 
 use regex::Regex;
 use crate::detector::ProjectInfo;
@@ -34,6 +36,12 @@ impl PipelineStrategy for GradleStrategy {
         if info.lint_cmd.is_some() {
             steps.push(checkstyle::step(info));
         }
+        if info.quality_plugins.contains(&"spotbugs".to_string()) {
+            steps.push(spotbugs::step(info));
+        }
+        if info.quality_plugins.contains(&"pmd".to_string()) {
+            steps.push(pmd::step(info));
+        }
         steps.push(BaseStrategy::test_step(info));
 
         for step in &mut steps {
@@ -62,6 +70,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["build.gradle".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         }
     }
@@ -79,6 +88,7 @@ mod tests {
             source_paths: vec!["src/".into()],
             config_files: vec!["build.gradle".into()],
             warnings: vec![],
+            quality_plugins: vec![],
             subdir: None,
         }
     }
