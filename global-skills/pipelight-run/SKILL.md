@@ -45,11 +45,15 @@ digraph pipelight {
 
 ## Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--reinit` | Force regenerate `pipeline.yml` before running, even if one already exists |
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `--reinit` | Force regenerate `pipeline.yml` before running | `/pipelight-run --reinit` |
+| `--skip <steps>` | Skip one or more steps (comma-separated) | `/pipelight-run --skip spotbugs,pmd` |
+| `--step <name>` | Run only a specific step | `/pipelight-run --step build` |
+| `--dry-run` | Show execution plan without running | `/pipelight-run --dry-run` |
+| `--verbose` | Show full container output | `/pipelight-run --verbose` |
 
-Example: `/pipelight-run --reinit`
+Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
 
 ## Step 1: Check pipeline.yml Exists
 
@@ -72,6 +76,10 @@ pipelight run -f pipeline.yml --output json --run-id <short-id>
 - Always use `--output json` so output is machine-parseable
 - Always provide `--run-id` (e.g. `run-001`) to enable retry
 - Use `-f` to point to the correct pipeline file if not `pipeline.yml`
+- If `--skip` was passed, add `--skip <step1> <step2>` to skip those steps
+- If `--step` was passed, add `--step <name>` to run only that step
+- If `--dry-run` was passed, add `--dry-run` to show plan without executing
+- If `--verbose` was passed, add `--verbose` to show full container output
 
 ## Step 3: Parse JSON Result
 

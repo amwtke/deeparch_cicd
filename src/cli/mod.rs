@@ -29,6 +29,10 @@ pub enum Command {
         #[arg(short, long)]
         step: Option<String>,
 
+        /// Skip specific steps (can be specified multiple times)
+        #[arg(long, num_args = 1..)]
+        skip: Vec<String>,
+
         /// Dry run - validate and show execution plan without running
         #[arg(long)]
         dry_run: bool,
@@ -111,11 +115,12 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
         Command::Run {
             file,
             step,
+            skip,
             dry_run,
             output,
             run_id,
             verbose,
-        } => cmd_run(file, step, dry_run, output, run_id, verbose).await,
+        } => cmd_run(file, step, skip, dry_run, output, run_id, verbose).await,
         Command::Init { dir, output } => cmd_init(dir, output).await,
         Command::Validate { file } => cmd_validate(file).await,
         Command::List { file } => cmd_list(file).await,
@@ -139,6 +144,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
 async fn cmd_run(
     file: PathBuf,
     step_filter: Option<String>,
+    skip_steps: Vec<String>,
     dry_run: bool,
     output: Option<String>,
     run_id: Option<String>,
@@ -201,6 +207,28 @@ async fn cmd_run(
         current_batch_index = batch_idx;
 
         for step_name in batch {
+            // Skip steps specified by --skip
+            if skip_steps.contains(step_name) {
+                state.add_step(StepState {
+                    name: step_name.clone(),
+                    status: StepStatus::Skipped,
+                    exit_code: None,
+                    duration_ms: None,
+                    image: pipeline.get_step(step_name).map(|s| s.image.clone()).unwrap_or_default(),
+                    command: pipeline.get_step(step_name).map(|s| s.commands.join(" && ")).unwrap_or_default(),
+                    stdout: None,
+                    stderr: None,
+                    error_context: None,
+                    on_failure: None,
+                    test_summary: None,
+                });
+                if let Some(ref progress) = progress {
+                    progress.lock().unwrap().start_step(step_name);
+                    progress.lock().unwrap().finish_step(step_name, true, std::time::Duration::ZERO);
+                }
+                continue;
+            }
+
             let step = pipeline.get_step(step_name).expect("step must exist").clone();
 
             // Signal step start

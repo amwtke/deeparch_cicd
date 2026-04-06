@@ -148,6 +148,19 @@ pipelight --version
 - **Works** → `OK: pipelight 0.1.0 (installed to /usr/local/bin/pipelight)`
 - **Not found** → warn user to add `~/.cargo/bin` to PATH
 
+### Step 2b2: Run Unit Tests
+
+After a successful build (or when build was skipped but Rust source changed since last test), run all unit and integration tests:
+
+```bash
+cargo test 2>&1
+```
+
+- **All passed** → `tests    OK (N passed)`
+- **Some failed** → show failure details, do NOT proceed to install. Report the failures and stop.
+
+If build was skipped and no Rust source changed, skip tests too.
+
 ### Step 2c: Install Global Skills
 
 Install skills from the repo's `global-skills/` directory to `~/.claude/skills/` so they are available in all projects.
@@ -218,6 +231,7 @@ Environment:
 
 Build:
   cargo build  OK (release, N warnings)  — or SKIPPED (no code changes since last build)
+  cargo test   OK (N passed)  — or SKIPPED (no code changes)
   pipelight    OK installed (/usr/local/bin/pipelight or ~/.cargo/bin/pipelight)  — or OK (up to date, skipped build)
 
 Global Skills:
