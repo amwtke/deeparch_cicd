@@ -43,13 +43,23 @@ digraph pipelight {
 }
 ```
 
+## Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--reinit` | Force regenerate `pipeline.yml` before running, even if one already exists |
+
+Example: `/pipelight-run --reinit`
+
 ## Step 1: Check pipeline.yml Exists
 
-If the project has no `pipeline.yml`, generate one:
+If the project has no `pipeline.yml`, **or the user passed `--reinit`**, generate one:
 
 ```bash
 pipelight init -d .
 ```
+
+When `--reinit` is used, this overwrites the existing `pipeline.yml` with a freshly detected configuration.
 
 Review the generated file and adjust if needed.
 
