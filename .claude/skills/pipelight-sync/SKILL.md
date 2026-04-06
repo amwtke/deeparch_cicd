@@ -75,16 +75,22 @@ After environment check, check whether a rebuild is needed before compiling.
 
 **Skip-build check:**
 
-The marker file `~/.pipelight/build-commit` stores the git commit hash of the last successful build+install. Compare it with the current HEAD:
+The marker file `~/.pipelight/build-commit` stores the git commit hash of the last successful build+install. Check whether any **Rust source or dependency files** changed since that commit:
 
 ```bash
-CURRENT_COMMIT=$(git rev-parse HEAD)
 MARKER_FILE="$HOME/.pipelight/build-commit"
 LAST_BUILD_COMMIT=$(cat "$MARKER_FILE" 2>/dev/null || echo "none")
 ```
 
-- **If `CURRENT_COMMIT == LAST_BUILD_COMMIT`** AND `pipelight --version` works → skip build+install, report: `pipelight    OK (up to date, skipped build)`
-- **Otherwise** → proceed with build+install below
+If `LAST_BUILD_COMMIT` is not "none", check for Rust-relevant changes:
+
+```bash
+git diff --name-only "$LAST_BUILD_COMMIT"..HEAD -- 'src/' 'Cargo.toml' 'Cargo.lock' 'build.rs'
+```
+
+- **If output is empty** (no Rust source/dep changes) AND `pipelight --version` works → skip build+install, report: `pipelight    OK (up to date, skipped build)`
+- **If output is non-empty** (Rust files changed) → proceed with build+install below
+- **If `LAST_BUILD_COMMIT` is "none"** (first time or marker missing) → always build
 
 **Build (only when needed):**
 
@@ -124,7 +130,13 @@ sudo cp target/release/pipelight /usr/local/bin/pipelight 2>/dev/null \
 
 ```bash
 mkdir -p ~/.pipelight
-echo "$CURRENT_COMMIT" > ~/.pipelight/build-commit
+git rev-parse HEAD > ~/.pipelight/build-commit
+```
+
+Note: also update the marker when build is skipped (so future diffs start from the latest HEAD):
+
+```bash
+git rev-parse HEAD > ~/.pipelight/build-commit
 ```
 
 **Verify installation:**
