@@ -1,6 +1,6 @@
 ---
 name: pipelight-run
-description: Use when user asks to run CI/CD pipeline, build project, compile check, run tests via pipelight, or when user says "run pipeline", "pipelight", "CI check". Also use when a pipelight run fails and needs auto-fix retry loop. Covers the full run-parse-fix-retry cycle with JSON output mode.
+description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --dry-run --verbose. Example: /pipelight-run --skip spotbugs,pmd --verbose"
 ---
 
 # /pipelight-run
