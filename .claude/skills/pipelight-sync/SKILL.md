@@ -71,7 +71,22 @@ claude --version     # Claude Code CLI (optional)
   - Others: print install instructions
 - **Installed but not running** (Docker daemon) → warn user to start Docker
 
-After environment check, build the release binary and install it:
+After environment check, check whether a rebuild is needed before compiling.
+
+**Skip-build check:**
+
+The marker file `~/.pipelight/build-commit` stores the git commit hash of the last successful build+install. Compare it with the current HEAD:
+
+```bash
+CURRENT_COMMIT=$(git rev-parse HEAD)
+MARKER_FILE="$HOME/.pipelight/build-commit"
+LAST_BUILD_COMMIT=$(cat "$MARKER_FILE" 2>/dev/null || echo "none")
+```
+
+- **If `CURRENT_COMMIT == LAST_BUILD_COMMIT`** AND `pipelight --version` works → skip build+install, report: `pipelight    OK (up to date, skipped build)`
+- **Otherwise** → proceed with build+install below
+
+**Build (only when needed):**
 
 ```bash
 cargo build --release 2>&1
@@ -103,6 +118,13 @@ cp target/release/pipelight ~/.cargo/bin/pipelight
 # Try /usr/local/bin first (may need sudo)
 sudo cp target/release/pipelight /usr/local/bin/pipelight 2>/dev/null \
   || cp target/release/pipelight ~/.cargo/bin/pipelight
+```
+
+**Write marker after successful install:**
+
+```bash
+mkdir -p ~/.pipelight
+echo "$CURRENT_COMMIT" > ~/.pipelight/build-commit
 ```
 
 **Verify installation:**
@@ -183,8 +205,8 @@ Environment:
   claude       OK 1.x.x (optional)
 
 Build:
-  cargo build  OK (release, N warnings)
-  pipelight    OK installed (/usr/local/bin/pipelight or ~/.cargo/bin/pipelight)
+  cargo build  OK (release, N warnings)  — or SKIPPED (no code changes since last build)
+  pipelight    OK installed (/usr/local/bin/pipelight or ~/.cargo/bin/pipelight)  — or OK (up to date, skipped build)
 
 Global Skills:
   pipelight-run  OK (installed to ~/.claude/skills/)
