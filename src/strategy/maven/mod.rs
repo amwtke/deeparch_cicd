@@ -45,12 +45,9 @@ impl PipelineStrategy for MavenStrategy {
         if info.lint_cmd.is_some() {
             steps.push(checkstyle::step(info));
         }
-        if info.quality_plugins.contains(&"spotbugs".to_string()) {
-            steps.push(spotbugs::step(info));
-        }
-        if info.quality_plugins.contains(&"pmd".to_string()) {
-            steps.push(pmd::step(info));
-        }
+        // SpotBugs and PMD always run — Maven supports CLI invocation without plugin declaration
+        steps.push(spotbugs::step(info));
+        steps.push(pmd::step(info));
         steps.push(BaseStrategy::test_step(info));
         steps.push(package::step(info));
 
@@ -109,11 +106,14 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        assert_eq!(steps.len(), 4);
+        // build, checkstyle, spotbugs, pmd, test, package
+        assert_eq!(steps.len(), 6);
         assert_eq!(steps[0].name, "build");
         assert_eq!(steps[1].name, "checkstyle");
-        assert_eq!(steps[2].name, "test");
-        assert_eq!(steps[3].name, "package");
+        assert_eq!(steps[2].name, "spotbugs");
+        assert_eq!(steps[3].name, "pmd");
+        assert_eq!(steps[4].name, "test");
+        assert_eq!(steps[5].name, "package");
     }
 
     #[test]
@@ -121,10 +121,13 @@ mod tests {
         let info = make_maven_info_without_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        assert_eq!(steps.len(), 3);
+        // build, spotbugs, pmd, test, package (no checkstyle)
+        assert_eq!(steps.len(), 5);
         assert_eq!(steps[0].name, "build");
-        assert_eq!(steps[1].name, "test");
-        assert_eq!(steps[2].name, "package");
+        assert_eq!(steps[1].name, "spotbugs");
+        assert_eq!(steps[2].name, "pmd");
+        assert_eq!(steps[3].name, "test");
+        assert_eq!(steps[4].name, "package");
     }
 
     #[test]

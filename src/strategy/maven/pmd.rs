@@ -3,10 +3,14 @@ use crate::pipeline::{OnFailure, Strategy};
 use crate::strategy::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
+    let cmd = match &info.subdir {
+        Some(subdir) => format!("cd {} && mvn pmd:check", subdir),
+        None => "mvn pmd:check".into(),
+    };
     StepDef {
         name: "pmd".into(),
         image: info.image.clone(),
-        commands: vec!["mvn pmd:check".into()],
+        commands: vec![cmd],
         depends_on: vec!["build".into()],
         on_failure: Some(OnFailure {
             strategy: Strategy::AutoFix,

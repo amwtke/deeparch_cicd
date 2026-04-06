@@ -3,10 +3,14 @@ use crate::pipeline::{OnFailure, Strategy};
 use crate::strategy::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
+    let cmd = match &info.subdir {
+        Some(subdir) => format!("cd {} && ./gradlew check -x test", subdir),
+        None => "./gradlew check -x test".into(),
+    };
     StepDef {
         name: "checkstyle".into(),
         image: info.image.clone(),
-        commands: vec!["./gradlew check -x test".into()],
+        commands: vec![cmd],
         depends_on: vec!["build".into()],
         on_failure: Some(OnFailure {
             strategy: Strategy::AutoFix,

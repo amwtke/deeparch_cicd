@@ -149,7 +149,9 @@ fn adapt_for_subdir(mut info: ProjectInfo, subdir: &str) -> ProjectInfo {
     info.test_cmd = prefix_cmd(info.test_cmd);
     info.lint_cmd = info.lint_cmd.map(prefix_cmd);
     info.fmt_cmd = info.fmt_cmd.map(prefix_cmd);
-    info.source_paths = prefix_path(info.source_paths);
+    // Source paths point to the subdir root (original relative paths like src/main/java/
+    // are internal to the subdir and would create wrong double-prefixed paths)
+    info.source_paths = vec![format!("{}/", subdir)];
     info.config_files = prefix_path(info.config_files);
     info.subdir = Some(subdir.to_string());
     info
