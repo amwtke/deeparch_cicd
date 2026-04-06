@@ -3,10 +3,16 @@ use crate::pipeline::{OnFailure, Strategy};
 use crate::strategy::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
-    let cmd = match &info.subdir {
-        Some(subdir) => format!("cd {} && ./gradlew spotbugsMain", subdir),
-        None => "./gradlew spotbugsMain".into(),
+    let cd_prefix = match &info.subdir {
+        Some(subdir) => format!("cd {} && ", subdir),
+        None => String::new(),
     };
+
+    let cmd = format!(
+        "{}./gradlew spotbugsMain && cp -r build/reports/spotbugs /workspace/pipelight-misc/spotbugs-report 2>/dev/null || true",
+        cd_prefix
+    );
+
     StepDef {
         name: "spotbugs".into(),
         image: info.image.clone(),

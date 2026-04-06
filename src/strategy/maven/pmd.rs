@@ -3,10 +3,22 @@ use crate::pipeline::{OnFailure, Strategy};
 use crate::strategy::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
-    let cmd = match &info.subdir {
-        Some(subdir) => format!("cd {} && mvn pmd:check", subdir),
-        None => "mvn pmd:check".into(),
+    let cd_prefix = match &info.subdir {
+        Some(subdir) => format!("cd {} && ", subdir),
+        None => String::new(),
     };
+
+    // Use custom ruleset if exists, otherwise default rules
+    // Report output goes to pipelight-misc/
+    let cmd = format!(
+        "{}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
+         mvn pmd:pmd -Dpmd.rulesetfiles=/workspace/pipelight-misc/pmd-ruleset.xml \
+         -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; \
+         else mvn pmd:pmd \
+         -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; fi",
+        cd_prefix
+    );
+
     StepDef {
         name: "pmd".into(),
         image: info.image.clone(),

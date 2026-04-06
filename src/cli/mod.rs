@@ -170,6 +170,13 @@ async fn cmd_run(
     let mut state = RunState::new(&run_id, &pipeline.name);
     let pipeline_start = std::time::Instant::now();
 
+    // Ensure pipelight-misc/ directory exists for artifacts and config
+    let misc_dir = project_dir.join("pipelight-misc");
+    if !misc_dir.exists() {
+        std::fs::create_dir_all(&misc_dir)
+            .context("Failed to create pipelight-misc/ directory")?;
+    }
+
     let executor = DockerExecutor::new().await?;
 
     // Set up progress UI (wrapped in Arc<Mutex> so on_log closure can access it)
