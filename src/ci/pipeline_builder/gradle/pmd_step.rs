@@ -2,6 +2,9 @@ use crate::ci::detector::ProjectInfo;
 use crate::ci::parser::{OnFailure, CallbackCommand};
 use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
 
+/// PMD version used for standalone CLI fallback when the Gradle PMD plugin is unavailable.
+const PMD_CLI_VERSION: &str = "7.9.0";
+
 pub struct PmdStep {
     image: String,
     source_paths: Vec<String>,
@@ -24,32 +27,50 @@ impl StepDef for PmdStep {
             Some(subdir) => format!("cd {} && ", subdir),
             None => String::new(),
         };
-        // Check for custom ruleset in pipelight-misc.
-        // If found: inject PMD plugin via init script (if not already present), configure ruleset, run pmdMain.
-        // If not found: emit callback marker and exit 1 so the LLM can search/generate a ruleset.
-        // The init script uses plugins.withId('java') to only apply PMD to Java-enabled projects,
-        // so it works for both single-module and multi-module Gradle projects regardless of
-        // whether the PMD plugin is already configured in build.gradle.
+        // PMD step with two execution paths:
+        //
+        // Path A: Ruleset exists → run PMD
+        //   1. Check if Gradle PMD plugin is available (./gradlew pmdMain --dry-run)
+        //   2a. Plugin exists → configure ruleset via init script, run ./gradlew pmdMain
+        //   2b. Plugin missing → download standalone PMD CLI, scan all src/main/java dirs
+        //
+        // Path B: No ruleset → emit callback for LLM to search/generate one
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
-             cat > /tmp/pmd-init.gradle << 'INITEOF'\n\
-             allprojects {{\n\
-               plugins.withId('java') {{\n\
-                 if (!plugins.hasPlugin('pmd')) {{ apply plugin: 'pmd' }}\n\
-                 pmd {{\n\
-                   ruleSetFiles = files('/workspace/pipelight-misc/pmd-ruleset.xml')\n\
-                   ruleSets = []\n\
-                 }}\n\
-               }}\n\
-             }}\n\
-             INITEOF\n\
-             ./gradlew --init-script /tmp/pmd-init.gradle pmdMain && \
-             mkdir -p /workspace/pipelight-misc/pmd-report && \
-             find . -path '*/build/reports/pmd' -type d -exec cp -r {{}}/* /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
+             if ./gradlew pmdMain --dry-run > /dev/null 2>&1; then \
+               cat > /tmp/pmd-init.gradle << 'INITEOF'\n\
+allprojects {{\n\
+  plugins.withId('pmd') {{\n\
+    pmd {{\n\
+      ruleSetFiles = files('/workspace/pipelight-misc/pmd-ruleset.xml')\n\
+      ruleSets = []\n\
+    }}\n\
+  }}\n\
+}}\n\
+INITEOF\n\
+               ./gradlew --init-script /tmp/pmd-init.gradle pmdMain && \
+               mkdir -p /workspace/pipelight-misc/pmd-report && \
+               find . -path '*/build/reports/pmd' -type d -exec cp -r {{}}/* /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
+             else \
+               echo 'PMD plugin not found in Gradle, using standalone PMD CLI...' && \
+               PMD_DIR=/tmp/pmd-bin-{pmd_ver} && \
+               if [ ! -f $PMD_DIR/bin/pmd ]; then \
+                 curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F{pmd_ver}/pmd-dist-{pmd_ver}-bin.zip -o /tmp/pmd.zip && \
+                 unzip -qo /tmp/pmd.zip -d /tmp/; \
+               fi && \
+               SOURCES=$(find . -path '*/src/main/java' -type d | tr '\\n' ',' | sed 's/,$//') && \
+               if [ -z \"$SOURCES\" ]; then SOURCES=.; fi && \
+               mkdir -p /workspace/pipelight-misc/pmd-report && \
+               $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+                 -R /workspace/pipelight-misc/pmd-ruleset.xml \
+                 -f text --no-cache \
+                 -r /workspace/pipelight-misc/pmd-report/pmd-result.txt || true; \
+             fi; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one.' >&2 && exit 1; \
              fi",
-            cd = cd_prefix
+            cd = cd_prefix,
+            pmd_ver = PMD_CLI_VERSION
         );
         StepConfig {
             name: "pmd".into(),

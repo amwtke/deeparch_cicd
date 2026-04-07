@@ -193,14 +193,16 @@ mod tests {
     }
 
     #[test]
-    fn test_pmd_init_script_injects_plugin() {
+    fn test_pmd_step_has_standalone_fallback() {
         let info = make_gradle_info_without_lint();
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
         let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
         let cmd = &pmd_cfg.commands[0];
-        assert!(cmd.contains("apply plugin: 'pmd'"), "init script should inject PMD plugin");
-        assert!(cmd.contains("plugins.withId('java')"), "init script should only apply to Java projects");
+        assert!(cmd.contains("pmdMain --dry-run"), "should check if Gradle PMD plugin exists");
+        assert!(cmd.contains("pmd-init.gradle"), "should use init script when plugin exists");
+        assert!(cmd.contains("standalone PMD CLI"), "should fall back to standalone PMD");
+        assert!(cmd.contains("pmd check"), "should have standalone pmd check command");
     }
 
     #[test]
