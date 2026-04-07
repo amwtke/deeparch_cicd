@@ -191,6 +191,59 @@ mod tests {
     }
 
     #[test]
+    fn test_pmd_step_uses_auto_gen_strategy() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let of = pmd_cfg.on_failure.unwrap();
+        assert_eq!(of.callback_command, CallbackCommand::AutoGenPmdRuleset);
+        assert_eq!(of.max_retries, 2);
+    }
+
+    #[test]
+    fn test_pmd_step_command_has_callback() {
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset"));
+        assert!(cmd.contains("pipelight-misc/pmd-ruleset.xml"));
+    }
+
+    #[test]
+    fn test_spotbugs_step_uses_autofix() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let cfg = steps.iter().find(|s| s.config().name == "spotbugs").unwrap().config();
+        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::AutoFix);
+    }
+
+    #[test]
+    fn test_checkstyle_step_uses_autofix() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let cfg = steps.iter().find(|s| s.config().name == "checkstyle").unwrap().config();
+        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::AutoFix);
+    }
+
+    #[test]
+    fn test_package_step_uses_abort() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let cfg = steps.iter().find(|s| s.config().name == "package").unwrap().config();
+        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::Abort);
+    }
+
+    #[test]
     fn test_parse_maven_test_single_module() {
         let output = "Tests run: 42, Failures: 0, Errors: 0, Skipped: 2";
         assert_eq!(parse_maven_test(output).unwrap(), "40 passed, 0 failed, 2 skipped");

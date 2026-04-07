@@ -1,5 +1,5 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, Strategy};
+use crate::ci::parser::{OnFailure, CallbackCommand};
 use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
 
 pub struct MypyStep {
@@ -24,7 +24,7 @@ impl StepDef for MypyStep {
             commands: vec!["pip install mypy && mypy .".into()],
             depends_on: vec!["build".into()],
             on_failure: Some(OnFailure {
-                strategy: Strategy::AutoFix,
+                callback_command: CallbackCommand::AutoFix,
                 max_retries: 2,
                 context_paths: self.source_paths.clone(),
             }),

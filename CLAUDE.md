@@ -32,6 +32,32 @@ Pipeline 模型层       → YAML → DAG 解析, 变量插值, 条件表达式
 - 环境变量支持 `${VAR}` 插值语法
 - 并行执行无依赖关系的 step
 
+## Skill 回调 (Skill Callback)
+Pipelight 与调用它的 LLM 之间的协作协议。Pipelight 本身不执行智能操作（搜索文档、生成配置、修复代码），
+而是通过 JSON 输出中的 **回调命令 (CallbackCommand)** 告知 LLM 应当执行的操作，LLM 按照 skill 中的指令完成后重试。
+
+### 回调命令 (CallbackCommand)
+定义在 `src/ci/parser/mod.rs` 的 `CallbackCommand` 枚举，YAML/JSON 字段名为 `on_failure.callback_command`：
+- `auto_fix` — 通知 LLM 自动修复源代码，然后 retry 该 step
+- `auto_gen_pmd_ruleset` — 通知 LLM 搜索项目中的 PMD ruleset 或 coding guideline 文档，生成 `pipelight-misc/pmd-ruleset.xml`，然后 retry 该 step；若都找不到则 skip PMD
+- `abort` — 不可重试，直接标记为 failed
+- `notify` — 不可重试，通知用户
+
+### 回调协议流程
+```
+Pipelight step 失败 → JSON 输出包含 callback_command + stderr
+    ↓
+pipelight-run skill 根据 callback_command 指导 LLM 执行相应操作
+    ↓
+LLM 完成操作（修复代码 / 生成配置 / 跳过 step）
+    ↓
+pipelight retry --step <name> 重试
+```
+
+### 术语约定
+- 当说 **"skill 回调"** 时，指的就是这种 pipelight ↔ LLM 之间的回调设计模式
+- 当说 **"回调命令"** 时，指的是 `CallbackCommand` 枚举中的具体值（如 `auto_fix`、`auto_gen_pmd_ruleset`）
+
 ## 目录结构
 ```
 src/

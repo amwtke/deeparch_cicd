@@ -1,5 +1,5 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, Strategy};
+use crate::ci::parser::{OnFailure, CallbackCommand};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct TestStep {
@@ -31,7 +31,7 @@ impl StepDef for TestStep {
             commands: self.test_cmd.clone(),
             depends_on: vec!["build".into()],
             on_failure: Some(OnFailure {
-                strategy: Strategy::Notify,
+                callback_command: CallbackCommand::Notify,
                 max_retries: 0,
                 context_paths: vec![],
             }),
@@ -58,7 +58,7 @@ impl StepDef for TestStep {
 mod tests {
     use super::*;
     use crate::ci::detector::{ProjectInfo, ProjectType};
-    use crate::ci::parser::Strategy;
+    use crate::ci::parser::CallbackCommand;
 
     fn make_info() -> ProjectInfo {
         ProjectInfo {
@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(cfg.name, "test");
         assert_eq!(cfg.depends_on, vec!["build"]);
         let on_failure = cfg.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.strategy, Strategy::Notify);
+        assert_eq!(on_failure.callback_command, CallbackCommand::Notify);
         assert_eq!(on_failure.max_retries, 0);
     }
 

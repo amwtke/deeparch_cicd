@@ -1,5 +1,5 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, Strategy};
+use crate::ci::parser::{OnFailure, CallbackCommand};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct PackageStep {
@@ -25,7 +25,7 @@ impl StepDef for PackageStep {
             commands: vec![cmd],
             depends_on: vec!["test".into()],
             on_failure: Some(OnFailure {
-                strategy: Strategy::Abort,
+                callback_command: CallbackCommand::Abort,
                 max_retries: 0,
                 context_paths: vec![],
             }),

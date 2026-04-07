@@ -72,16 +72,17 @@ fn is_false(b: &bool) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Strategy {
+pub enum CallbackCommand {
     Abort,
     AutoFix,
+    AutoGenPmdRuleset,
     Notify,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnFailure {
-    #[serde(default = "default_strategy")]
-    pub strategy: Strategy,
+    #[serde(default = "default_callback_command")]
+    pub callback_command: CallbackCommand,
 
     #[serde(default)]
     pub max_retries: u32,
@@ -90,8 +91,8 @@ pub struct OnFailure {
     pub context_paths: Vec<String>,
 }
 
-fn default_strategy() -> Strategy {
-    Strategy::Abort
+fn default_callback_command() -> CallbackCommand {
+    CallbackCommand::Abort
 }
 
 impl Pipeline {
@@ -175,7 +176,7 @@ steps:
     commands:
       - cargo build
     on_failure:
-      strategy: auto_fix
+      callback_command: auto_fix
       max_retries: 3
       context_paths:
         - src/
@@ -184,7 +185,7 @@ steps:
         let pipeline = Pipeline::from_str(yaml).unwrap();
         let step = &pipeline.steps[0];
         let on_failure = step.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.strategy, Strategy::AutoFix);
+        assert_eq!(on_failure.callback_command, CallbackCommand::AutoFix);
         assert_eq!(on_failure.max_retries, 3);
         assert_eq!(on_failure.context_paths, vec!["src/", "Cargo.toml"]);
     }
@@ -214,12 +215,12 @@ steps:
     commands:
       - cargo test
     on_failure:
-      strategy: notify
+      callback_command: notify
 "#;
         let pipeline = Pipeline::from_str(yaml).unwrap();
         let step = &pipeline.steps[0];
         let on_failure = step.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.strategy, Strategy::Notify);
+        assert_eq!(on_failure.callback_command, CallbackCommand::Notify);
         assert_eq!(on_failure.max_retries, 0);
         assert!(on_failure.context_paths.is_empty());
     }
@@ -354,11 +355,66 @@ steps:
     image: rust:1.78
     commands: [echo hi]
     on_failure:
-      strategy: abort
+      callback_command: abort
 "#;
         let pipeline = Pipeline::from_str(yaml).unwrap();
         let of = pipeline.steps[0].on_failure.as_ref().unwrap();
-        assert_eq!(of.strategy, Strategy::Abort);
+        assert_eq!(of.callback_command, CallbackCommand::Abort);
+    }
+
+    #[test]
+    fn test_on_failure_auto_gen_pmd_ruleset_strategy() {
+        let yaml = r#"
+name: test
+steps:
+  - name: pmd
+    image: gradle:8-jdk17
+    commands: [echo hi]
+    on_failure:
+      callback_command: auto_gen_pmd_ruleset
+      max_retries: 2
+      context_paths: ["src/"]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let of = pipeline.steps[0].on_failure.as_ref().unwrap();
+        assert_eq!(of.callback_command, CallbackCommand::AutoGenPmdRuleset);
+        assert_eq!(of.max_retries, 2);
+        assert_eq!(of.context_paths, vec!["src/"]);
+    }
+
+    #[test]
+    fn test_strategy_serde_roundtrip_all_variants() {
+        for (yaml_val, expected) in [
+            ("abort", CallbackCommand::Abort),
+            ("auto_fix", CallbackCommand::AutoFix),
+            ("auto_gen_pmd_ruleset", CallbackCommand::AutoGenPmdRuleset),
+            ("notify", CallbackCommand::Notify),
+        ] {
+            let yaml = format!(
+                r#"
+name: test
+steps:
+  - name: s
+    image: alpine
+    commands: [echo]
+    on_failure:
+      callback_command: {}
+"#,
+                yaml_val
+            );
+            let pipeline = Pipeline::from_str(&yaml).unwrap();
+            let of = pipeline.steps[0].on_failure.as_ref().unwrap();
+            assert_eq!(of.callback_command, expected, "failed for yaml value: {}", yaml_val);
+
+            // Verify serialization roundtrip
+            let serialized = serde_yaml::to_string(&pipeline).unwrap();
+            assert!(
+                serialized.contains(yaml_val),
+                "serialized YAML should contain '{}', got: {}",
+                yaml_val,
+                serialized
+            );
+        }
     }
 
     #[test]

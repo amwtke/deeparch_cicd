@@ -1,5 +1,5 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, Strategy};
+use crate::ci::parser::{OnFailure, CallbackCommand};
 use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
 
 pub struct BuildStep {
@@ -27,7 +27,7 @@ impl StepDef for BuildStep {
             image: self.image.clone(),
             commands: self.build_cmd.clone(),
             on_failure: Some(OnFailure {
-                strategy: Strategy::AutoFix,
+                callback_command: CallbackCommand::AutoFix,
                 max_retries: 3,
                 context_paths: [&self.source_paths[..], &self.config_files[..]].concat(),
             }),
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(cfg.commands, vec!["cargo build"]);
         assert!(cfg.depends_on.is_empty());
         let on_failure = cfg.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.strategy, Strategy::AutoFix);
+        assert_eq!(on_failure.callback_command, CallbackCommand::AutoFix);
         assert_eq!(on_failure.max_retries, 3);
         assert!(on_failure.context_paths.contains(&"src/".to_string()));
         assert!(on_failure.context_paths.contains(&"Cargo.toml".to_string()));

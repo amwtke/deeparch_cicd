@@ -32,7 +32,7 @@ pub struct ErrorContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnFailureState {
-    pub strategy: String,
+    pub callback_command: String,
     pub max_retries: u32,
     pub retries_remaining: u32,
     pub context_paths: Vec<String>,
@@ -202,7 +202,7 @@ mod tests {
             stderr: Some("error".into()),
             error_context: None,
             on_failure: Some(OnFailureState {
-                strategy: "auto_fix".into(),
+                callback_command: "auto_fix".into(),
                 max_retries: 3,
                 retries_remaining: 3,
                 context_paths: vec!["src/".into()],
@@ -260,7 +260,7 @@ mod tests {
                 error_type: "test_failure".into(),
             }),
             on_failure: Some(OnFailureState {
-                strategy: "auto_fix".into(),
+                callback_command: "auto_fix".into(),
                 max_retries: 3,
                 retries_remaining: 2,
                 context_paths: vec!["src/".into()],
@@ -307,7 +307,7 @@ mod tests {
             stderr: None,
             error_context: None,
             on_failure: Some(OnFailureState {
-                strategy: "auto_fix".into(),
+                callback_command: "auto_fix".into(),
                 max_retries: 1,
                 retries_remaining: 1,
                 context_paths: vec![],

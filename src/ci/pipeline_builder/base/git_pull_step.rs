@@ -1,4 +1,4 @@
-use crate::ci::parser::{OnFailure, Strategy};
+use crate::ci::parser::{OnFailure, CallbackCommand};
 use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
 
 pub struct GitPullStep;
@@ -27,7 +27,7 @@ impl StepDef for GitPullStep {
                 "~/.gitconfig:/root/.gitconfig:ro".into(),
             ],
             on_failure: Some(OnFailure {
-                strategy: Strategy::Abort,
+                callback_command: CallbackCommand::Abort,
                 max_retries: 0,
                 context_paths: vec![],
             }),
@@ -63,7 +63,7 @@ impl StepDef for GitPullStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ci::parser::Strategy;
+    use crate::ci::parser::CallbackCommand;
 
     #[test]
     fn test_config() {
@@ -75,7 +75,7 @@ mod tests {
         assert!(cfg.volumes.iter().any(|v| v.contains(".ssh")));
         assert!(cfg.volumes.iter().any(|v| v.contains(".gitconfig")));
         let on_failure = cfg.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.strategy, Strategy::Abort);
+        assert_eq!(on_failure.callback_command, CallbackCommand::Abort);
         assert_eq!(on_failure.max_retries, 0);
     }
 

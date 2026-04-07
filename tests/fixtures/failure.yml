@@ -6,4 +6,4 @@ steps:
       - echo "about to fail"
       - exit 1
     on_failure:
-      strategy: abort
+      callback_command: abort

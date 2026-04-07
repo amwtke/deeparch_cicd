@@ -174,6 +174,67 @@ mod tests {
     }
 
     #[test]
+    fn test_pmd_step_uses_auto_gen_strategy() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let on_failure = pmd_cfg.on_failure.unwrap();
+        assert_eq!(on_failure.callback_command, CallbackCommand::AutoGenPmdRuleset);
+    }
+
+    #[test]
+    fn test_pmd_step_command_checks_ruleset() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("pipelight-misc/pmd-ruleset.xml"), "should check for ruleset");
+        assert!(cmd.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset"), "should emit callback when no ruleset");
+        assert!(cmd.contains("pmd-init.gradle"), "should use init script for custom ruleset");
+    }
+
+    #[test]
+    fn test_spotbugs_step_uses_autofix() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let cfg = steps.iter().find(|s| s.config().name == "spotbugs").unwrap().config();
+        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::AutoFix);
+    }
+
+    #[test]
+    fn test_checkstyle_step_uses_autofix() {
+        use crate::ci::parser::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let cfg = steps.iter().find(|s| s.config().name == "checkstyle").unwrap().config();
+        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::AutoFix);
+    }
+
+    #[test]
+    fn test_pmd_step_collects_multimodule_reports() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("find . -path"), "should collect multi-module reports via find");
+        assert!(cmd.contains("pipelight-misc/pmd-report"), "should copy reports to pipelight-misc");
+    }
+
+    #[test]
+    fn test_pmd_report_callback_message() {
+        let pmd = pmd_step::PmdStep::new(&make_gradle_info_with_lint());
+        let report = pmd.output_report_str(false, "", "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset");
+        assert_eq!(report, "pmd: ruleset not found (callback)");
+    }
+
+    #[test]
     fn test_parse_gradle_test_basic() {
         let output = "10 tests completed, 0 failed";
         assert_eq!(parse_gradle_test(output).unwrap(), "10 passed, 0 failed, 0 skipped");

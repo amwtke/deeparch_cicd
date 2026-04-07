@@ -103,7 +103,7 @@ JSON structure:
       "stderr": "...",
       "error_context": { "files": [...], "lines": [...], "error_type": "..." },
       "on_failure": {
-        "strategy": "autofix | abort | notify",
+        "callback_command": "auto_fix | auto_gen_pmd_ruleset | abort | notify",
         "max_retries": 3,
         "retries_remaining": 3,
         "context_paths": ["src/", "Cargo.toml"]
@@ -185,6 +185,110 @@ When auto-fixing failures, you may ONLY modify **application source code** (`.ja
 2. Re-run with `--skip pmd,spotbugs` to skip those steps
 
 **The only files auto-fix should create** are pipelight-misc config files (`pmd-ruleset.xml`, `spotbugs-exclude.xml`) to tune rule severity — never project build files.
+
+## PMD Callback Protocol: `auto_gen_pmd_ruleset`
+
+When the PMD step fails with `callback_command: "auto_gen_pmd_ruleset"` and stderr contains `PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset`, this is a **callback** — pipelight is asking the LLM to find or generate a PMD ruleset before retrying.
+
+### Callback Flow
+
+```dot
+digraph pmd_callback {
+    "PMD step fails\nstrategy=auto_gen_pmd_ruleset" [shape=box];
+    "Search project for\nexisting pmd-ruleset.xml" [shape=box];
+    "Found?" [shape=diamond];
+    "Copy to pipelight-misc/\npmd-ruleset.xml" [shape=box];
+    "Search for coding\nguideline docs" [shape=box];
+    "Found docs?" [shape=diamond];
+    "Read docs & generate\npmd-ruleset.xml" [shape=box];
+    "Skip PMD\n--skip pmd" [shape=box];
+    "Retry PMD step" [shape=doublecircle];
+
+    "PMD step fails\nstrategy=auto_gen_pmd_ruleset" -> "Search project for\nexisting pmd-ruleset.xml";
+    "Search project for\nexisting pmd-ruleset.xml" -> "Found?";
+    "Found?" -> "Copy to pipelight-misc/\npmd-ruleset.xml" [label="yes"];
+    "Found?" -> "Search for coding\nguideline docs" [label="no"];
+    "Copy to pipelight-misc/\npmd-ruleset.xml" -> "Retry PMD step";
+    "Search for coding\nguideline docs" -> "Found docs?";
+    "Found docs?" -> "Read docs & generate\npmd-ruleset.xml" [label="yes"];
+    "Found docs?" -> "Skip PMD\n--skip pmd" [label="no"];
+    "Read docs & generate\npmd-ruleset.xml" -> "Retry PMD step";
+}
+```
+
+### Step 1: Search for Existing `pmd-ruleset.xml`
+
+Search the project (including subdirectories/modules) for existing PMD ruleset files:
+
+```
+# Search patterns, in priority order:
+pmd-ruleset.xml
+pmd.xml
+ruleset.xml (only in directories that suggest PMD context)
+config/pmd/*.xml
+**/pmd-ruleset.xml
+```
+
+For **multi-module Gradle/Maven** projects, also search inside each module directory (e.g. `module-a/config/pmd/`).
+
+If found:
+1. Copy the file to `pipelight-misc/pmd-ruleset.xml`
+2. Retry the PMD step: `pipelight retry --run-id <same-id> --step pmd -f pipeline.yml --output json`
+
+### Step 2: Search for Coding Guideline Documents
+
+If no PMD ruleset file exists, search for coding standard/guideline documents:
+
+```
+# Search patterns:
+**/coding-guide*.md
+**/coding-guide*.pdf
+**/coding-standard*.md
+**/coding-standard*.pdf
+**/code-style*.md
+**/code-style*.pdf
+**/CONTRIBUTING.md (may contain code style section)
+**/style-guide*.md
+**/checkstyle*.xml (can be partially converted)
+```
+
+If found:
+1. Read the document content (for PDFs, extract the text)
+2. Analyze the coding rules described in the document
+3. Generate a valid PMD ruleset XML that maps the documented rules to PMD rule references
+4. Write the generated ruleset to `pipelight-misc/pmd-ruleset.xml`
+5. Organize supplementary files under `pipelight-misc/pmd/` if needed (e.g. `pipelight-misc/pmd/source-guideline.md` for traceability)
+6. Retry the PMD step: `pipelight retry --run-id <same-id> --step pmd -f pipeline.yml --output json`
+
+**PMD ruleset XML template:**
+
+```xml
+<?xml version="1.0"?>
+<ruleset name="Project Rules"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>Auto-generated from project coding guidelines</description>
+
+    <!-- Map each guideline rule to a PMD rule reference -->
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField" />
+    <rule ref="category/java/codestyle.xml/MethodNamingConventions" />
+    <!-- ... more rules based on the guideline content ... -->
+</ruleset>
+```
+
+### Step 3: No Guidelines Found — Skip PMD
+
+If neither a ruleset file nor coding guideline documents are found:
+1. Report to user: "No PMD ruleset or coding guidelines found in project — skipping PMD step"
+2. Re-run the pipeline with `--skip pmd`: `pipelight run -f pipeline.yml --output json --run-id <new-id> --skip pmd`
+
+### Handling Subsequent PMD Failures (Violations)
+
+After the LLM successfully places a ruleset and retries, the PMD step may fail again — this time with **actual PMD violations** (stderr will NOT contain `PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset`). In this case, treat it like a normal `auto_fix` failure:
+1. Read the violations from stderr/stdout
+2. Fix the source code
+3. Retry the PMD step
 
 ## Common Mistakes
 

@@ -185,7 +185,7 @@ fn json_status_failed_pipeline_structure() {
                     "error_type": "compilation_error"
                 },
                 "on_failure": {
-                    "strategy": "auto_fix",
+                    "callback_command": "auto_fix",
                     "max_retries": 3,
                     "retries_remaining": 2,
                     "context_paths": ["src/"]
@@ -233,7 +233,7 @@ fn json_status_failed_pipeline_structure() {
 
     // on_failure structure
     let of = &build["on_failure"];
-    assert_eq!(of["strategy"].as_str().unwrap(), "auto_fix");
+    assert_eq!(of["callback_command"].as_str().unwrap(), "auto_fix");
     assert_eq!(of["max_retries"].as_u64().unwrap(), 3);
     assert_eq!(of["retries_remaining"].as_u64().unwrap(), 2);
     assert_eq!(of["context_paths"][0].as_str().unwrap(), "src/");
@@ -267,7 +267,7 @@ fn json_status_retryable_pipeline() {
                 "stderr": "warning turned error",
                 "error_context": null,
                 "on_failure": {
-                    "strategy": "auto_fix",
+                    "callback_command": "auto_fix",
                     "max_retries": 2,
                     "retries_remaining": 2,
                     "context_paths": ["src/"]
@@ -581,8 +581,8 @@ fn json_real_execution_retryable() {
     let step = &json["steps"][0];
     assert_eq!(step["status"].as_str().unwrap(), "failed");
     let of = &step["on_failure"];
-    // Strategy is serialized via Debug as "autofix" (lowercased AutoFix)
-    assert_eq!(of["strategy"].as_str().unwrap(), "autofix");
+    // CallbackCommand is serialized via match to "auto_fix"
+    assert_eq!(of["callback_command"].as_str().unwrap(), "auto_fix");
     assert_eq!(of["max_retries"].as_u64().unwrap(), 3);
     assert_eq!(of["retries_remaining"].as_u64().unwrap(), 3);
 }

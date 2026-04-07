@@ -5,7 +5,7 @@ steps:
     commands:
       - exit 1
     on_failure:
-      strategy: abort
+      callback_command: abort
 
   - name: step-b
     image: alpine:latest

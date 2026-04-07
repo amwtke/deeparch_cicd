@@ -6,7 +6,7 @@ use crate::ci::executor::DockerExecutor;
 use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::ci::output::{resolve_output_mode, OutputMode};
 use crate::ci::output::{json, plain};
-use crate::ci::parser::{Pipeline, Strategy};
+use crate::ci::parser::{Pipeline, CallbackCommand};
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 use crate::ci::scheduler::Scheduler;
 
@@ -317,7 +317,12 @@ async fn cmd_run(
             let on_failure_state = pipeline_step
                 .and_then(|s| s.on_failure.as_ref())
                 .map(|of| OnFailureState {
-                    strategy: format!("{:?}", of.strategy).to_lowercase(),
+                    callback_command: match of.callback_command {
+                        CallbackCommand::Abort => "abort",
+                        CallbackCommand::AutoFix => "auto_fix",
+                        CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
+                        CallbackCommand::Notify => "notify",
+                    }.to_string(),
                     max_retries: of.max_retries,
                     retries_remaining: of.max_retries,
                     context_paths: of.context_paths.clone(),
@@ -358,17 +363,17 @@ async fn cmd_run(
             // Handle failure
             let allow_failure = pipeline_step.map(|s| s.allow_failure).unwrap_or(false);
             if !result.success && !allow_failure {
-                let strategy = pipeline_step
+                let callback_cmd = pipeline_step
                     .and_then(|s| s.on_failure.as_ref())
-                    .map(|of| &of.strategy)
-                    .unwrap_or(&Strategy::Abort);
+                    .map(|of| &of.callback_command)
+                    .unwrap_or(&CallbackCommand::Abort);
 
-                match strategy {
-                    Strategy::AutoFix => {
+                match callback_cmd {
+                    CallbackCommand::AutoFix | CallbackCommand::AutoGenPmdRuleset => {
                         has_retryable_failure = true;
                         break 'outer;
                     }
-                    Strategy::Abort | Strategy::Notify => {
+                    CallbackCommand::Abort | CallbackCommand::Notify => {
                         has_final_failure = true;
                         break 'outer;
                     }
@@ -610,7 +615,7 @@ async fn cmd_retry(
         s.status == StepStatus::Failed
             && s.on_failure
                 .as_ref()
-                .map(|of| of.strategy == "auto_fix" && of.retries_remaining > 0)
+                .map(|of| (of.callback_command == "auto_fix" || of.callback_command == "auto_gen_pmd_ruleset") && of.retries_remaining > 0)
                 .unwrap_or(false)
     });
 
@@ -716,7 +721,7 @@ async fn cmd_list_steps(dir: PathBuf) -> Result<i32> {
         if let Some(ref on_failure) = step.on_failure {
             println!(
                 "     failure:  {} (max retries: {})",
-                style(format!("{:?}", on_failure.strategy).to_lowercase()).yellow(),
+                style(format!("{:?}", on_failure.callback_command).to_lowercase()).yellow(),
                 on_failure.max_retries
             );
         }
@@ -788,6 +793,26 @@ mod tests {
         let path = write_step_report(dir.path(), "lint", "", "");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.is_empty());
+    }
+
+    #[test]
+    fn test_strategy_to_string_all_variants() {
+        use crate::ci::parser::CallbackCommand;
+        let cases = [
+            (CallbackCommand::Abort, "abort"),
+            (CallbackCommand::AutoFix, "auto_fix"),
+            (CallbackCommand::AutoGenPmdRuleset, "auto_gen_pmd_ruleset"),
+            (CallbackCommand::Notify, "notify"),
+        ];
+        for (variant, expected) in &cases {
+            let result = match variant {
+                CallbackCommand::Abort => "abort",
+                CallbackCommand::AutoFix => "auto_fix",
+                CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
+                CallbackCommand::Notify => "notify",
+            };
+            assert_eq!(result, *expected, "CallbackCommand::{:?} should serialize to '{}'", variant, expected);
+        }
     }
 
     #[test]
