@@ -35,16 +35,18 @@ Pipeline 模型层       → YAML → DAG 解析, 变量插值, 条件表达式
 ## 目录结构
 ```
 src/
-  main.rs                    → 入口
-  cli/mod.rs                  → clap 命令定义
-  pipeline/mod.rs             → YAML 解析 & Pipeline 数据模型
-  scheduler/mod.rs            → DAG 构建 & 拓扑排序调度
-  executor/mod.rs             → Docker 容器执行器
-  output/mod.rs               → 终端日志输出格式化
-  detector/                   → 项目类型检测 (策略模式)
-    base/mod.rs               → ProjectDetector trait, ProjectInfo, ProjectType, 检测编排
-    maven.rs / gradle.rs / …  → 各语言检测策略实现
-  pipeline_gen/               → 流水线生成 (策略模式)
-    base/mod.rs               → BaseStrategy 共享 step 构建器
-    maven/ / rust_lang/ / …   → 各语言流水线步骤策略实现
+  main.rs              → 入口
+  cli/                 → clap 命令定义
+  run_state/           → 运行状态持久化
+  ci/                  → CI 流水线核心 (6 个阶段)
+    detector/          → 检测器: 项目类型检测 (策略模式)
+      base/mod.rs      →   ProjectDetector trait, ProjectInfo, ProjectType, 检测编排
+      maven.rs / …     →   各语言检测策略实现
+    builder/           → 构建器: 流水线步骤生成 (策略模式)
+      base/mod.rs      →   BaseStrategy 共享 step 工厂方法
+      maven/ / …       →   各语言流水线步骤策略实现
+    parser/            → 解析器: Pipeline YAML 解析 & 校验
+    scheduler/         → 调度器: DAG 构建 & 拓扑排序
+    executor/          → 执行器: Docker 容器执行
+    output/            → 输出器: 终端日志格式化 (tty/plain/json)
 ```

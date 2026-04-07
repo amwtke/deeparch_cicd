@@ -1,11 +1,6 @@
+mod ci;
 mod cli;
-mod detector;
-mod executor;
-mod output;
-mod pipeline;
 mod run_state;
-mod scheduler;
-mod pipeline_gen;
 
 use clap::Parser;
 

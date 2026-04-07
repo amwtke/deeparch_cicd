@@ -2,13 +2,13 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use crate::executor::DockerExecutor;
-use crate::output::tty::{PipelineProgressUI, PipelineReporter};
-use crate::output::{resolve_output_mode, OutputMode};
-use crate::output::{json, plain};
-use crate::pipeline::{Pipeline, Strategy};
+use crate::ci::executor::DockerExecutor;
+use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
+use crate::ci::output::{resolve_output_mode, OutputMode};
+use crate::ci::output::{json, plain};
+use crate::ci::parser::{Pipeline, Strategy};
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
-use crate::scheduler::Scheduler;
+use crate::ci::scheduler::Scheduler;
 
 #[derive(Parser)]
 #[command(name = "pipelight", version, about = "Lightweight CLI CI/CD tool")]
@@ -201,7 +201,7 @@ async fn cmd_run(
     let mut has_retryable_failure = false;
     let mut current_batch_index = 0;
     let mut step_results: Vec<(String, std::time::Duration, bool)> = Vec::new();
-    let mut test_summary: Option<crate::pipeline_gen::test_parser::TestSummary> = None;
+    let mut test_summary: Option<crate::ci::builder::test_parser::TestSummary> = None;
 
     'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
         current_batch_index = batch_idx;
@@ -293,7 +293,7 @@ async fn cmd_run(
             // Parse test output if this is a test step
             let step_test_summary = if step_name == "test" {
                 let full_output = format!("{}{}", &stdout, &stderr);
-                if let Some(strategy) = crate::pipeline_gen::strategy_for_pipeline(&pipeline) {
+                if let Some(strategy) = crate::ci::builder::strategy_for_pipeline(&pipeline) {
                     let parsed = strategy.parse_test_output(&full_output);
                     if parsed.is_some() {
                         test_summary = parsed.clone();
@@ -605,7 +605,7 @@ async fn cmd_retry(
 }
 
 async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
-    use crate::detector;
+    use crate::ci::detector;
 
     let (info, pipeline) = detector::detect_and_generate(&dir)?;
 
