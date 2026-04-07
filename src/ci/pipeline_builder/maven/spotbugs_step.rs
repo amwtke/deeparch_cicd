@@ -1,0 +1,56 @@
+use crate::ci::detector::ProjectInfo;
+use crate::ci::parser::{OnFailure, Strategy};
+use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+
+pub struct SpotbugsStep {
+    image: String,
+    source_paths: Vec<String>,
+    subdir: Option<String>,
+}
+
+impl SpotbugsStep {
+    pub fn new(info: &ProjectInfo) -> Self {
+        Self {
+            image: info.image.clone(),
+            source_paths: info.source_paths.clone(),
+            subdir: info.subdir.clone(),
+        }
+    }
+}
+
+impl StepDef for SpotbugsStep {
+    fn config(&self) -> StepConfig {
+        let cd_prefix = match &self.subdir {
+            Some(subdir) => format!("cd {} && ", subdir),
+            None => String::new(),
+        };
+        let cmd = format!(
+            "{}if [ -f /workspace/pipelight-misc/spotbugs-exclude.xml ]; then \
+             mvn spotbugs:spotbugs -Dspotbugs.excludeFilterFile=/workspace/pipelight-misc/spotbugs-exclude.xml \
+             -Dspotbugs.xmlOutputDirectory=/workspace/pipelight-misc/spotbugs-report; \
+             else mvn spotbugs:spotbugs \
+             -Dspotbugs.xmlOutputDirectory=/workspace/pipelight-misc/spotbugs-report; fi",
+            cd_prefix
+        );
+        StepConfig {
+            name: "spotbugs".into(),
+            image: self.image.clone(),
+            commands: vec![cmd],
+            depends_on: vec!["build".into()],
+            on_failure: Some(OnFailure {
+                strategy: Strategy::AutoFix,
+                max_retries: 2,
+                context_paths: self.source_paths.clone(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        let bugs = count_pattern(&output, &["Bug", "bug"]);
+        if success { "spotbugs: no bugs found".into() }
+        else if bugs > 0 { format!("spotbugs: {} bugs found", bugs) }
+        else { "spotbugs: failed".into() }
+    }
+}
