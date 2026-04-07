@@ -306,6 +306,11 @@ async fn cmd_run(
                 None
             };
 
+            // Write error log to pipelight-misc/ when a step fails
+            if !result.success {
+                write_error_log(&misc_dir, step_name, &stdout, &stderr);
+            }
+
             state.add_step(StepState {
                 name: result.step_name.clone(),
                 status: step_status,
@@ -639,6 +644,24 @@ async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
     Ok(0)
 }
 
+/// Write failed step's stdout/stderr to pipelight-misc/<step_name>.log
+fn write_error_log(misc_dir: &std::path::Path, step_name: &str, stdout: &str, stderr: &str) {
+    let log_path = misc_dir.join(format!("{}.log", step_name));
+    let mut log_content = String::new();
+    if !stdout.is_empty() {
+        log_content.push_str(stdout);
+    }
+    if !stderr.is_empty() {
+        if !log_content.is_empty() {
+            log_content.push('\n');
+        }
+        log_content.push_str(stderr);
+    }
+    if let Err(e) = std::fs::write(&log_path, &log_content) {
+        tracing::warn!("Failed to write error log to {}: {}", log_path.display(), e);
+    }
+}
+
 async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
     let base = RunState::default_base_dir();
     let state = RunState::load(&base, &run_id)?;
@@ -649,4 +672,48 @@ async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_write_error_log_both_stdout_and_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        write_error_log(dir.path(), "build", "compile output", "error: failed");
+        let content = std::fs::read_to_string(dir.path().join("build.log")).unwrap();
+        assert_eq!(content, "compile output\nerror: failed");
+    }
+
+    #[test]
+    fn test_write_error_log_stdout_only() {
+        let dir = tempfile::tempdir().unwrap();
+        write_error_log(dir.path(), "test", "test output here", "");
+        let content = std::fs::read_to_string(dir.path().join("test.log")).unwrap();
+        assert_eq!(content, "test output here");
+    }
+
+    #[test]
+    fn test_write_error_log_stderr_only() {
+        let dir = tempfile::tempdir().unwrap();
+        write_error_log(dir.path(), "package", "", "fatal error");
+        let content = std::fs::read_to_string(dir.path().join("package.log")).unwrap();
+        assert_eq!(content, "fatal error");
+    }
+
+    #[test]
+    fn test_write_error_log_empty_output() {
+        let dir = tempfile::tempdir().unwrap();
+        write_error_log(dir.path(), "lint", "", "");
+        let content = std::fs::read_to_string(dir.path().join("lint.log")).unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[test]
+    fn test_write_error_log_file_naming() {
+        let dir = tempfile::tempdir().unwrap();
+        write_error_log(dir.path(), "fmt-check", "", "bad format");
+        assert!(dir.path().join("fmt-check.log").exists());
+    }
 }
