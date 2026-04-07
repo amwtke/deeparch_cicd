@@ -4,23 +4,43 @@ use regex::Regex;
 use crate::ci::detector::ProjectInfo;
 use crate::ci::builder::{PipelineStrategy, StepDef};
 use crate::ci::builder::base::BaseStrategy;
-use crate::ci::builder::test_parser::TestSummary;
 
 pub struct RustStrategy;
+
+impl RustStrategy {
+    fn parse_rust_test(output: &str) -> Option<String> {
+        let re = Regex::new(r"test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored")
+            .unwrap();
+        // Sum across multiple test binaries
+        let mut total_passed: u32 = 0;
+        let mut total_failed: u32 = 0;
+        let mut total_ignored: u32 = 0;
+        let mut found = false;
+        for cap in re.captures_iter(output) {
+            found = true;
+            total_passed += cap[1].parse::<u32>().unwrap_or(0);
+            total_failed += cap[2].parse::<u32>().unwrap_or(0);
+            total_ignored += cap[3].parse::<u32>().unwrap_or(0);
+        }
+        if !found {
+            return None;
+        }
+        Some(format!("{} passed, {} failed, {} ignored", total_passed, total_failed, total_ignored))
+    }
+}
 
 impl PipelineStrategy for RustStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "rust-ci".into()
     }
 
-    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
-        let re = Regex::new(r"test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored")
-            .unwrap();
-        let cap = re.captures(output)?;
-        let passed: u32 = cap[1].parse().unwrap_or(0);
-        let failed: u32 = cap[2].parse().unwrap_or(0);
-        let skipped: u32 = cap[3].parse().unwrap_or(0);
-        Some(TestSummary::new(passed, failed, skipped))
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "test" => Self::parse_rust_test(&output)
+                .unwrap_or_else(|| BaseStrategy::default_report_str(step_name, success, stdout, stderr)),
+            _ => BaseStrategy::default_report_str(step_name, success, stdout, stderr),
+        }
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -93,26 +113,23 @@ mod tests {
     fn test_parse_test_output_all_pass() {
         let output = "test result: ok. 42 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out";
         let strategy = RustStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 42);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 3);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "42 passed, 0 failed, 3 ignored");
     }
 
     #[test]
     fn test_parse_test_output_with_failures() {
         let output = "test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured";
         let strategy = RustStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 8);
-        assert_eq!(summary.failed, 2);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "8 passed, 2 failed, 0 ignored");
     }
 
     #[test]
     fn test_parse_test_output_no_match() {
         let output = "Compiling pipelight v0.1.0";
         let strategy = RustStrategy;
-        assert!(strategy.parse_test_output(output).is_none());
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "Tests passed");
     }
 }

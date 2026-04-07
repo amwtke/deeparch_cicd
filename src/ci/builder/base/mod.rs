@@ -93,6 +93,150 @@ impl BaseStrategy {
             ..Default::default()
         })
     }
+
+    /// Default report string for common steps. Language strategies can override
+    /// specific steps and delegate the rest here.
+    pub fn default_report_str(step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "git-pull" => Self::report_git_pull(&output),
+            "build" => Self::report_build(success, &output),
+            "test" => Self::report_test_generic(success, &output),
+            "lint" | "clippy" | "checkstyle" | "vet" => Self::report_lint(success, step_name, &output),
+            "fmt-check" | "typecheck" | "mypy" => Self::report_check(success, step_name, &output),
+            "spotbugs" => Self::report_spotbugs(success, &output),
+            "pmd" => Self::report_pmd(success, &output),
+            "package" => Self::report_package(success, &output),
+            _ => if success { "OK".into() } else { format!("Failed (exit non-zero)") },
+        }
+    }
+
+    fn report_git_pull(output: &str) -> String {
+        if output.contains("Already up to date") || output.contains("Already up-to-date") {
+            "Already up to date".into()
+        } else if output.contains("skipping") || output.contains("Skipping") {
+            // Our skip messages: "Not a git repository" or "No remote configured"
+            let line = output.lines()
+                .find(|l| l.contains("skipping"))
+                .unwrap_or("Skipped");
+            line.trim().into()
+        } else if output.contains("files changed") || output.contains("file changed") {
+            // Extract git stat summary: "3 files changed, 10 insertions(+), 2 deletions(-)"
+            output.lines()
+                .find(|l| l.contains("files changed") || l.contains("file changed"))
+                .unwrap_or("Pulled latest changes")
+                .trim().into()
+        } else if output.contains("Pulling") {
+            "Pulled latest changes".into()
+        } else {
+            "OK".into()
+        }
+    }
+
+    fn report_build(success: bool, output: &str) -> String {
+        // Count warnings from common patterns
+        let warning_count = count_pattern(output, &["warning:", "WARNING", "[WARNING]"]);
+        if success {
+            if warning_count > 0 {
+                format!("Build succeeded ({} warnings)", warning_count)
+            } else {
+                "Build succeeded".into()
+            }
+        } else {
+            let error_count = count_pattern(output, &["error:", "ERROR", "[ERROR]"]);
+            if error_count > 0 {
+                format!("Build failed ({} errors)", error_count)
+            } else {
+                "Build failed".into()
+            }
+        }
+    }
+
+    fn report_test_generic(success: bool, _output: &str) -> String {
+        // Try to find common test result patterns
+        // Maven: "Tests run: N, Failures: N, Errors: N, Skipped: N"
+        // Rust: "test result: ok. N passed; N failed; N ignored"
+        // Go: "ok/FAIL" lines
+        // Fallback to generic
+        if success {
+            "Tests passed".into()
+        } else {
+            "Tests failed".into()
+        }
+    }
+
+    fn report_lint(success: bool, name: &str, output: &str) -> String {
+        let warning_count = count_pattern(output, &["warning:", "WARNING", "[WARN]"]);
+        let violation_count = count_pattern(output, &["violation", "Violation"]);
+        let issues = warning_count + violation_count;
+        if success {
+            if issues > 0 {
+                format!("{}: passed ({} warnings)", name, issues)
+            } else {
+                format!("{}: no issues found", name)
+            }
+        } else {
+            if issues > 0 {
+                format!("{}: {} issues found", name, issues)
+            } else {
+                format!("{}: failed", name)
+            }
+        }
+    }
+
+    fn report_check(success: bool, name: &str, output: &str) -> String {
+        if success {
+            format!("{}: passed", name)
+        } else {
+            let error_count = count_pattern(output, &["error:", "Error"]);
+            if error_count > 0 {
+                format!("{}: {} errors", name, error_count)
+            } else {
+                format!("{}: failed", name)
+            }
+        }
+    }
+
+    fn report_spotbugs(success: bool, output: &str) -> String {
+        let bug_count = count_pattern(output, &["Bug", "bug"]);
+        if success {
+            "spotbugs: no bugs found".into()
+        } else {
+            if bug_count > 0 {
+                format!("spotbugs: {} bugs found", bug_count)
+            } else {
+                "spotbugs: failed".into()
+            }
+        }
+    }
+
+    fn report_pmd(success: bool, output: &str) -> String {
+        let violation_count = count_pattern(output, &["violation", "Violation"]);
+        if success {
+            "pmd: no violations".into()
+        } else {
+            if violation_count > 0 {
+                format!("pmd: {} violations", violation_count)
+            } else {
+                "pmd: failed".into()
+            }
+        }
+    }
+
+    fn report_package(success: bool, _output: &str) -> String {
+        if success {
+            "Package created".into()
+        } else {
+            "Package failed".into()
+        }
+    }
+}
+
+/// Count occurrences of any of the given patterns in output.
+fn count_pattern(output: &str, patterns: &[&str]) -> usize {
+    output.lines()
+        .filter(|line| patterns.iter().any(|p| line.contains(p)))
+        .count()
 }
 
 pub struct BaseOnlyStrategy;

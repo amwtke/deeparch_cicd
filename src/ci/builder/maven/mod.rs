@@ -7,16 +7,11 @@ use regex::Regex;
 use crate::ci::detector::ProjectInfo;
 use crate::ci::builder::{PipelineStrategy, StepDef};
 use crate::ci::builder::base::BaseStrategy;
-use crate::ci::builder::test_parser::TestSummary;
 
 pub struct MavenStrategy;
 
-impl PipelineStrategy for MavenStrategy {
-    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
-        "maven-java-ci".into()
-    }
-
-    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+impl MavenStrategy {
+    fn parse_maven_test(output: &str) -> Option<String> {
         let re = Regex::new(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)")
             .unwrap();
         let mut total_run: u32 = 0;
@@ -35,7 +30,23 @@ impl PipelineStrategy for MavenStrategy {
             return None;
         }
         let passed = total_run.saturating_sub(total_failures + total_errors + total_skipped);
-        Some(TestSummary::new(passed, total_failures + total_errors, total_skipped))
+        let failed = total_failures + total_errors;
+        Some(format!("{} passed, {} failed, {} skipped", passed, failed, total_skipped))
+    }
+}
+
+impl PipelineStrategy for MavenStrategy {
+    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
+        "maven-java-ci".into()
+    }
+
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "test" => Self::parse_maven_test(&output)
+                .unwrap_or_else(|| BaseStrategy::default_report_str(step_name, success, stdout, stderr)),
+            _ => BaseStrategy::default_report_str(step_name, success, stdout, stderr),
+        }
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -167,10 +178,8 @@ mod tests {
     fn test_parse_test_output_single_module() {
         let output = "Tests run: 42, Failures: 0, Errors: 0, Skipped: 2";
         let strategy = MavenStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 40);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 2);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "40 passed, 0 failed, 2 skipped");
     }
 
     #[test]
@@ -180,17 +189,15 @@ Tests run: 10, Failures: 1, Errors: 0, Skipped: 0
 Tests run: 20, Failures: 0, Errors: 2, Skipped: 1
 Tests run: 5, Failures: 0, Errors: 0, Skipped: 0";
         let strategy = MavenStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        // total_run=35, failures=1, errors=2, skipped=1 => passed=35-3-1=31, failed=3
-        assert_eq!(summary.passed, 31);
-        assert_eq!(summary.failed, 3);
-        assert_eq!(summary.skipped, 1);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "31 passed, 3 failed, 1 skipped");
     }
 
     #[test]
     fn test_parse_test_output_no_tests() {
         let output = "BUILD SUCCESS";
         let strategy = MavenStrategy;
-        assert!(strategy.parse_test_output(output).is_none());
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "Tests passed");
     }
 }

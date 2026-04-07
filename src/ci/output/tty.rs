@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::ci::executor::{LogLine, LogStream, StepResult};
 use crate::ci::parser::Pipeline;
 use crate::ci::scheduler::Scheduler;
-use crate::ci::builder::test_parser::TestSummary;
+use crate::ci::pipeline_builder::test_parser::TestSummary;
 
 static ROCKET: Emoji<'_, '_> = Emoji("🚀 ", ">> ");
 static CHECK: Emoji<'_, '_> = Emoji("✅", "[OK]");
@@ -189,8 +189,20 @@ impl PipelineProgressUI {
         }
     }
 
-    /// Mark step as finished.
+    /// Mark step as finished with report summary and log path.
     pub fn finish_step(&mut self, name: &str, success: bool, duration: Duration) {
+        self.finish_step_with_report(name, success, duration, None, None);
+    }
+
+    /// Mark step as finished with optional report info.
+    pub fn finish_step_with_report(
+        &mut self,
+        name: &str,
+        success: bool,
+        duration: Duration,
+        report_summary: Option<&str>,
+        report_path: Option<&str>,
+    ) {
         // Update status
         if let Some(idx) = self.step_names.iter().position(|n| n == name) {
             self.step_status[idx] = if success {
@@ -223,12 +235,25 @@ impl PipelineProgressUI {
         } else {
             style(name).red().bold().to_string()
         };
+
+        let report_str = match (report_summary, report_path) {
+            (Some(summary), Some(path)) => format!(
+                "  {} → {}",
+                style(summary).italic(),
+                style(path).dim().underlined()
+            ),
+            (Some(summary), None) => format!("  {}", style(summary).italic()),
+            (None, Some(path)) => format!("  → {}", style(path).dim().underlined()),
+            (None, None) => String::new(),
+        };
+
         println!(
-            " {} {} {:<16} {}",
+            " {} {} {:<16} {}{}",
             icon,
             style(&progress_tag).dim(),
             name_styled,
-            style(format_duration(duration)).dim()
+            style(format_duration(duration)).dim(),
+            report_str
         );
     }
 

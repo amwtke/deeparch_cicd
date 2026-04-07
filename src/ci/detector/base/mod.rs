@@ -88,7 +88,7 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
         if detector.detect(dir) {
             let mut info = detector.analyze(dir)?;
             info.subdir = None;
-            let pipeline = crate::ci::builder::generate_pipeline(&info);
+            let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
             return Ok((info, pipeline));
         }
     }
@@ -111,7 +111,7 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
                     let mut info = detector.analyze(&subpath)?;
                     let subdir_name = name_str.to_string();
                     info = adapt_for_subdir(info, &subdir_name);
-                    let pipeline = crate::ci::builder::generate_pipeline(&info);
+                    let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
                     return Ok((info, pipeline));
                 }
             }
@@ -172,7 +172,7 @@ mod tests {
             quality_plugins: vec![],
             subdir: None,
         };
-        let pipeline = crate::ci::builder::generate_pipeline(&info);
+        let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
         assert_eq!(pipeline.name, "rust-ci");
         // git-pull + RustStrategy: git-pull, build, clippy, test, fmt-check
         assert_eq!(pipeline.steps.len(), 5);
@@ -199,7 +199,7 @@ mod tests {
             quality_plugins: vec![],
             subdir: None,
         };
-        let pipeline = crate::ci::builder::generate_pipeline(&info);
+        let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
         // git-pull + GoStrategy: git-pull, build, vet, test (no lint, no fmt)
         assert_eq!(pipeline.steps.len(), 4);
         assert_eq!(pipeline.steps[0].name, "git-pull");

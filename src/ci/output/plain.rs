@@ -1,6 +1,6 @@
 use crate::ci::executor::{LogLine, LogStream};
 use crate::run_state::{RunState, StepStatus};
-use crate::ci::builder::test_parser::TestSummary;
+use crate::ci::pipeline_builder::test_parser::TestSummary;
 
 /// Print step start
 pub fn print_step_start(name: &str, image: &str) {
@@ -20,10 +20,16 @@ pub fn print_log_line(name: &str, line: &LogLine, verbose: bool) {
     }
 }
 
-/// Print step completion
+/// Print step completion with optional report summary and log path
 pub fn print_step_finish(name: &str, success: bool, duration: std::time::Duration) {
     let status = if success { "OK" } else { "FAIL" };
     println!("[{}] {} ({:.1}s)", name, status, duration.as_secs_f64());
+}
+
+/// Print step completion with report summary and log path
+pub fn print_step_report(name: &str, success: bool, duration: std::time::Duration, summary: &str, log_path: &str) {
+    let status = if success { "OK" } else { "FAIL" };
+    println!("[{}] {} ({:.1}s) {} → {}", name, status, duration.as_secs_f64(), summary, log_path);
 }
 
 /// Print test summary

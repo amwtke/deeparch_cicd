@@ -4,16 +4,11 @@ use regex::Regex;
 use crate::ci::detector::ProjectInfo;
 use crate::ci::builder::{PipelineStrategy, StepDef};
 use crate::ci::builder::base::BaseStrategy;
-use crate::ci::builder::test_parser::TestSummary;
 
 pub struct PythonStrategy;
 
-impl PipelineStrategy for PythonStrategy {
-    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
-        "python-ci".into()
-    }
-
-    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+impl PythonStrategy {
+    fn parse_python_test(output: &str) -> Option<String> {
         let passed_re = Regex::new(r"(\d+) passed").unwrap();
         let failed_re = Regex::new(r"(\d+) failed").unwrap();
         let skipped_re = Regex::new(r"(\d+) skipped").unwrap();
@@ -32,7 +27,22 @@ impl PipelineStrategy for PythonStrategy {
         if passed == 0 && failed == 0 && skipped == 0 {
             return None;
         }
-        Some(TestSummary::new(passed, failed, skipped))
+        Some(format!("{} passed, {} failed, {} skipped", passed, failed, skipped))
+    }
+}
+
+impl PipelineStrategy for PythonStrategy {
+    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
+        "python-ci".into()
+    }
+
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "test" => Self::parse_python_test(&output)
+                .unwrap_or_else(|| BaseStrategy::default_report_str(step_name, success, stdout, stderr)),
+            _ => BaseStrategy::default_report_str(step_name, success, stdout, stderr),
+        }
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -97,36 +107,31 @@ mod tests {
     fn test_parse_test_output_all_pass() {
         let output = "====== 30 passed in 1.23s ======";
         let strategy = PythonStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 30);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "30 passed, 0 failed, 0 skipped");
     }
 
     #[test]
     fn test_parse_test_output_with_failures() {
         let output = "====== 25 passed, 5 failed in 2.5s ======";
         let strategy = PythonStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 25);
-        assert_eq!(summary.failed, 5);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "25 passed, 5 failed, 0 skipped");
     }
 
     #[test]
     fn test_parse_test_output_with_skipped() {
         let output = "====== 20 passed, 2 skipped in 1.0s ======";
         let strategy = PythonStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 20);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 2);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "20 passed, 0 failed, 2 skipped");
     }
 
     #[test]
     fn test_parse_test_output_no_match() {
         let output = "collected 0 items / 1 error";
         let strategy = PythonStrategy;
-        assert!(strategy.parse_test_output(output).is_none());
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "Tests failed");
     }
 }

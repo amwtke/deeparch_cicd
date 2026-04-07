@@ -8,6 +8,7 @@ pub mod go;
 pub mod test_parser;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::ci::detector::{ProjectInfo, ProjectType};
 use crate::ci::parser::{OnFailure, Pipeline, Step};
@@ -62,6 +63,16 @@ impl From<StepDef> for Step {
 pub trait PipelineStrategy {
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef>;
     fn pipeline_name(&self, info: &ProjectInfo) -> String;
+
+    /// Parse step output into a human-readable summary line.
+    /// Each strategy should override this for its specific steps.
+    /// Default: delegates to BaseStrategy for common steps (git-pull, build, test, lint, fmt-check),
+    /// falls back to generic success/fail message.
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
+    }
+
+    /// Parse test step output into structured TestSummary (backward compat for JSON output).
     fn parse_test_output(&self, _output: &str) -> Option<TestSummary> {
         None
     }
@@ -124,4 +135,29 @@ pub fn generate_pipeline(info: &ProjectInfo) -> Pipeline {
         env: HashMap::new(),
         steps: all_steps.into_iter().map(|sd| sd.into()).collect(),
     }
+}
+
+/// Write step stdout+stderr to pipelight-misc/{step_name}-{timestamp}.log.
+/// Always writes (success or failure). Returns the written file path.
+pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr: &str) -> PathBuf {
+    let timestamp = chrono::Local::now().format("%Y%m%dT%H%M%S");
+    let filename = format!("{}-{}.log", step_name, timestamp);
+    let log_path = misc_dir.join(&filename);
+
+    let mut content = String::new();
+    if !stdout.is_empty() {
+        content.push_str(stdout);
+    }
+    if !stderr.is_empty() {
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        content.push_str(stderr);
+    }
+
+    if let Err(e) = std::fs::write(&log_path, &content) {
+        tracing::warn!("Failed to write step report to {}: {}", log_path.display(), e);
+    }
+
+    log_path
 }

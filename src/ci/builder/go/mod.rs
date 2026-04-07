@@ -4,16 +4,11 @@ use regex::Regex;
 use crate::ci::detector::ProjectInfo;
 use crate::ci::builder::{PipelineStrategy, StepDef};
 use crate::ci::builder::base::BaseStrategy;
-use crate::ci::builder::test_parser::TestSummary;
 
 pub struct GoStrategy;
 
-impl PipelineStrategy for GoStrategy {
-    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
-        "go-ci".into()
-    }
-
-    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+impl GoStrategy {
+    fn parse_go_test(output: &str) -> Option<String> {
         let ok_re = Regex::new(r"(?m)^ok\s+").unwrap();
         let fail_re = Regex::new(r"(?m)^FAIL\s+").unwrap();
         let passed = ok_re.find_iter(output).count() as u32;
@@ -21,7 +16,22 @@ impl PipelineStrategy for GoStrategy {
         if passed == 0 && failed == 0 {
             return None;
         }
-        Some(TestSummary::new(passed, failed, 0))
+        Some(format!("{} passed, {} failed", passed, failed))
+    }
+}
+
+impl PipelineStrategy for GoStrategy {
+    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
+        "go-ci".into()
+    }
+
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "test" => Self::parse_go_test(&output)
+                .unwrap_or_else(|| BaseStrategy::default_report_str(step_name, success, stdout, stderr)),
+            _ => BaseStrategy::default_report_str(step_name, success, stdout, stderr),
+        }
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -121,10 +131,8 @@ ok  \tgithub.com/example/foo\t0.012s
 ok  \tgithub.com/example/bar\t0.005s
 FAIL\tgithub.com/example/baz\t0.034s";
         let strategy = GoStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 2);
-        assert_eq!(summary.failed, 1);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "2 passed, 1 failed");
     }
 
     #[test]
@@ -133,16 +141,15 @@ FAIL\tgithub.com/example/baz\t0.034s";
 ok  \tgithub.com/example/a\t0.001s
 ok  \tgithub.com/example/b\t0.002s";
         let strategy = GoStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 2);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "2 passed, 0 failed");
     }
 
     #[test]
     fn test_parse_test_output_no_match() {
         let output = "go: downloading github.com/example/dep v1.0.0";
         let strategy = GoStrategy;
-        assert!(strategy.parse_test_output(output).is_none());
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "Tests passed");
     }
 }

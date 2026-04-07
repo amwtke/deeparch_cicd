@@ -6,16 +6,11 @@ use regex::Regex;
 use crate::ci::detector::ProjectInfo;
 use crate::ci::builder::{PipelineStrategy, StepDef};
 use crate::ci::builder::base::BaseStrategy;
-use crate::ci::builder::test_parser::TestSummary;
 
 pub struct GradleStrategy;
 
-impl PipelineStrategy for GradleStrategy {
-    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
-        "gradle-java-ci".into()
-    }
-
-    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
+impl GradleStrategy {
+    fn parse_gradle_test(output: &str) -> Option<String> {
         let re = Regex::new(r"(\d+) tests completed, (\d+) failed").unwrap();
         let cap = re.captures(output)?;
         let total: u32 = cap[1].parse().unwrap_or(0);
@@ -26,7 +21,22 @@ impl PipelineStrategy for GradleStrategy {
             .and_then(|c| c[1].parse().ok())
             .unwrap_or(0);
         let passed = total.saturating_sub(failed + skipped);
-        Some(TestSummary::new(passed, failed, skipped))
+        Some(format!("{} passed, {} failed, {} skipped", passed, failed, skipped))
+    }
+}
+
+impl PipelineStrategy for GradleStrategy {
+    fn pipeline_name(&self, _info: &ProjectInfo) -> String {
+        "gradle-java-ci".into()
+    }
+
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "test" => Self::parse_gradle_test(&output)
+                .unwrap_or_else(|| BaseStrategy::default_report_str(step_name, success, stdout, stderr)),
+            _ => BaseStrategy::default_report_str(step_name, success, stdout, stderr),
+        }
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -134,36 +144,31 @@ mod tests {
     fn test_parse_test_output_basic() {
         let output = "10 tests completed, 0 failed";
         let strategy = GradleStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 10);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "10 passed, 0 failed, 0 skipped");
     }
 
     #[test]
     fn test_parse_test_output_with_failures() {
         let output = "15 tests completed, 3 failed";
         let strategy = GradleStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 12);
-        assert_eq!(summary.failed, 3);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "12 passed, 3 failed, 0 skipped");
     }
 
     #[test]
     fn test_parse_test_output_with_skipped() {
         let output = "20 tests completed, 1 failed, 2 skipped";
         let strategy = GradleStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 17);
-        assert_eq!(summary.failed, 1);
-        assert_eq!(summary.skipped, 2);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "17 passed, 1 failed, 2 skipped");
     }
 
     #[test]
     fn test_parse_test_output_no_match() {
         let output = "BUILD SUCCESSFUL";
         let strategy = GradleStrategy;
-        assert!(strategy.parse_test_output(output).is_none());
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "Tests passed");
     }
 }

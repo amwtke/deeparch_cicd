@@ -217,7 +217,7 @@ async fn cmd_run(
     let mut has_retryable_failure = false;
     let mut current_batch_index = 0;
     let mut step_results: Vec<(String, std::time::Duration, bool)> = Vec::new();
-    let mut test_summary: Option<crate::ci::builder::test_parser::TestSummary> = None;
+    let mut test_summary: Option<crate::ci::pipeline_builder::test_parser::TestSummary> = None;
 
     'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
         current_batch_index = batch_idx;
@@ -237,6 +237,8 @@ async fn cmd_run(
                     error_context: None,
                     on_failure: None,
                     test_summary: None,
+                    report_summary: None,
+                    report_path: None,
                 });
                 if let Some(ref progress) = progress {
                     progress.lock().unwrap().start_step(step_name);
@@ -277,15 +279,39 @@ async fn cmd_run(
             // Record step result for stats
             step_results.push((step_name.clone(), result.duration, result.success));
 
-            // Finish progress for this step
+            let pipeline_step = pipeline.get_step(step_name);
+
+            let step_status = if result.success {
+                StepStatus::Success
+            } else {
+                StepStatus::Failed
+            };
+
+            let stdout = result.stdout_string();
+            let stderr = result.stderr_string();
+
+            // Generate report: summary string + write log file
+            let report_summary = if let Some(strategy) = crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline) {
+                strategy.output_report_str(step_name, result.success, &stdout, &stderr)
+            } else {
+                crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(step_name, result.success, &stdout, &stderr)
+            };
+            let report_log_path = crate::ci::pipeline_builder::write_step_report(&misc_dir, step_name, &stdout, &stderr);
+            let report_path_str = report_log_path.strip_prefix(&project_dir)
+                .unwrap_or(&report_log_path)
+                .to_string_lossy()
+                .to_string();
+
+            // Finish progress for this step with report info
             if let Some(ref progress) = progress {
-                progress.lock().unwrap().finish_step(step_name, result.success, result.duration);
+                progress.lock().unwrap().finish_step_with_report(
+                    step_name, result.success, result.duration,
+                    Some(&report_summary), Some(&report_path_str),
+                );
             }
             if mode == OutputMode::Plain {
-                plain::print_step_finish(step_name, result.success, result.duration);
+                plain::print_step_report(step_name, result.success, result.duration, &report_summary, &report_path_str);
             }
-
-            let pipeline_step = pipeline.get_step(step_name);
 
             // Build on_failure state from pipeline config
             let on_failure_state = pipeline_step
@@ -297,19 +323,10 @@ async fn cmd_run(
                     context_paths: of.context_paths.clone(),
                 });
 
-            let step_status = if result.success {
-                StepStatus::Success
-            } else {
-                StepStatus::Failed
-            };
-
-            let stdout = result.stdout_string();
-            let stderr = result.stderr_string();
-
-            // Parse test output if this is a test step
+            // Parse test output for backward-compat test_summary field
             let step_test_summary = if step_name == "test" {
                 let full_output = format!("{}{}", &stdout, &stderr);
-                if let Some(strategy) = crate::ci::builder::strategy_for_pipeline(&pipeline) {
+                if let Some(strategy) = crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline) {
                     let parsed = strategy.parse_test_output(&full_output);
                     if parsed.is_some() {
                         test_summary = parsed.clone();
@@ -321,11 +338,6 @@ async fn cmd_run(
             } else {
                 None
             };
-
-            // Write error log to pipelight-misc/ when a step fails
-            if !result.success {
-                write_error_log(&misc_dir, step_name, &stdout, &stderr);
-            }
 
             state.add_step(StepState {
                 name: result.step_name.clone(),
@@ -339,6 +351,8 @@ async fn cmd_run(
                 error_context: None,
                 on_failure: on_failure_state,
                 test_summary: step_test_summary,
+                report_summary: Some(report_summary),
+                report_path: Some(report_path_str),
             });
 
             // Handle failure
@@ -379,6 +393,8 @@ async fn cmd_run(
                     error_context: None,
                     on_failure: None,
                     test_summary: None,
+                    report_summary: None,
+                    report_path: None,
                 });
             }
         }
@@ -723,23 +739,6 @@ async fn cmd_list_steps(dir: PathBuf) -> Result<i32> {
     Ok(0)
 }
 
-/// Write failed step's stdout/stderr to pipelight-misc/<step_name>.log
-fn write_error_log(misc_dir: &std::path::Path, step_name: &str, stdout: &str, stderr: &str) {
-    let log_path = misc_dir.join(format!("{}.log", step_name));
-    let mut log_content = String::new();
-    if !stdout.is_empty() {
-        log_content.push_str(stdout);
-    }
-    if !stderr.is_empty() {
-        if !log_content.is_empty() {
-            log_content.push('\n');
-        }
-        log_content.push_str(stderr);
-    }
-    if let Err(e) = std::fs::write(&log_path, &log_content) {
-        tracing::warn!("Failed to write error log to {}: {}", log_path.display(), e);
-    }
-}
 
 async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
     let base = RunState::default_base_dir();
@@ -755,44 +754,50 @@ async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ci::pipeline_builder::write_step_report;
 
     #[test]
-    fn test_write_error_log_both_stdout_and_stderr() {
+    fn test_write_step_report_both_stdout_and_stderr() {
         let dir = tempfile::tempdir().unwrap();
-        write_error_log(dir.path(), "build", "compile output", "error: failed");
-        let content = std::fs::read_to_string(dir.path().join("build.log")).unwrap();
+        let path = write_step_report(dir.path(), "build", "compile output", "error: failed");
+        let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "compile output\nerror: failed");
+        assert!(path.file_name().unwrap().to_string_lossy().starts_with("build-"));
+        assert!(path.extension().unwrap() == "log");
     }
 
     #[test]
-    fn test_write_error_log_stdout_only() {
+    fn test_write_step_report_stdout_only() {
         let dir = tempfile::tempdir().unwrap();
-        write_error_log(dir.path(), "test", "test output here", "");
-        let content = std::fs::read_to_string(dir.path().join("test.log")).unwrap();
+        let path = write_step_report(dir.path(), "test", "test output here", "");
+        let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "test output here");
     }
 
     #[test]
-    fn test_write_error_log_stderr_only() {
+    fn test_write_step_report_stderr_only() {
         let dir = tempfile::tempdir().unwrap();
-        write_error_log(dir.path(), "package", "", "fatal error");
-        let content = std::fs::read_to_string(dir.path().join("package.log")).unwrap();
+        let path = write_step_report(dir.path(), "package", "", "fatal error");
+        let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "fatal error");
     }
 
     #[test]
-    fn test_write_error_log_empty_output() {
+    fn test_write_step_report_empty_output() {
         let dir = tempfile::tempdir().unwrap();
-        write_error_log(dir.path(), "lint", "", "");
-        let content = std::fs::read_to_string(dir.path().join("lint.log")).unwrap();
+        let path = write_step_report(dir.path(), "lint", "", "");
+        let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.is_empty());
     }
 
     #[test]
-    fn test_write_error_log_file_naming() {
+    fn test_write_step_report_file_has_timestamp() {
         let dir = tempfile::tempdir().unwrap();
-        write_error_log(dir.path(), "fmt-check", "", "bad format");
-        assert!(dir.path().join("fmt-check.log").exists());
+        let path = write_step_report(dir.path(), "fmt-check", "", "bad format");
+        let filename = path.file_name().unwrap().to_string_lossy();
+        // Format: fmt-check-20260407T143022.log
+        assert!(filename.starts_with("fmt-check-"));
+        assert!(filename.ends_with(".log"));
+        assert!(filename.len() > "fmt-check-.log".len()); // has timestamp
     }
 }

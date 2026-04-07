@@ -4,7 +4,6 @@ use regex::Regex;
 use crate::ci::detector::ProjectInfo;
 use crate::ci::builder::{PipelineStrategy, StepDef};
 use crate::ci::builder::base::BaseStrategy;
-use crate::ci::builder::test_parser::TestSummary;
 
 pub struct NodeStrategy;
 
@@ -17,6 +16,23 @@ impl NodeStrategy {
                 .map(|f| f.contains("next") || f.contains("angular"))
                 .unwrap_or(false)
     }
+
+    fn parse_node_test(output: &str) -> Option<String> {
+        // Try Jest format first
+        let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").unwrap();
+        if let Some(cap) = jest_re.captures(output) {
+            let failed: u32 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let passed: u32 = cap[2].parse().unwrap_or(0);
+            return Some(format!("{} passed, {} failed", passed, failed));
+        }
+        // Fallback: Mocha format
+        let mocha_re = Regex::new(r"(\d+) passing").unwrap();
+        if let Some(cap) = mocha_re.captures(output) {
+            let passed: u32 = cap[1].parse().unwrap_or(0);
+            return Some(format!("{} passed", passed));
+        }
+        None
+    }
 }
 
 impl PipelineStrategy for NodeStrategy {
@@ -24,22 +40,13 @@ impl PipelineStrategy for NodeStrategy {
         "node-ci".into()
     }
 
-    fn parse_test_output(&self, output: &str) -> Option<TestSummary> {
-        // Try Jest format first
-        let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").unwrap();
-        if let Some(cap) = jest_re.captures(output) {
-            let failed: u32 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-            let passed: u32 = cap[2].parse().unwrap_or(0);
-            let skipped: u32 = 0;
-            return Some(TestSummary::new(passed, failed, skipped));
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        match step_name {
+            "test" => Self::parse_node_test(&output)
+                .unwrap_or_else(|| BaseStrategy::default_report_str(step_name, success, stdout, stderr)),
+            _ => BaseStrategy::default_report_str(step_name, success, stdout, stderr),
         }
-        // Fallback: Mocha format
-        let mocha_re = Regex::new(r"(\d+) passing").unwrap();
-        if let Some(cap) = mocha_re.captures(output) {
-            let passed: u32 = cap[1].parse().unwrap_or(0);
-            return Some(TestSummary::new(passed, 0, 0));
-        }
-        None
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<StepDef> {
@@ -135,36 +142,31 @@ mod tests {
     fn test_parse_test_output_jest_with_failures() {
         let output = "Tests: 3 failed, 10 passed, 13 total";
         let strategy = NodeStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 10);
-        assert_eq!(summary.failed, 3);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", false, output, "");
+        assert_eq!(report, "10 passed, 3 failed");
     }
 
     #[test]
     fn test_parse_test_output_jest_pass_only() {
         let output = "Tests: 20 passed, 20 total";
         let strategy = NodeStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 20);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "20 passed, 0 failed");
     }
 
     #[test]
     fn test_parse_test_output_mocha_format() {
         let output = "  15 passing (2s)\n  1 failing";
         let strategy = NodeStrategy;
-        let summary = strategy.parse_test_output(output).unwrap();
-        assert_eq!(summary.passed, 15);
-        assert_eq!(summary.failed, 0);
-        assert_eq!(summary.skipped, 0);
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "15 passed");
     }
 
     #[test]
     fn test_parse_test_output_no_match() {
         let output = "npm run test\n> jest";
         let strategy = NodeStrategy;
-        assert!(strategy.parse_test_output(output).is_none());
+        let report = strategy.output_report_str("test", true, output, "");
+        assert_eq!(report, "Tests passed");
     }
 }
