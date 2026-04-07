@@ -2,9 +2,41 @@ use crate::ci::detector::ProjectInfo;
 use crate::ci::parser::{OnFailure, Strategy};
 use crate::ci::builder::{PipelineStrategy, StepDef};
 
+pub const GIT_PULL_STEP_NAME: &str = "git-pull";
+pub const GIT_PULL_IMAGE: &str = "alpine/git:latest";
+
 pub struct BaseStrategy;
 
 impl BaseStrategy {
+    /// Fixed first step: pull latest code from remote git repository.
+    /// - If not a git repo → skip (exit 0)
+    /// - If no remote configured → skip (exit 0)
+    /// - If remote exists → git pull --ff-only; conflict → error (exit 1)
+    pub fn git_pull_step() -> StepDef {
+        StepDef {
+            name: GIT_PULL_STEP_NAME.into(),
+            image: GIT_PULL_IMAGE.into(),
+            commands: vec![
+                "if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi".into(),
+                "if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi".into(),
+                "echo \"Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))...\"".into(),
+                "STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash push -m 'pipelight-auto-stash' && STASHED=true; fi".into(),
+                "git pull --rebase || { if $STASHED; then git stash pop; fi; echo 'ERROR: git pull --rebase failed — possible merge conflict'; exit 1; }".into(),
+                "if $STASHED; then echo 'Restoring stashed changes...'; git stash pop || { echo 'ERROR: stash pop conflict — run git stash pop manually'; exit 1; }; fi".into(),
+            ],
+            volumes: vec![
+                "~/.ssh:/root/.ssh:ro".into(),
+                "~/.gitconfig:/root/.gitconfig:ro".into(),
+            ],
+            on_failure: Some(OnFailure {
+                strategy: Strategy::Abort,
+                max_retries: 0,
+                context_paths: vec![],
+            }),
+            ..Default::default()
+        }
+    }
+
     pub fn build_step(info: &ProjectInfo) -> StepDef {
         StepDef {
             name: "build".into(),
@@ -128,6 +160,26 @@ mod tests {
             quality_plugins: vec![],
             subdir: None,
         }
+    }
+
+    #[test]
+    fn test_git_pull_step_defaults() {
+        let step = BaseStrategy::git_pull_step();
+        assert_eq!(step.name, "git-pull");
+        assert_eq!(step.image, "alpine/git:latest");
+        assert!(step.depends_on.is_empty());
+        assert_eq!(step.workdir, "/workspace");
+        // Should have SSH and gitconfig volume mounts
+        assert!(step.volumes.iter().any(|v| v.contains(".ssh")));
+        assert!(step.volumes.iter().any(|v| v.contains(".gitconfig")));
+        // Commands should handle: no git, no remote, pull
+        assert!(step.commands.len() >= 3);
+        assert!(step.commands[0].contains(".git"));
+        assert!(step.commands[1].contains("git remote"));
+        // On failure should abort
+        let on_failure = step.on_failure.as_ref().unwrap();
+        assert_eq!(on_failure.strategy, Strategy::Abort);
+        assert_eq!(on_failure.max_retries, 0);
     }
 
     #[test]

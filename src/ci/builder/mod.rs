@@ -100,14 +100,28 @@ pub fn strategy_for_pipeline(pipeline: &Pipeline) -> Option<Box<dyn PipelineStra
 }
 
 /// Generate a Pipeline from ProjectInfo using the strategy system.
+/// A fixed `git-pull` step is always prepended, and all root steps
+/// (those with no dependencies) are wired to depend on it.
 pub fn generate_pipeline(info: &ProjectInfo) -> Pipeline {
     let strategy = strategy_for(&info.project_type);
-    let step_defs = strategy.steps(info);
+    let mut step_defs = strategy.steps(info);
     let name = strategy.pipeline_name(info);
+
+    // Prepend git-pull and wire root steps to depend on it
+    let git_pull = base::BaseStrategy::git_pull_step();
+    let git_pull_name = git_pull.name.clone();
+    for sd in &mut step_defs {
+        if sd.depends_on.is_empty() {
+            sd.depends_on.push(git_pull_name.clone());
+        }
+    }
+
+    let mut all_steps = vec![git_pull];
+    all_steps.extend(step_defs);
 
     Pipeline {
         name,
         env: HashMap::new(),
-        steps: step_defs.into_iter().map(|sd| sd.into()).collect(),
+        steps: all_steps.into_iter().map(|sd| sd.into()).collect(),
     }
 }
