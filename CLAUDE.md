@@ -42,9 +42,9 @@ src/
     detector/          → 检测器: 项目类型检测 (策略模式)
       base/mod.rs      →   ProjectDetector trait, ProjectInfo, ProjectType, 检测编排
       maven.rs / …     →   各语言检测策略实现
-    builder/           → 构建器: 流水线步骤生成 (策略模式)
-      base/mod.rs      →   BaseStrategy 共享 step 工厂方法
-      maven/ / …       →   各语言流水线步骤策略实现
+    pipeline_builder/  → 流水线步骤生成 (StepDef trait + 策略模式)
+      base/            →   5 个公共 step: git_pull/build/test/lint/fmt (*_step.rs)
+      maven/ / …       →   各语言策略 + 特有 step (*_step.rs, 实现 StepDef trait)
     parser/            → 解析器: Pipeline YAML 解析 & 校验
     scheduler/         → 调度器: DAG 构建 & 拓扑排序
     executor/          → 执行器: Docker 容器执行

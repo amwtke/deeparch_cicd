@@ -111,13 +111,14 @@ retry: RunState + Parser → Executor → StepResult → Output + RunState
 - 职责: 回答「这是什么项目」— 检测项目类型、提取语言版本、框架信息
 - 输出: ProjectInfo (image, build_cmd, test_cmd, lint_cmd, fmt_cmd, source_paths, config_files)
 
-#### Builder — 构建器 (src/ci/builder/)
-- 策略模式: PipelineStrategy trait
-- base/mod.rs: BaseStrategy 提供 build/test/lint/fmt 四个标准 step 工厂方法
-- 每种语言一个策略目录，可覆盖 base step 或添加特有 step
-- 语言特有 step 每个一个文件 (如 maven/checkstyle.rs, maven/package.rs)
-- 职责: 回答「这个项目该怎么跑 CI」— 生成 step 列表和依赖关系
-- 输出: Pipeline (name + steps)
+#### PipelineBuilder — 流水线构建器 (src/ci/pipeline_builder/)
+- **StepDef trait**: 每个 step 实现此接口 — config(), output_report_str(), output_report_path()
+- **StepConfig struct**: 纯数据，描述 step 的 image/commands/depends_on 等
+- **PipelineStrategy trait**: 每种语言实现，组装 Vec<Box<dyn StepDef>>
+- base/ 目录: 5 个公共 step — GitPullStep, BuildStep, TestStep, LintStep, FmtStep
+- 各语言策略目录 (maven/, gradle/, rust_lang/, node/, python/, go/): 特有 step 以 *_step.rs 命名
+- 职责: 回答「这个项目该怎么跑 CI」— 生成 step 列表、依赖关系和报告逻辑
+- 输出: (Pipeline, Vec<Box<dyn StepDef>>)
 
 #### Parser — 解析器 (src/ci/parser/)
 - 数据模型: Pipeline, Step, OnFailure, Strategy
