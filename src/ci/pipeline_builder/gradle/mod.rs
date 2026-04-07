@@ -73,11 +73,9 @@ impl PipelineStrategy for GradleStrategy {
             quality_step_names.push("spotbugs".into());
         }
 
-        // PMD (if quality_plugins contains "pmd")
-        if info.quality_plugins.contains(&"pmd".to_string()) {
-            steps.push(Box::new(GradleCachedStep::wrap(Box::new(pmd_step::PmdStep::new(info)))));
-            quality_step_names.push("pmd".into());
-        }
+        // PMD (always — uses init script to inject plugin if not configured in build.gradle)
+        steps.push(Box::new(GradleCachedStep::wrap(Box::new(pmd_step::PmdStep::new(info)))));
+        quality_step_names.push("pmd".into());
 
         // Test depends on quality steps
         let test_step = TestStep::new(info).with_parser(parse_gradle_test);
@@ -150,9 +148,10 @@ mod tests {
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
-        assert_eq!(names, vec!["build", "test"]);
-        let test_cfg = steps[1].config();
-        assert_eq!(test_cfg.depends_on, vec!["build"]);
+        // PMD is always present even without lint plugins
+        assert_eq!(names, vec!["build", "pmd", "test"]);
+        let test_cfg = steps[2].config();
+        assert_eq!(test_cfg.depends_on, vec!["pmd"]);
     }
 
     #[test]
@@ -182,6 +181,26 @@ mod tests {
         let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
         let on_failure = pmd_cfg.on_failure.unwrap();
         assert_eq!(on_failure.callback_command, CallbackCommand::AutoGenPmdRuleset);
+    }
+
+    #[test]
+    fn test_pmd_step_always_present_without_plugin() {
+        let info = make_gradle_info_without_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        assert!(steps.iter().any(|s| s.config().name == "pmd"),
+            "PMD step should always be present even without PMD plugin in build.gradle");
+    }
+
+    #[test]
+    fn test_pmd_init_script_injects_plugin() {
+        let info = make_gradle_info_without_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("apply plugin: 'pmd'"), "init script should inject PMD plugin");
+        assert!(cmd.contains("plugins.withId('java')"), "init script should only apply to Java projects");
     }
 
     #[test]

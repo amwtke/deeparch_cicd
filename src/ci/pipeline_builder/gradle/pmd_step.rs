@@ -25,11 +25,24 @@ impl StepDef for PmdStep {
             None => String::new(),
         };
         // Check for custom ruleset in pipelight-misc.
-        // If found: apply via Gradle init script, run pmdMain, collect multi-module reports.
+        // If found: inject PMD plugin via init script (if not already present), configure ruleset, run pmdMain.
         // If not found: emit callback marker and exit 1 so the LLM can search/generate a ruleset.
+        // The init script uses plugins.withId('java') to only apply PMD to Java-enabled projects,
+        // so it works for both single-module and multi-module Gradle projects regardless of
+        // whether the PMD plugin is already configured in build.gradle.
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
-             printf 'allprojects {{ plugins.withId(\"pmd\") {{ pmd {{ ruleSetFiles = files(\"/workspace/pipelight-misc/pmd-ruleset.xml\"); ruleSets = [] }} }} }}' > /tmp/pmd-init.gradle && \
+             cat > /tmp/pmd-init.gradle << 'INITEOF'\n\
+             allprojects {{\n\
+               plugins.withId('java') {{\n\
+                 if (!plugins.hasPlugin('pmd')) {{ apply plugin: 'pmd' }}\n\
+                 pmd {{\n\
+                   ruleSetFiles = files('/workspace/pipelight-misc/pmd-ruleset.xml')\n\
+                   ruleSets = []\n\
+                 }}\n\
+               }}\n\
+             }}\n\
+             INITEOF\n\
              ./gradlew --init-script /tmp/pmd-init.gradle pmdMain && \
              mkdir -p /workspace/pipelight-misc/pmd-report && \
              find . -path '*/build/reports/pmd' -type d -exec cp -r {{}}/* /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
