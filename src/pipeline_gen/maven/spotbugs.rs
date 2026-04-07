@@ -1,6 +1,6 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::StepDef;
+use crate::pipeline_gen::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
     let cd_prefix = match &info.subdir {
@@ -8,19 +8,19 @@ pub fn step(info: &ProjectInfo) -> StepDef {
         None => String::new(),
     };
 
-    // Use custom ruleset if exists, otherwise default rules
+    // Use custom exclude filter if exists
     // Report output goes to pipelight-misc/
     let cmd = format!(
-        "{}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
-         mvn pmd:pmd -Dpmd.rulesetfiles=/workspace/pipelight-misc/pmd-ruleset.xml \
-         -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; \
-         else mvn pmd:pmd \
-         -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; fi",
+        "{}if [ -f /workspace/pipelight-misc/spotbugs-exclude.xml ]; then \
+         mvn spotbugs:spotbugs -Dspotbugs.excludeFilterFile=/workspace/pipelight-misc/spotbugs-exclude.xml \
+         -Dspotbugs.xmlOutputDirectory=/workspace/pipelight-misc/spotbugs-report; \
+         else mvn spotbugs:spotbugs \
+         -Dspotbugs.xmlOutputDirectory=/workspace/pipelight-misc/spotbugs-report; fi",
         cd_prefix
     );
 
     StepDef {
-        name: "pmd".into(),
+        name: "spotbugs".into(),
         image: info.image.clone(),
         commands: vec![cmd],
         depends_on: vec!["build".into()],

@@ -27,7 +27,7 @@
          │                                         │
          ▼                                         │
 ┌─────────────────┐                                │
-│   Strategy      │  src/strategy/                 │
+│  PipelineGen    │  src/pipeline_gen/             │
 │                 │  接收 ProjectInfo               │
 │  BaseStrategy   │  生成 Vec<StepDef>             │
 │  MavenStrategy  │  转换为 Pipeline               │
@@ -88,7 +88,7 @@
 ## 数据流
 
 ```
-init:  目录 → Detector → ProjectInfo → Strategy → Pipeline → pipeline.yml
+init:  目录 → Detector → ProjectInfo → PipelineGen → Pipeline → pipeline.yml
 run:   pipeline.yml → Pipeline → Scheduler(DAG) → Executor(Docker) → StepResult → Output + RunState
 retry: RunState + Pipeline → Executor → StepResult → Output + RunState
 ```
@@ -102,13 +102,14 @@ retry: RunState + Pipeline → Executor → StepResult → Output + RunState
 
 ### Detector (src/detector/)
 - 策略模式: ProjectDetector trait
-- 每种语言一个 detector 文件 (maven.rs, gradle.rs, rust_project.rs, node.rs, python.rs, go.rs)
+- base/mod.rs: 抽象层 — ProjectDetector trait, ProjectInfo, ProjectType, 检测编排 (detect_and_generate)
+- 每种语言一个 detector 文件 (maven.rs, gradle.rs, rust_project.rs, node.rs, python.rs, go.rs) — 策略层
 - 职责: 回答「这是什么项目」— 检测项目类型、提取语言版本、框架信息
 - 输出: ProjectInfo (image, build_cmd, test_cmd, lint_cmd, fmt_cmd, source_paths, config_files)
 
-### Strategy (src/strategy/)
+### PipelineGen (src/pipeline_gen/)
 - 策略模式: PipelineStrategy trait
-- BaseStrategy 提供 build/test/lint/fmt 四个标准 step 工厂方法
+- base/mod.rs: BaseStrategy 提供 build/test/lint/fmt 四个标准 step 工厂方法
 - 每种语言一个策略目录，可覆盖 base step 或添加特有 step
 - 语言特有 step 每个一个文件 (如 maven/checkstyle.rs, maven/package.rs)
 - 职责: 回答「这个项目该怎么跑 CI」— 生成 step 列表和依赖关系

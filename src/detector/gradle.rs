@@ -3,7 +3,7 @@ use regex::Regex;
 use std::fs;
 use std::path::Path;
 
-use super::{ProjectDetector, ProjectInfo, ProjectType};
+use super::base::{ProjectDetector, ProjectInfo, ProjectType};
 
 pub struct GradleDetector;
 

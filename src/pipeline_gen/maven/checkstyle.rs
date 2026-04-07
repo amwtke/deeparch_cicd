@@ -1,11 +1,11 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::StepDef;
+use crate::pipeline_gen::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
     let cmd = match &info.subdir {
-        Some(subdir) => format!("cd {} && ./gradlew check -x test", subdir),
-        None => "./gradlew check -x test".into(),
+        Some(subdir) => format!("cd {} && mvn checkstyle:check", subdir),
+        None => "mvn checkstyle:check".into(),
     };
     StepDef {
         name: "checkstyle".into(),

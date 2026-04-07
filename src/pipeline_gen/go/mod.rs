@@ -2,9 +2,9 @@ pub mod vet;
 
 use regex::Regex;
 use crate::detector::ProjectInfo;
-use crate::strategy::{PipelineStrategy, StepDef};
-use crate::strategy::base::BaseStrategy;
-use crate::strategy::test_parser::TestSummary;
+use crate::pipeline_gen::{PipelineStrategy, StepDef};
+use crate::pipeline_gen::base::BaseStrategy;
+use crate::pipeline_gen::test_parser::TestSummary;
 
 pub struct GoStrategy;
 

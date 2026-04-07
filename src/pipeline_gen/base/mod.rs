@@ -1,6 +1,6 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::{PipelineStrategy, StepDef};
+use crate::pipeline_gen::{PipelineStrategy, StepDef};
 
 pub struct BaseStrategy;
 

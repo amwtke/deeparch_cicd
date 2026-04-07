@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::executor::{LogLine, LogStream, StepResult};
 use crate::pipeline::Pipeline;
 use crate::scheduler::Scheduler;
-use crate::strategy::test_parser::TestSummary;
+use crate::pipeline_gen::test_parser::TestSummary;
 
 static ROCKET: Emoji<'_, '_> = Emoji("🚀 ", ">> ");
 static CHECK: Emoji<'_, '_> = Emoji("✅", "[OK]");

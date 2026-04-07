@@ -1,6 +1,6 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::StepDef;
+use crate::pipeline_gen::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
     let cmd = match &info.subdir {

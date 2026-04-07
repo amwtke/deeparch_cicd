@@ -1,6 +1,6 @@
 use crate::executor::{LogLine, LogStream};
 use crate::run_state::{RunState, StepStatus};
-use crate::strategy::test_parser::TestSummary;
+use crate::pipeline_gen::test_parser::TestSummary;
 
 /// Print step start
 pub fn print_step_start(name: &str, image: &str) {

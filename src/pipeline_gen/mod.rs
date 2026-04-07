@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::detector::{ProjectInfo, ProjectType};
 use crate::pipeline::{OnFailure, Pipeline, Step};
-use crate::strategy::test_parser::TestSummary;
+use crate::pipeline_gen::test_parser::TestSummary;
 
 /// Definition of a single pipeline step, produced by strategies.
 #[derive(Debug, Clone)]

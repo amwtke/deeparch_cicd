@@ -1,6 +1,6 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::StepDef;
+use crate::pipeline_gen::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
     let cd_prefix = match &info.subdir {
@@ -8,8 +8,14 @@ pub fn step(info: &ProjectInfo) -> StepDef {
         None => String::new(),
     };
 
+    // Use custom ruleset if exists, otherwise default rules
+    // Report output goes to pipelight-misc/
     let cmd = format!(
-        "{}./gradlew pmdMain && cp -r build/reports/pmd /workspace/pipelight-misc/pmd-report 2>/dev/null || true",
+        "{}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
+         mvn pmd:pmd -Dpmd.rulesetfiles=/workspace/pipelight-misc/pmd-ruleset.xml \
+         -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; \
+         else mvn pmd:pmd \
+         -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; fi",
         cd_prefix
     );
 

@@ -5,7 +5,7 @@ mod output;
 mod pipeline;
 mod run_state;
 mod scheduler;
-mod strategy;
+mod pipeline_gen;
 
 use clap::Parser;
 

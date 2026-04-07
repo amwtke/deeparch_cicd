@@ -201,7 +201,7 @@ async fn cmd_run(
     let mut has_retryable_failure = false;
     let mut current_batch_index = 0;
     let mut step_results: Vec<(String, std::time::Duration, bool)> = Vec::new();
-    let mut test_summary: Option<crate::strategy::test_parser::TestSummary> = None;
+    let mut test_summary: Option<crate::pipeline_gen::test_parser::TestSummary> = None;
 
     'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
         current_batch_index = batch_idx;
@@ -293,7 +293,7 @@ async fn cmd_run(
             // Parse test output if this is a test step
             let step_test_summary = if step_name == "test" {
                 let full_output = format!("{}{}", &stdout, &stderr);
-                if let Some(strategy) = crate::strategy::strategy_for_pipeline(&pipeline) {
+                if let Some(strategy) = crate::pipeline_gen::strategy_for_pipeline(&pipeline) {
                     let parsed = strategy.parse_test_output(&full_output);
                     if parsed.is_some() {
                         test_summary = parsed.clone();

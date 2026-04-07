@@ -1,6 +1,6 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::StepDef;
+use crate::pipeline_gen::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
     let cd_prefix = match &info.subdir {
@@ -8,19 +8,13 @@ pub fn step(info: &ProjectInfo) -> StepDef {
         None => String::new(),
     };
 
-    // Use custom exclude filter if exists
-    // Report output goes to pipelight-misc/
     let cmd = format!(
-        "{}if [ -f /workspace/pipelight-misc/spotbugs-exclude.xml ]; then \
-         mvn spotbugs:spotbugs -Dspotbugs.excludeFilterFile=/workspace/pipelight-misc/spotbugs-exclude.xml \
-         -Dspotbugs.xmlOutputDirectory=/workspace/pipelight-misc/spotbugs-report; \
-         else mvn spotbugs:spotbugs \
-         -Dspotbugs.xmlOutputDirectory=/workspace/pipelight-misc/spotbugs-report; fi",
+        "{}./gradlew pmdMain && cp -r build/reports/pmd /workspace/pipelight-misc/pmd-report 2>/dev/null || true",
         cd_prefix
     );
 
     StepDef {
-        name: "spotbugs".into(),
+        name: "pmd".into(),
         image: info.image.clone(),
         commands: vec![cmd],
         depends_on: vec!["build".into()],

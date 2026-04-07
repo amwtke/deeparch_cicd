@@ -1,22 +1,12 @@
 use crate::detector::ProjectInfo;
 use crate::pipeline::{OnFailure, Strategy};
-use crate::strategy::StepDef;
+use crate::pipeline_gen::StepDef;
 
 pub fn step(info: &ProjectInfo) -> StepDef {
-    let cd_prefix = match &info.subdir {
-        Some(subdir) => format!("cd {} && ", subdir),
-        None => String::new(),
-    };
-
-    let cmd = format!(
-        "{}./gradlew spotbugsMain && cp -r build/reports/spotbugs /workspace/pipelight-misc/spotbugs-report 2>/dev/null || true",
-        cd_prefix
-    );
-
     StepDef {
-        name: "spotbugs".into(),
+        name: "clippy".into(),
         image: info.image.clone(),
-        commands: vec![cmd],
+        commands: vec!["cargo clippy -- -D warnings".into()],
         depends_on: vec!["build".into()],
         on_failure: Some(OnFailure {
             strategy: Strategy::AutoFix,
