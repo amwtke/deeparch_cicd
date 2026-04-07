@@ -14,7 +14,15 @@ use crate::ci::scheduler::Scheduler;
 #[command(name = "pipelight", version, about = "Lightweight CLI CI/CD tool")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
+
+    /// List all detected steps for the current project
+    #[arg(long)]
+    pub list_steps: bool,
+
+    /// Project directory (used with --list-steps)
+    #[arg(long, default_value = ".")]
+    pub dir: PathBuf,
 }
 
 #[derive(Subcommand)]
@@ -111,7 +119,15 @@ pub enum Command {
 }
 
 pub async fn dispatch(cli: Cli) -> Result<i32> {
-    match cli.command {
+    if cli.list_steps {
+        return cmd_list_steps(cli.dir).await;
+    }
+
+    let command = cli.command.ok_or_else(|| {
+        anyhow::anyhow!("No subcommand provided. Use --help for usage or --list-steps to list project steps.")
+    })?;
+
+    match command {
         Command::Run {
             file,
             step,
@@ -641,6 +657,69 @@ async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
         .context(format!("Failed to write {}", output_path.display()))?;
 
     println!("\nGenerated: {}", output_path.display());
+    Ok(0)
+}
+
+async fn cmd_list_steps(dir: PathBuf) -> Result<i32> {
+    use crate::ci::detector;
+    use console::style;
+
+    let (info, pipeline) = detector::detect_and_generate(&dir)?;
+
+    println!(
+        "\n{}  {} ({})\n",
+        style("Pipeline").cyan().bold(),
+        style(&pipeline.name).bold(),
+        info.project_type
+    );
+
+    for (i, step) in pipeline.steps.iter().enumerate() {
+        let deps = if step.depends_on.is_empty() {
+            String::new()
+        } else {
+            format!("  depends on [{}]", step.depends_on.join(", "))
+        };
+
+        println!(
+            "  {}. {} {}",
+            style(i + 1).dim(),
+            style(&step.name).bold(),
+            style(&deps).dim()
+        );
+        println!(
+            "     image:    {}",
+            style(&step.image).dim()
+        );
+        for cmd in &step.commands {
+            println!(
+                "     command:  {}",
+                style(cmd).green()
+            );
+        }
+
+        if let Some(ref on_failure) = step.on_failure {
+            println!(
+                "     failure:  {} (max retries: {})",
+                style(format!("{:?}", on_failure.strategy).to_lowercase()).yellow(),
+                on_failure.max_retries
+            );
+        }
+
+        if step.allow_failure {
+            println!(
+                "     {}",
+                style("allow_failure: true").yellow()
+            );
+        }
+
+        println!();
+    }
+
+    println!(
+        "  {} steps total\n",
+        style(pipeline.steps.len()).bold()
+    );
+
     Ok(0)
 }
 
