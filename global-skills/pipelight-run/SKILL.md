@@ -249,7 +249,7 @@ If found:
 If no PMD ruleset file exists, search for coding standard/guideline documents:
 
 ```
-# Search patterns:
+# Search patterns (English):
 **/coding-guide*.md
 **/coding-guide*.pdf
 **/coding-standard*.md
@@ -259,7 +259,19 @@ If no PMD ruleset file exists, search for coding standard/guideline documents:
 **/CONTRIBUTING.md (may contain code style section)
 **/style-guide*.md
 **/checkstyle*.xml (can be partially converted)
+
+# Search patterns (Chinese — 中文命名):
+**/*编码规范*.md
+**/*编码规范*.pdf
+**/*代码规范*.md
+**/*代码规范*.pdf
+**/*编码标准*.md
+**/*开发规范*.md
+**/*代码风格*.md
+**/*编程规范*.md
 ```
+
+**IMPORTANT:** Coding guideline documents may use any language for naming. Do NOT rely solely on the patterns above — also search broadly with `find` or `glob` in `docs/`, `doc/`, `standards/`, `guidelines/` directories for any `.md` or `.pdf` file whose name suggests coding rules or conventions.
 
 If found:
 1. Read the document content (for PDFs, extract the text)
