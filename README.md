@@ -1,6 +1,6 @@
 # Pipelight
 
-轻量级 CLI CI/CD 工具，通过 Docker 容器隔离执行流水线步骤。配合 Claude Code Skills 实现 AI 驱动的自动化开发工作流。
+轻量级 CLI CI/CD 工具，用 Rust 实现，通过 Docker 容器隔离执行流水线步骤。配合 Claude Code Skills 实现 AI 驱动的自动化开发工作流。
 
 ## 快速开始（Claude Code 用户）
 
@@ -51,11 +51,14 @@ pipeline 执行 → 成功？ → 报告结果
           策略是 auto_fix？
            ↓ 是          ↓ 否
    读取错误日志      报告失败，终止
+   (pipelight-misc/<step>.log)
    AI 分析修复代码
    retries > 0？
     ↓ 是     ↓ 否
   pipelight retry  报告失败
 ```
+
+失败的 step 日志自动保存到 `pipelight-misc/<step>.log`，供 AI 或人工分析。
 
 ## 核心理念：Debug-First CI
 
@@ -83,12 +86,16 @@ cargo build --release
 cp target/release/pipelight /usr/local/bin/
 
 # 在目标项目中
-pipelight init                  # 生成 pipeline.yml
+pipelight init                  # 自动检测项目类型，生成 pipeline.yml
 pipelight run                   # 运行流水线
 pipelight run --verbose         # 查看容器内全量输出
-pipelight validate              # 验证 pipeline.yml 语法
-pipelight list                  # 列出所有 step
+pipelight run --skip pmd,spotbugs  # 跳过指定 step
+pipelight run --step build      # 只运行指定 step
 pipelight run --dry-run         # 只看执行计划
+pipelight validate              # 验证 pipeline.yml 语法
+pipelight list                  # 列出 pipeline.yml 中所有 step
+pipelight --list-steps          # 自动检测项目并列出所有 step（无需 pipeline.yml）
+pipelight --list-steps --dir ./subproject  # 指定子目录
 pipelight status --run-id <id>  # 查看某次运行的状态
 pipelight retry --run-id <id> --step <name>  # 重试失败的 step
 ```
@@ -111,12 +118,14 @@ pipelight run > build.log      # 自动切换到 plain 模式
 
 | 类型 | 检测文件 | Docker 镜像 | 特有 Step |
 |------|---------|-------------|----------|
-| Maven | `pom.xml` | `maven:3.9-eclipse-temurin-{8,11,17,21}` | checkstyle, package |
-| Gradle | `build.gradle` / `build.gradle.kts` | `gradle:8-jdk{8,11,17,21}` | checkstyle |
+| Maven | `pom.xml` | `maven:3.9-eclipse-temurin-{8,11,17,21}` | checkstyle, spotbugs, pmd, package |
+| Gradle | `build.gradle` / `build.gradle.kts` | `gradle:8-jdk{8,11,17,21}` | checkstyle, spotbugs, pmd |
 | Rust | `Cargo.toml` | `rust:latest` | clippy |
 | Node.js | `package.json` | `node:{version}-slim` | typecheck (TypeScript) |
 | Python | `pyproject.toml` / `requirements.txt` | `python:{version}-slim` | mypy |
 | Go | `go.mod` | `golang:{version}` | vet |
+
+支持子目录检测：当根目录无法匹配时，自动扫描子目录中的项目。
 
 ## pipeline.yml 示例
 
@@ -143,6 +152,13 @@ steps:
     on_failure:
       strategy: notify
 
+  - name: spotbugs
+    image: maven:3.9-eclipse-temurin-17
+    commands:
+      - mvn spotbugs:check
+    depends_on:
+      - build
+
   - name: package
     image: maven:3.9-eclipse-temurin-17
     commands:
@@ -157,7 +173,9 @@ steps:
 [build] Starting... (maven:3.9-eclipse-temurin-17)
 [build] OK (47.4s)
 [test] Starting... (maven:3.9-eclipse-temurin-17)
+[spotbugs] Starting... (maven:3.9-eclipse-temurin-17)
 [test] OK (83.2s)
+[spotbugs] OK (12.3s)
 [package] Starting... (maven:3.9-eclipse-temurin-17)
 [package] OK (30.1s)
 
@@ -166,22 +184,51 @@ Test Summary: 42 passed, 0 failed, 2 skipped
 Step             Duration     Status
 build            47.4s        OK
 test             83.2s        OK
+spotbugs         12.3s        OK
 package          30.1s        OK
-Total            160.7s
+Total            173.0s
 ```
 
 ## 失败处理策略
 
 | 策略 | 行为 |
 |------|------|
-| `auto_fix` | 退出码 1，保存状态，等待 LLM agent 修复后 `pipelight retry` |
+| `auto_fix` | 退出码 1，保存状态 + 错误日志到 `pipelight-misc/`，等待 LLM agent 修复后 `pipelight retry` |
 | `abort` | 退出码 2，终止流水线 |
 | `notify` | 退出码 2，通知用户 |
+
+## 架构
+
+```
+CLI 层 (clap)        → 子命令: run / init / validate / list / retry / status
+    ↓                  顶层 flag: --list-steps
+Pipeline 模型层       → YAML → DAG 解析, 变量插值, 条件表达式
+    ↓
+调度器层             → DAG 拓扑排序, 并行 step 调度 (tokio)
+    ↓
+执行器层             → Docker API 交互 (bollard)
+    ↓
+输出层               → 实时日志流, 彩色终端输出 (tty/plain/json)
+```
+
+```
+src/
+  main.rs              → 入口
+  cli/                 → clap 命令定义
+  run_state/           → 运行状态持久化 (~/.pipelight/runs/)
+  ci/                  → CI 流水线核心
+    detector/          →   项目类型检测 (策略模式)
+    builder/           →   流水线步骤生成 (策略模式)
+    parser/            →   Pipeline YAML 解析 & 校验
+    scheduler/         →   DAG 构建 & 拓扑排序
+    executor/          →   Docker 容器执行
+    output/            →   终端日志格式化
+```
 
 ## 开发
 
 ```bash
 cargo build          # 编译
-cargo test           # 运行测试
+cargo test           # 运行测试 (159 单元 + 48 集成)
 cargo run -- --help  # 查看帮助
 ```
