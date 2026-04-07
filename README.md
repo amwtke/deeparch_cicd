@@ -1,65 +1,95 @@
 # Pipelight
 
-轻量级 CLI CI/CD 工具，通过 Docker 容器隔离执行流水线步骤。
+轻量级 CLI CI/CD 工具，通过 Docker 容器隔离执行流水线步骤。配合 Claude Code Skills 实现 AI 驱动的自动化开发工作流。
 
-## 快速开始
+## 快速开始（Claude Code 用户）
 
-### 前置条件
+只需两步：
 
-- Rust (rustup)
-- Docker (daemon 必须在运行)
-
-### 安装
+### Step 1: 克隆并同步环境
 
 ```bash
 git clone git@github.com:amwtke/deeparch_cicd.git
 cd deeparch_cicd
+```
+
+在 Claude Code 中运行：
+
+```
+/pipelight-sync
+```
+
+自动完成：环境检查 → Rust/Docker 安装 → 编译 pipelight → 运行测试 → 安装到 PATH → 同步 Skills → 加载知识库。完成后即可在任意项目中使用 `pipelight` 命令。
+
+### Step 2: 在目标项目中运行 CI
+
+切换到需要 CI 的项目目录，在 Claude Code 中运行：
+
+```
+/pipelight-run
+```
+
+自动完成：检测项目类型 → 生成 pipeline.yml → Docker 容器内执行 build/test/lint → 失败时 AI 自动修复并重试。
+
+#### /pipelight-run 参数
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--reinit` | 重新检测项目并覆盖 pipeline.yml | `/pipelight-run --reinit` |
+| `--skip <steps>` | 跳过指定 step（逗号分隔） | `/pipelight-run --skip spotbugs,pmd` |
+| `--step <name>` | 只运行指定 step | `/pipelight-run --step build` |
+| `--dry-run` | 只显示执行计划，不实际运行 | `/pipelight-run --dry-run` |
+| `--verbose` | 显示容器内全量输出 | `/pipelight-run --verbose` |
+
+参数可组合使用：`/pipelight-run --reinit --skip pmd --verbose`
+
+#### /pipelight-run 失败处理流程
+
+```
+pipeline 执行 → 成功？ → 报告结果
+                  ↓ 失败
+          策略是 auto_fix？
+           ↓ 是          ↓ 否
+   读取错误日志      报告失败，终止
+   AI 分析修复代码
+   retries > 0？
+    ↓ 是     ↓ 否
+  pipelight retry  报告失败
+```
+
+## 核心理念：Debug-First CI
+
+传统 CI/CD 工具在构建失败时只做一件事——**把错误日志甩给你**，然后等你手动修复、重新提交、再次触发流水线。这个循环完全依赖人：
+
+```
+传统 CI:  代码提交 → CI 构建 → 失败 → 人读日志 → 人改代码 → 人重新提交 → CI 再跑 → ...
+```
+
+Pipelight 的做法不同。当你在 Claude Code 中运行 `/pipelight-run`，失败不是终点，而是 **LLM 自动修复的起点**：
+
+```
+Pipelight:  /pipelight-run → CI 构建 → 失败 → LLM 读日志 → LLM 改代码 → pipelight retry → 通过
+```
+
+这就是 **Debug-First**：CI 流水线本身内置了"出错就修"的能力，而不是把调试的负担推回给开发者。`pipeline.yml` 中的 `on_failure: auto_fix` 配置告诉 pipelight "这个 step 失败时，把错误上下文交给 AI，让它尝试修复"。修复后自动 retry，直到通过或耗尽重试次数。
+
+对于开发者来说，体验从"盯着红色日志找 bug"变成了"喝杯咖啡等结果"。
+
+### 手动使用（不依赖 Claude Code）
+
+```bash
+# 安装
 cargo build --release
-```
-
-编译后的二进制在 `target/release/pipelight`，可以复制到 PATH 中：
-
-```bash
 cp target/release/pipelight /usr/local/bin/
-```
 
-### 使用
-
-#### 1. 生成 pipeline.yml
-
-在你的项目目录下运行：
-
-```bash
-pipelight init
-```
-
-自动检测项目类型（Maven/Gradle/Rust/Node/Python/Go），生成 `pipeline.yml`。
-
-也可以指定目录：
-
-```bash
-pipelight init --dir /path/to/your/project
-```
-
-#### 2. 运行流水线
-
-```bash
-pipelight run
-```
-
-带实时日志和进度条。加 `--verbose` 查看容器内全量输出：
-
-```bash
-pipelight run --verbose
-```
-
-#### 3. 其他命令
-
-```bash
-pipelight validate          # 验证 pipeline.yml 语法
-pipelight list              # 列出所有 step
-pipelight run --dry-run     # 只看执行计划，不实际运行
-pipelight status --run-id <id>   # 查看某次运行的状态
+# 在目标项目中
+pipelight init                  # 生成 pipeline.yml
+pipelight run                   # 运行流水线
+pipelight run --verbose         # 查看容器内全量输出
+pipelight validate              # 验证 pipeline.yml 语法
+pipelight list                  # 列出所有 step
+pipelight run --dry-run         # 只看执行计划
+pipelight status --run-id <id>  # 查看某次运行的状态
 pipelight retry --run-id <id> --step <name>  # 重试失败的 step
 ```
 
@@ -147,65 +177,6 @@ Total            160.7s
 | `auto_fix` | 退出码 1，保存状态，等待 LLM agent 修复后 `pipelight retry` |
 | `abort` | 退出码 2，终止流水线 |
 | `notify` | 退出码 2，通知用户 |
-
-## 开发环境同步 (pipelight-sync)
-
-在 Claude Code 中使用 `/pipelight-sync` 命令，一键完成新机器的开发环境准备或已有机器的状态同步。
-
-### 功能
-
-| 步骤 | 说明 |
-|------|------|
-| Git 同步 | 自动提交本地未保存的改动，`git pull --rebase`，推送未推送的 commit |
-| 环境检查 | 检查 Rust、Cargo、Docker、Git、Claude Code 是否安装且可用；缺失时自动安装 Rust |
-| 增量构建 | 对比上次构建的 commit，仅在 `src/`、`Cargo.toml`、`Cargo.lock` 有变更时才 `cargo build --release` |
-| 单元测试 | 构建成功后自动运行 `cargo test`，失败则中止 |
-| 安装二进制 | 将 `pipelight` 复制到 `/usr/local/bin` 或 `~/.cargo/bin`，全局可用 |
-| 全局 Skills 安装 | 将 `global-skills/` 下的 skill 同步到 `~/.claude/skills/`，所有项目均可使用 |
-| 知识库加载 | 读取 `docs/` 下的 vision、architecture、decisions、dev-environment 文档，恢复项目上下文 |
-
-### 用法
-
-在 Claude Code 对话中直接输入：
-
-```
-/pipelight-sync
-```
-
-无需任何参数。命令执行完毕后会输出汇总表：
-
-```
-=== Pipelight Sync Complete ===
-
-Git:
-  repo         OK (up to date)
-
-Environment:
-  rustc        OK 1.94.1
-  cargo        OK 1.94.1
-  docker       OK 29.1.5 (daemon running)
-  git          OK 2.43.0
-  claude       OK 2.1.90
-
-Build:
-  cargo build  OK (release)
-  cargo test   OK (154 passed)
-  pipelight    OK 0.1.0 (installed)
-
-Global Skills:
-  pipelight-run  OK
-
-Knowledge:
-  docs/        OK (5 documents loaded)
-
-Ready to develop!
-```
-
-### 适用场景
-
-- 切换到新开发机器时
-- 长时间未开发后恢复上下文
-- 拉取队友代码后确保本地环境一致
 
 ## 开发
 
