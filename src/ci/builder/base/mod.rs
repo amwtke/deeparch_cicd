@@ -20,7 +20,7 @@ impl BaseStrategy {
                 "if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi".into(),
                 "if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi".into(),
                 "echo \"Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))...\"".into(),
-                "STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash push -m 'pipelight-auto-stash' && STASHED=true; fi".into(),
+                "STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash && STASHED=true; fi".into(),
                 "git pull --rebase || { if $STASHED; then git stash pop; fi; echo 'ERROR: git pull --rebase failed — possible merge conflict'; exit 1; }".into(),
                 "if $STASHED; then echo 'Restoring stashed changes...'; git stash pop || { echo 'ERROR: stash pop conflict — run git stash pop manually'; exit 1; }; fi".into(),
             ],
