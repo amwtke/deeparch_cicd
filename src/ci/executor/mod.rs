@@ -171,6 +171,7 @@ impl DockerExecutor {
 
         let host_config = HostConfig {
             binds: Some(binds),
+            network_mode: Some("host".to_string()),
             ..Default::default()
         };
 
