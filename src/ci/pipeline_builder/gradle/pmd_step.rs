@@ -37,6 +37,7 @@ impl StepDef for PmdStep {
         // Path B: No ruleset → emit callback for LLM to search/generate one
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
+             mkdir -p /workspace/pipelight-misc/pmd-report && \
              if ./gradlew pmdMain --dry-run > /dev/null 2>&1; then \
                cat > /tmp/pmd-init.gradle << 'INITEOF'\n\
 allprojects {{\n\
@@ -49,8 +50,7 @@ allprojects {{\n\
 }}\n\
 INITEOF\n\
                ./gradlew --init-script /tmp/pmd-init.gradle pmdMain && \
-               mkdir -p /workspace/pipelight-misc/pmd-report && \
-               find . -path '*/build/reports/pmd' -type d -exec cp -r {{}}/* /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
+               find . -path '*/build/reports/pmd/*.xml' -type f -exec cp {{}} /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
              else \
                echo 'PMD plugin not found in Gradle, using standalone PMD CLI...' && \
                PMD_DIR=/tmp/pmd-bin-{pmd_ver} && \
@@ -60,12 +60,20 @@ INITEOF\n\
                fi && \
                SOURCES=$(find . -path '*/src/main/java' -type d | tr '\\n' ',' | sed 's/,$//') && \
                if [ -z \"$SOURCES\" ]; then SOURCES=.; fi && \
-               mkdir -p /workspace/pipelight-misc/pmd-report && \
                $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
                  -R /workspace/pipelight-misc/pmd-ruleset.xml \
-                 -f text --no-cache \
-                 -r /workspace/pipelight-misc/pmd-report/pmd-result.txt || true; \
-             fi; \
+                 -f xml --no-cache \
+                 -r /workspace/pipelight-misc/pmd-report/pmd-result.xml || true; \
+             fi && \
+             TOTAL=0 && \
+             for f in /workspace/pipelight-misc/pmd-report/*.xml; do \
+               [ -f \"$f\" ] || continue; \
+               COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null || echo 0); \
+               if [ \"$COUNT\" -gt 0 ]; then echo \"  $(basename $f .xml): $COUNT violations\"; fi; \
+               TOTAL=$((TOTAL + COUNT)); \
+             done && \
+             echo \"\" && echo \"PMD Total: $TOTAL violations\" && \
+             if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one.' >&2 && exit 1; \
              fi",

@@ -25,12 +25,22 @@ impl StepDef for PmdStep {
             None => String::new(),
         };
         // Check for custom ruleset in pipelight-misc.
-        // If found: run mvn pmd:pmd with that ruleset.
+        // If found: run mvn pmd:pmd with that ruleset, collect per-module reports, output summary.
         // If not found: emit callback marker and exit 1 so the LLM can search/generate a ruleset.
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
-             mvn pmd:pmd -Dpmd.rulesetfiles=/workspace/pipelight-misc/pmd-ruleset.xml \
-             -Dpmd.outputDirectory=/workspace/pipelight-misc/pmd-report; \
+             mvn pmd:pmd -Dpmd.rulesetfiles=/workspace/pipelight-misc/pmd-ruleset.xml && \
+             mkdir -p /workspace/pipelight-misc/pmd-report && \
+             TOTAL=0 && \
+             for f in $(find . -path '*/target/pmd.xml' -type f 2>/dev/null); do \
+               MODULE=$(echo \"$f\" | sed 's|^\\./||;s|/target/pmd\\.xml||'); \
+               cp \"$f\" /workspace/pipelight-misc/pmd-report/\"$(echo $MODULE | tr / _)-pmd.xml\"; \
+               COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null || echo 0); \
+               if [ \"$COUNT\" -gt 0 ]; then echo \"  $MODULE: $COUNT violations\"; fi; \
+               TOTAL=$((TOTAL + COUNT)); \
+             done && \
+             echo \"\" && echo \"PMD Total: $TOTAL violations\" && \
+             if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one.' >&2 && exit 1; \
              fi",
