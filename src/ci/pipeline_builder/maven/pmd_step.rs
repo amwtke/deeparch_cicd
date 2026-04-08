@@ -31,11 +31,13 @@ impl StepDef for PmdStep {
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
              PMD_VER=7.9.0 && \
-             PMD_DIR=/tmp/pmd-bin-$PMD_VER && \
+             PMD_CACHE=/root/.pipelight/cache && \
+             PMD_DIR=$PMD_CACHE/pmd-bin-$PMD_VER && \
              if [ ! -f $PMD_DIR/bin/pmd ]; then \
                echo 'Downloading PMD CLI...' && \
+               mkdir -p $PMD_CACHE && \
                curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F$PMD_VER/pmd-dist-$PMD_VER-bin.zip -o /tmp/pmd.zip && \
-               (cd /tmp && jar xf pmd.zip) && chmod +x $PMD_DIR/bin/pmd; \
+               (cd $PMD_CACHE && jar xf /tmp/pmd.zip) && chmod +x $PMD_DIR/bin/pmd && rm -f /tmp/pmd.zip; \
              fi && \
              SOURCES=$(find . -path '*/src/main/java' -type d | tr '\\n' ',' | sed 's/,$//') && \
              if [ -z \"$SOURCES\" ]; then SOURCES=.; fi && \
