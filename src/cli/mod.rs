@@ -116,6 +116,13 @@ pub enum Command {
         #[arg(long)]
         output: Option<String>,
     },
+
+    /// Clean all pipelight-generated artifacts (pipeline.yml, pipelight-misc/)
+    Clean {
+        /// Project directory to clean
+        #[arg(short, long, default_value = ".")]
+        dir: PathBuf,
+    },
 }
 
 pub async fn dispatch(cli: Cli) -> Result<i32> {
@@ -154,6 +161,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             let mode = resolve_output_mode(output);
             cmd_status(run_id, mode).await
         }
+        Command::Clean { dir } => cmd_clean(dir).await,
     }
 }
 
@@ -744,6 +752,37 @@ async fn cmd_list_steps(dir: PathBuf) -> Result<i32> {
     Ok(0)
 }
 
+
+async fn cmd_clean(dir: PathBuf) -> Result<i32> {
+    use console::style;
+
+    let dir = dir.canonicalize().unwrap_or(dir);
+    let mut removed = Vec::new();
+
+    let pipeline_file = dir.join("pipeline.yml");
+    if pipeline_file.exists() {
+        std::fs::remove_file(&pipeline_file)
+            .context("Failed to remove pipeline.yml")?;
+        removed.push("pipeline.yml");
+    }
+
+    let misc_dir = dir.join("pipelight-misc");
+    if misc_dir.exists() {
+        std::fs::remove_dir_all(&misc_dir)
+            .context("Failed to remove pipelight-misc/")?;
+        removed.push("pipelight-misc/");
+    }
+
+    if removed.is_empty() {
+        println!("{} Nothing to clean", style("✓").green());
+    } else {
+        for item in &removed {
+            println!("{} Removed {}", style("✓").green(), item);
+        }
+    }
+
+    Ok(0)
+}
 
 async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
     let base = RunState::default_base_dir();
