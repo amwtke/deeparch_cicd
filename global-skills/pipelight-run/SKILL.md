@@ -1,6 +1,6 @@
 ---
 name: pipelight-run
-description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --dry-run --verbose. Example: /pipelight-run --skip spotbugs,pmd --verbose"
+description: "Run CI/CD pipeline. Args: --clean --reinit --skip <steps> --step <name> --dry-run --verbose --list-steps. Example: /pipelight-run --clean --skip spotbugs,pmd --verbose"
 ---
 
 # /pipelight-run
@@ -47,13 +47,35 @@ digraph pipelight {
 
 | Argument | Description | Example |
 |----------|-------------|---------|
+| `--clean` | Remove all pipelight artifacts (pipeline.yml, pipelight-misc/) before running | `/pipelight-run --clean` |
 | `--reinit` | Force regenerate `pipeline.yml` before running | `/pipelight-run --reinit` |
 | `--skip <steps>` | Skip one or more steps (comma-separated) | `/pipelight-run --skip spotbugs,pmd` |
 | `--step <name>` | Run only a specific step | `/pipelight-run --step build` |
 | `--dry-run` | Show execution plan without running | `/pipelight-run --dry-run` |
 | `--verbose` | Show full container output | `/pipelight-run --verbose` |
+| `--list-steps` | List all detected steps without running | `/pipelight-run --list-steps` |
 
-Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
+Arguments can be combined: `/pipelight-run --clean --reinit --skip pmd --verbose`
+
+## Step 0: Handle --clean and --list-steps
+
+If the user passed `--clean`, run clean first to remove all pipelight artifacts:
+
+```bash
+pipelight clean -d <project-dir>
+```
+
+This removes `pipeline.yml` and `pipelight-misc/` from the target project. After cleaning, continue to Step 1 to regenerate `pipeline.yml` and run the pipeline.
+
+If `--clean` is combined with `--reinit`, the clean already removes `pipeline.yml` so `--reinit` is implicit.
+
+If the user passed `--list-steps`, run:
+
+```bash
+pipelight --list-steps --dir <project-dir>
+```
+
+Report the output to the user and **stop here** — do not proceed to run the pipeline.
 
 ## Step 1: Check pipeline.yml Exists
 
