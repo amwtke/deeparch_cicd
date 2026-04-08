@@ -15,8 +15,8 @@ pub struct GitCredentials {
 pub struct Pipeline {
     pub name: String,
 
-    /// Git credentials for HTTPS pulls inside Docker (optional)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Git credentials for HTTPS pulls inside Docker (optional, fill in your username/password)
+    #[serde(default)]
     pub git_credentials: Option<GitCredentials>,
 
     /// Global environment variables available to all steps

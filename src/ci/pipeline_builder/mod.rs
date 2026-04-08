@@ -171,7 +171,10 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
 
     let pipeline = Pipeline {
         name,
-        git_credentials: None,
+        git_credentials: Some(crate::ci::parser::GitCredentials {
+            username: "your_username".to_string(),
+            password: "your_token_or_password".to_string(),
+        }),
         env: HashMap::new(),
         steps: all_configs.into_iter().map(|sc| sc.into()).collect(),
     };
