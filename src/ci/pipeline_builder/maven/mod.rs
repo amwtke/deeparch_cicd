@@ -5,8 +5,8 @@ pub mod spotbugs_step;
 
 use regex::Regex;
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
-use crate::ci::pipeline_builder::base::{BuildStep, TestStep};
+use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef, test_parser};
+use crate::ci::pipeline_builder::base::{self, BuildStep, TestStep};
 
 pub struct MavenStrategy;
 
@@ -63,6 +63,37 @@ impl StepDef for MavenCachedStep {
 impl PipelineStrategy for MavenStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "maven-java-ci".into()
+    }
+
+    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+        if step_name == "test" {
+            let output = format!("{}{}", stdout, stderr);
+            if let Some(summary) = parse_maven_test(&output) {
+                return format!("Tests: {}", summary);
+            }
+        }
+        base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<test_parser::TestSummary> {
+        let re = Regex::new(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)")
+            .unwrap();
+        let mut total_run: u32 = 0;
+        let mut total_failures: u32 = 0;
+        let mut total_errors: u32 = 0;
+        let mut total_skipped: u32 = 0;
+        let mut found = false;
+        for cap in re.captures_iter(output) {
+            found = true;
+            total_run += cap[1].parse::<u32>().unwrap_or(0);
+            total_failures += cap[2].parse::<u32>().unwrap_or(0);
+            total_errors += cap[3].parse::<u32>().unwrap_or(0);
+            total_skipped += cap[4].parse::<u32>().unwrap_or(0);
+        }
+        if !found { return None; }
+        let passed = total_run.saturating_sub(total_failures + total_errors + total_skipped);
+        let failed = total_failures + total_errors;
+        Some(test_parser::TestSummary { passed, failed, skipped: total_skipped })
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<Box<dyn StepDef>> {
