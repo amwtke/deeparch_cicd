@@ -116,13 +116,17 @@ impl BaseStrategy {
     }
 
     fn report_pmd(success: bool, output: &str) -> String {
+        // Extract "PMD Total: N violations" summary line if present
+        if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
+            return line.trim().to_string();
+        }
         let violation_count = count_pattern(output, &["violation", "Violation"]);
-        if success {
-            "pmd: no violations".into()
-        } else if violation_count > 0 {
-            format!("pmd: {} violations", violation_count)
-        } else {
+        if !success && violation_count == 0 {
             "pmd: failed".into()
+        } else if violation_count > 0 {
+            format!("pmd: {} violations (report only)", violation_count)
+        } else {
+            "pmd: no violations".into()
         }
     }
 

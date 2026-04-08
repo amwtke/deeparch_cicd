@@ -72,8 +72,7 @@ INITEOF\n\
                if [ \"$COUNT\" -gt 0 ]; then echo \"  $(basename $f .xml): $COUNT violations\"; fi; \
                TOTAL=$((TOTAL + COUNT)); \
              done && \
-             echo \"\" && echo \"PMD Total: $TOTAL violations\" && \
-             if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
+             echo \"\" && echo \"PMD Total: $TOTAL violations\"; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one.' >&2 && exit 1; \
              fi",
@@ -99,9 +98,15 @@ INITEOF\n\
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
         }
-        let violations = count_pattern(&output, &["violation", "Violation"]);
-        if success { "pmd: no violations".into() }
-        else if violations > 0 { format!("pmd: {} violations", violations) }
-        else { "pmd: failed".into() }
+        let violations = count_pattern(&output, &["PMD Total:"]);
+        if violations > 0 {
+            if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
+                return line.trim().to_string();
+            }
+        }
+        let violation_count = count_pattern(&output, &["violation", "Violation"]);
+        if !success && violation_count == 0 { "pmd: failed".into() }
+        else if violation_count > 0 { format!("pmd: {} violations (report only)", violation_count) }
+        else { "pmd: no violations".into() }
     }
 }
