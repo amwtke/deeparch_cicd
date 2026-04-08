@@ -47,7 +47,7 @@ digraph pipelight {
 
 | Argument | Description | Example |
 |----------|-------------|---------|
-| `--clean` | Remove all pipelight artifacts (pipeline.yml, pipelight-misc/) before running | `/pipelight-run --clean` |
+| `--clean` | Remove all pipelight artifacts (pipeline.yml, pipelight-misc/) and stop. When combined with other flags (e.g. `--reinit`), clean first then continue. | `/pipelight-run --clean` |
 | `--reinit` | Force regenerate `pipeline.yml` before running | `/pipelight-run --reinit` |
 | `--skip <steps>` | Skip one or more steps (comma-separated) | `/pipelight-run --skip spotbugs,pmd` |
 | `--step <name>` | Run only a specific step | `/pipelight-run --step build` |
@@ -59,15 +59,17 @@ Arguments can be combined: `/pipelight-run --clean --reinit --skip pmd --verbose
 
 ## Step 0: Handle --clean and --list-steps
 
-If the user passed `--clean`, run clean first to remove all pipelight artifacts:
+If the user passed `--clean`, run clean to remove all pipelight artifacts:
 
 ```bash
 pipelight clean -d <project-dir>
 ```
 
-This removes `pipeline.yml` and `pipelight-misc/` from the target project. After cleaning, continue to Step 1 to regenerate `pipeline.yml` and run the pipeline.
+This removes `pipeline.yml` and `pipelight-misc/` from the target project.
 
-If `--clean` is combined with `--reinit`, the clean already removes `pipeline.yml` so `--reinit` is implicit.
+**If `--clean` is the only flag** (no `--reinit`, `--skip`, `--step`, etc.), **stop here** — report the clean result and do not proceed to init or run.
+
+**If `--clean` is combined with other flags** (e.g. `--clean --reinit`, `--clean --skip pmd`), clean first then continue to Step 1. In this case `--reinit` is implicit since clean already removes `pipeline.yml`.
 
 If the user passed `--list-steps`, run:
 

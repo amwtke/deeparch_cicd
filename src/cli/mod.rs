@@ -682,6 +682,13 @@ async fn cmd_retry(
 async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
     use crate::ci::detector;
 
+    // If output_path is relative, resolve it against the target project directory
+    let output_path = if output_path.is_relative() {
+        dir.join(&output_path)
+    } else {
+        output_path
+    };
+
     let (info, pipeline) = detector::detect_and_generate(&dir)?;
 
     // Print detection results
