@@ -171,6 +171,7 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
 
     let pipeline = Pipeline {
         name,
+        git_credentials: None,
         env: HashMap::new(),
         steps: all_configs.into_iter().map(|sc| sc.into()).collect(),
     };

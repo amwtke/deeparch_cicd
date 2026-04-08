@@ -255,7 +255,15 @@ async fn cmd_run(
                 continue;
             }
 
-            let step = pipeline.get_step(step_name).expect("step must exist").clone();
+            let mut step = pipeline.get_step(step_name).expect("step must exist").clone();
+
+            // Inject git credentials into git-pull step if configured
+            if step_name == "git-pull" {
+                if let Some(ref creds) = pipeline.git_credentials {
+                    step.env.insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
+                    step.env.insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
+                }
+            }
 
             // Signal step start
             if let Some(ref progress) = progress {
@@ -529,11 +537,20 @@ async fn cmd_retry(
     let pipeline_start = std::time::Instant::now();
 
     // Re-execute the failed step
-    let pipeline_step = pipeline
+    let mut retry_step = pipeline
         .get_step(&step_name)
-        .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in pipeline config", step_name))?;
+        .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in pipeline config", step_name))?
+        .clone();
 
-    let result = executor.run_step(&pipeline.name, pipeline_step, &project_dir, |_| {}).await?;
+    // Inject git credentials if configured
+    if step_name == "git-pull" {
+        if let Some(ref creds) = pipeline.git_credentials {
+            retry_step.env.insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
+            retry_step.env.insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
+        }
+    }
+
+    let result = executor.run_step(&pipeline.name, &retry_step, &project_dir, |_| {}).await?;
 
     // Update step state
     {
@@ -582,12 +599,20 @@ async fn cmd_retry(
             }
 
             // Execute the skipped step
-            let skipped_step = match pipeline.get_step(skipped_name) {
-                Some(s) => s,
+            let mut skipped_step = match pipeline.get_step(skipped_name) {
+                Some(s) => s.clone(),
                 None => continue,
             };
 
-            let sr = executor.run_step(&pipeline.name, skipped_step, &project_dir, |_| {}).await?;
+            // Inject git credentials if configured
+            if skipped_name == "git-pull" {
+                if let Some(ref creds) = pipeline.git_credentials {
+                    skipped_step.env.insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
+                    skipped_step.env.insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
+                }
+            }
+
+            let sr = executor.run_step(&pipeline.name, &skipped_step, &project_dir, |_| {}).await?;
 
             // Update state
             {

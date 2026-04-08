@@ -31,6 +31,23 @@ Pipeline 模型层       → YAML → DAG 解析, 变量插值, 条件表达式
 - Step 间通过共享 Docker volume 传递 artifact
 - 环境变量支持 `${VAR}` 插值语法
 - 并行执行无依赖关系的 step
+- PMD 使用独立 PMD CLI（非 Maven 插件），缓存在 `~/.pipelight/cache/`
+- `pipelight clean` 清除项目产物（pipeline.yml + pipelight-misc/），不影响全局缓存
+
+## Git HTTPS 认证 (git_credentials)
+pipeline.yml 支持 `git_credentials` 字段，用于内网 HTTPS 环境下 Docker 容器内的 git 操作：
+```yaml
+name: my-ci
+git_credentials:
+  username: your_username
+  password: your_token_or_password
+steps:
+  - name: git-pull
+    ...
+```
+- 凭据通过环境变量注入容器，用 `git credential helper` 传递给 git
+- **安全提示**：不要将包含明文密码的 pipeline.yml 提交到版本控制，建议加入 `.gitignore`
+- 如果不配置 `git_credentials`，git-pull 会尝试 SSH key（挂载 `~/.ssh`）
 
 ## Skill 回调 (Skill Callback)
 Pipelight 与调用它的 LLM 之间的协作协议。Pipelight 本身不执行智能操作（搜索文档、生成配置、修复代码），

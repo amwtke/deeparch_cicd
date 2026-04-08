@@ -96,7 +96,7 @@ retry: RunState + Parser → Executor → StepResult → Output + RunState
 ## 模块职责
 
 ### CLI (src/cli/)
-- clap 命令定义: run, validate, list, retry, init, status
+- clap 命令定义: run, validate, list, retry, init, status, clean
 - 参数解析和命令分发
 - 协调各模块完成命令执行
 

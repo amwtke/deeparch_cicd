@@ -11,10 +11,17 @@ impl GitPullStep {
 
 impl StepDef for GitPullStep {
     fn config(&self) -> StepConfig {
+        // If GIT_PIPELIGHT_USER/GIT_PIPELIGHT_PASS env vars are present (injected by
+        // pipeline builder when git_credentials is set), configure a credential helper.
+        let cred_setup = "\
+            if [ -n \"$GIT_PIPELIGHT_USER\" ] && [ -n \"$GIT_PIPELIGHT_PASS\" ]; then \
+              git config credential.helper '!f() { echo username=$GIT_PIPELIGHT_USER; echo password=$GIT_PIPELIGHT_PASS; }; f'; \
+            fi";
         StepConfig {
             name: "git-pull".into(),
             image: "alpine/git:latest".into(),
             commands: vec![
+                cred_setup.into(),
                 "if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi".into(),
                 "if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi".into(),
                 "echo \"Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))...\"".into(),

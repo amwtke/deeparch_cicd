@@ -3,10 +3,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Git credentials for HTTPS authentication inside Docker containers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCredentials {
+    pub username: String,
+    pub password: String,
+}
+
 /// Top-level pipeline definition, maps directly from YAML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
     pub name: String,
+
+    /// Git credentials for HTTPS pulls inside Docker (optional)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_credentials: Option<GitCredentials>,
 
     /// Global environment variables available to all steps
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
