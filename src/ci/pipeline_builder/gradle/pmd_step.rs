@@ -56,7 +56,7 @@ INITEOF\n\
                PMD_DIR=/tmp/pmd-bin-{pmd_ver} && \
                if [ ! -f $PMD_DIR/bin/pmd ]; then \
                  curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F{pmd_ver}/pmd-dist-{pmd_ver}-bin.zip -o /tmp/pmd.zip && \
-                 unzip -qo /tmp/pmd.zip -d /tmp/; \
+                 (cd /tmp && jar xf pmd.zip) && chmod +x $PMD_DIR/bin/pmd; \
                fi && \
                SOURCES=$(find . -path '*/src/main/java' -type d | tr '\\n' ',' | sed 's/,$//') && \
                if [ -z \"$SOURCES\" ]; then SOURCES=.; fi && \

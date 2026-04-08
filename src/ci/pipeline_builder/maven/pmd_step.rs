@@ -25,20 +25,26 @@ impl StepDef for PmdStep {
             None => String::new(),
         };
         // Check for custom ruleset in pipelight-misc.
-        // If found: run mvn pmd:pmd with that ruleset, collect per-module reports, output summary.
+        // If found: use standalone PMD CLI to scan with ONLY our ruleset (Maven plugin
+        //   always merges its default ruleset, so we bypass it entirely).
         // If not found: emit callback marker and exit 1 so the LLM can search/generate a ruleset.
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
-             mvn pmd:pmd -Dpmd.rulesetfiles=/workspace/pipelight-misc/pmd-ruleset.xml && \
+             PMD_VER=7.9.0 && \
+             PMD_DIR=/tmp/pmd-bin-$PMD_VER && \
+             if [ ! -f $PMD_DIR/bin/pmd ]; then \
+               echo 'Downloading PMD CLI...' && \
+               curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F$PMD_VER/pmd-dist-$PMD_VER-bin.zip -o /tmp/pmd.zip && \
+               (cd /tmp && jar xf pmd.zip) && chmod +x $PMD_DIR/bin/pmd; \
+             fi && \
+             SOURCES=$(find . -path '*/src/main/java' -type d | tr '\\n' ',' | sed 's/,$//') && \
+             if [ -z \"$SOURCES\" ]; then SOURCES=.; fi && \
              mkdir -p /workspace/pipelight-misc/pmd-report && \
-             TOTAL=0 && \
-             for f in $(find . -path '*/target/pmd.xml' -type f 2>/dev/null); do \
-               MODULE=$(echo \"$f\" | sed 's|^\\./||;s|/target/pmd\\.xml||'); \
-               cp \"$f\" /workspace/pipelight-misc/pmd-report/\"$(echo $MODULE | tr / _)-pmd.xml\"; \
-               COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null || echo 0); \
-               if [ \"$COUNT\" -gt 0 ]; then echo \"  $MODULE: $COUNT violations\"; fi; \
-               TOTAL=$((TOTAL + COUNT)); \
-             done && \
+             $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+               -R /workspace/pipelight-misc/pmd-ruleset.xml \
+               -f xml --no-cache \
+               -r /workspace/pipelight-misc/pmd-report/pmd-result.xml; \
+             TOTAL=$(grep -c '<violation' /workspace/pipelight-misc/pmd-report/pmd-result.xml 2>/dev/null || echo 0) && \
              echo \"\" && echo \"PMD Total: $TOTAL violations\"; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one.' >&2 && exit 1; \
