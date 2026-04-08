@@ -35,13 +35,15 @@ cd deeparch_cicd
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
+| `--clean` | 清除所有 pipelight 产物（pipeline.yml + pipelight-misc/）后停止；与其他参数组合时先清除再继续 | `/pipelight-run --clean` |
 | `--reinit` | 重新检测项目并覆盖 pipeline.yml | `/pipelight-run --reinit` |
 | `--skip <steps>` | 跳过指定 step（逗号分隔） | `/pipelight-run --skip spotbugs,pmd` |
 | `--step <name>` | 只运行指定 step | `/pipelight-run --step build` |
 | `--dry-run` | 只显示执行计划，不实际运行 | `/pipelight-run --dry-run` |
 | `--verbose` | 显示容器内全量输出 | `/pipelight-run --verbose` |
+| `--list-steps` | 列出检测到的所有 step，不运行 | `/pipelight-run --list-steps` |
 
-参数可组合使用：`/pipelight-run --reinit --skip pmd --verbose`
+参数可组合使用：`/pipelight-run --clean --reinit --skip pmd --verbose`
 
 #### /pipelight-run 失败处理流程
 
