@@ -24,6 +24,7 @@ pub struct StepConfig {
     pub on_failure: Option<OnFailure>,
     pub allow_failure: bool,
     pub volumes: Vec<String>,
+    pub local: bool,
 }
 
 impl Default for StepConfig {
@@ -37,6 +38,7 @@ impl Default for StepConfig {
             on_failure: None,
             allow_failure: false,
             volumes: vec![],
+            local: false,
         }
     }
 }
@@ -52,6 +54,7 @@ impl From<StepConfig> for Step {
             on_failure: sc.on_failure,
             allow_failure: sc.allow_failure,
             volumes: sc.volumes,
+            local: sc.local,
             env: HashMap::new(),
             condition: None,
         }

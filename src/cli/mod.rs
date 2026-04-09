@@ -278,7 +278,7 @@ async fn cmd_run(
             let m = mode.clone();
             let v = verbose;
             let progress_ref = progress.clone();
-            let result = executor.run_step(&pipeline.name, &step, &project_dir, move |line| {
+            let on_log = move |line: &crate::ci::executor::LogLine| {
                 match m {
                     OutputMode::Plain => {
                         plain::print_log_line(&sn, line, v);
@@ -290,7 +290,12 @@ async fn cmd_run(
                     }
                     _ => {}
                 }
-            }).await?;
+            };
+            let result = if step.local {
+                DockerExecutor::run_step_local(&step, &project_dir, on_log).await?
+            } else {
+                executor.run_step(&pipeline.name, &step, &project_dir, on_log).await?
+            };
 
             // Record step result for stats
             step_results.push((step_name.clone(), result.duration, result.success));
@@ -550,7 +555,11 @@ async fn cmd_retry(
         }
     }
 
-    let result = executor.run_step(&pipeline.name, &retry_step, &project_dir, |_| {}).await?;
+    let result = if retry_step.local {
+        DockerExecutor::run_step_local(&retry_step, &project_dir, |_| {}).await?
+    } else {
+        executor.run_step(&pipeline.name, &retry_step, &project_dir, |_| {}).await?
+    };
 
     // Update step state
     {
@@ -612,7 +621,11 @@ async fn cmd_retry(
                 }
             }
 
-            let sr = executor.run_step(&pipeline.name, &skipped_step, &project_dir, |_| {}).await?;
+            let sr = if skipped_step.local {
+                DockerExecutor::run_step_local(&skipped_step, &project_dir, |_| {}).await?
+            } else {
+                executor.run_step(&pipeline.name, &skipped_step, &project_dir, |_| {}).await?
+            };
 
             // Update state
             {

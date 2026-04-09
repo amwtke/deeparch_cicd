@@ -1,57 +1,66 @@
 name: rust-ci
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: "1"
-
+git_credentials:
+  username: your_username
+  password: your_token_or_password
 steps:
-  - name: build
-    image: rust:1.78-slim
-    commands:
-      - cargo build --release
-    env:
-      RUSTFLAGS: "-D warnings"
-    on_failure:
-      strategy: auto_fix
-      max_retries: 3
-      context_paths:
-        - src/
-        - Cargo.toml
-
-  - name: lint
-    image: rust:1.78-slim
-    commands:
-      - rustup component add clippy
-      - cargo clippy -- -D warnings
-    on_failure:
-      strategy: auto_fix
-      max_retries: 2
-      context_paths:
-        - src/
-
-  - name: test
-    image: rust:1.78-slim
-    depends_on: [build]
-    commands:
-      - cargo test --release
-    on_failure:
-      strategy: notify
-
-  - name: fmt-check
-    image: rust:1.78-slim
-    commands:
-      - rustup component add rustfmt
-      - cargo fmt -- --check
-    on_failure:
-      strategy: auto_fix
-      max_retries: 1
-      context_paths:
-        - src/
-
-  - name: security-audit
-    image: rust:1.78-slim
-    depends_on: [build]
-    allow_failure: true
-    commands:
-      - cargo install cargo-audit
-      - cargo audit
+- name: git-pull
+  image: alpine/git:latest
+  commands:
+  - if [ -n "$GIT_PIPELIGHT_USER" ] && [ -n "$GIT_PIPELIGHT_PASS" ]; then git config credential.helper '!f() { echo username=$GIT_PIPELIGHT_USER; echo password=$GIT_PIPELIGHT_PASS; }; f'; fi
+  - if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi
+  - if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi
+  - echo "Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))..."
+  - STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash && STASHED=true; fi
+  - 'git pull --rebase || { if $STASHED; then git stash pop; fi; echo ''ERROR: git pull --rebase failed — possible merge conflict''; exit 1; }'
+  - 'if $STASHED; then echo ''Restoring stashed changes...''; git stash pop || { echo ''ERROR: stash pop conflict — run git stash pop manually''; exit 1; }; fi'
+  on_failure:
+    callback_command: abort
+    max_retries: 0
+    context_paths: []
+  volumes:
+  - ~/.ssh:/root/.ssh:ro
+  - ~/.gitconfig:/root/.gitconfig:ro
+- name: build
+  image: rust:latest
+  commands:
+  - cargo build
+  depends_on:
+  - git-pull
+  on_failure:
+    callback_command: auto_fix
+    max_retries: 3
+    context_paths:
+    - src/
+    - Cargo.toml
+- name: clippy
+  image: rust:latest
+  commands:
+  - cargo clippy -- -D warnings
+  depends_on:
+  - build
+  on_failure:
+    callback_command: auto_fix
+    max_retries: 2
+    context_paths:
+    - src/
+- name: test
+  image: rust:latest
+  commands:
+  - cargo test
+  depends_on:
+  - build
+  on_failure:
+    callback_command: notify
+    max_retries: 0
+    context_paths: []
+- name: fmt-check
+  image: rust:latest
+  commands:
+  - cargo fmt -- --check
+  depends_on:
+  - git-pull
+  on_failure:
+    callback_command: auto_fix
+    max_retries: 1
+    context_paths:
+    - src/

@@ -33,7 +33,8 @@ pub struct Step {
     /// Unique step name
     pub name: String,
 
-    /// Docker image to use
+    /// Docker image to use (empty for local steps)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub image: String,
 
     /// Commands to execute inside the container
@@ -67,6 +68,10 @@ pub struct Step {
     /// Additional volume mounts (host:container format)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub volumes: Vec<String>,
+
+    /// Run commands locally (no Docker container)
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub local: bool,
 }
 
 fn default_workdir() -> String {

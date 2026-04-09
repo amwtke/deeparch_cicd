@@ -285,6 +285,57 @@ impl DockerExecutor {
         })
     }
 
+    /// Execute a single pipeline step locally (no Docker container).
+    pub async fn run_step_local(
+        step: &Step,
+        project_dir: &std::path::Path,
+        on_log: impl Fn(&LogLine) + Send,
+    ) -> Result<StepResult> {
+        let start = std::time::Instant::now();
+
+        info!(step = %step.name, "Starting local step");
+
+        let script = step.commands.join(" && ");
+
+        let output = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .current_dir(project_dir)
+            .envs(step.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .context(format!("Failed to execute local step '{}'", step.name))?;
+
+        let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+
+        let mut logs = Vec::new();
+        if !stdout_str.is_empty() {
+            let line = LogLine { stream: LogStream::Stdout, message: stdout_str };
+            on_log(&line);
+            logs.push(line);
+        }
+        if !stderr_str.is_empty() {
+            let line = LogLine { stream: LogStream::Stderr, message: stderr_str };
+            on_log(&line);
+            logs.push(line);
+        }
+
+        let exit_code = output.status.code().unwrap_or(-1) as i64;
+        let duration = start.elapsed();
+        let success = exit_code == 0 || step.allow_failure;
+
+        Ok(StepResult {
+            step_name: step.name.clone(),
+            exit_code,
+            logs,
+            duration,
+            success,
+        })
+    }
+
     /// Pull image if not available locally
     async fn ensure_image(&self, image: &str) -> Result<()> {
         // Check if image exists locally

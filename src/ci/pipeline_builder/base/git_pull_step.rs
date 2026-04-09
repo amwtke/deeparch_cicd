@@ -11,27 +11,16 @@ impl GitPullStep {
 
 impl StepDef for GitPullStep {
     fn config(&self) -> StepConfig {
-        // If GIT_PIPELIGHT_USER/GIT_PIPELIGHT_PASS env vars are present (injected by
-        // pipeline builder when git_credentials is set), configure a credential helper.
-        let cred_setup = "\
-            if [ -n \"$GIT_PIPELIGHT_USER\" ] && [ -n \"$GIT_PIPELIGHT_PASS\" ]; then \
-              git config credential.helper '!f() { echo username=$GIT_PIPELIGHT_USER; echo password=$GIT_PIPELIGHT_PASS; }; f'; \
-            fi";
         StepConfig {
             name: "git-pull".into(),
-            image: "alpine/git:latest".into(),
+            local: true,
             commands: vec![
-                cred_setup.into(),
                 "if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi".into(),
                 "if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi".into(),
                 "echo \"Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))...\"".into(),
                 "STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash && STASHED=true; fi".into(),
                 "git pull --rebase || { if $STASHED; then git stash pop; fi; echo 'ERROR: git pull --rebase failed — possible merge conflict'; exit 1; }".into(),
                 "if $STASHED; then echo 'Restoring stashed changes...'; git stash pop || { echo 'ERROR: stash pop conflict — run git stash pop manually'; exit 1; }; fi".into(),
-            ],
-            volumes: vec![
-                "~/.ssh:/root/.ssh:ro".into(),
-                "~/.gitconfig:/root/.gitconfig:ro".into(),
             ],
             on_failure: Some(OnFailure {
                 callback_command: CallbackCommand::Abort,
@@ -77,10 +66,10 @@ mod tests {
         let step = GitPullStep::new();
         let cfg = step.config();
         assert_eq!(cfg.name, "git-pull");
-        assert_eq!(cfg.image, "alpine/git:latest");
+        assert!(cfg.local);
+        assert!(cfg.image.is_empty());
         assert!(cfg.depends_on.is_empty());
-        assert!(cfg.volumes.iter().any(|v| v.contains(".ssh")));
-        assert!(cfg.volumes.iter().any(|v| v.contains(".gitconfig")));
+        assert!(cfg.volumes.is_empty());
         let on_failure = cfg.on_failure.as_ref().unwrap();
         assert_eq!(on_failure.callback_command, CallbackCommand::Abort);
         assert_eq!(on_failure.max_retries, 0);
