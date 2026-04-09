@@ -975,17 +975,44 @@ async fn cmd_docker_prepare(file: PathBuf) -> Result<i32> {
         }
     }
 
-    println!();
-    if failed.is_empty() {
-        println!(
-            "All images ready. You can now run: pipelight run -f {}",
-            file.display()
-        );
-        Ok(0)
-    } else {
-        println!("Failed to pull: {}", failed.join(", "));
-        Ok(1)
+    if !failed.is_empty() {
+        println!("\nFailed to pull: {}", failed.join(", "));
+        return Ok(1);
     }
+
+    // Install Rust toolchain components (clippy, rustfmt) into images that need them
+    let rust_images: BTreeSet<String> = pipeline
+        .steps
+        .iter()
+        .filter(|s| {
+            !s.local
+                && !s.image.is_empty()
+                && s.commands
+                    .iter()
+                    .any(|c| c.contains("cargo clippy") || c.contains("cargo fmt"))
+        })
+        .map(|s| s.image.clone())
+        .collect();
+
+    for image in &rust_images {
+        print!("  Installing clippy+rustfmt in {} ... ", image);
+        let setup_result = executor
+            .run_setup_container(
+                image,
+                "rustup component add clippy rustfmt 2>/dev/null || true",
+            )
+            .await;
+        match setup_result {
+            Ok(_) => println!("OK"),
+            Err(e) => println!("WARN ({})", e),
+        }
+    }
+
+    println!(
+        "\nAll images ready. You can now run: pipelight run -f {}",
+        file.display()
+    );
+    Ok(0)
 }
 
 #[cfg(test)]

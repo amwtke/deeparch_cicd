@@ -145,11 +145,13 @@ impl DockerExecutor {
         let cmd = vec![script];
 
         // Build environment variables
-        let env: Vec<String> = step
+        let mut env: Vec<String> = step
             .env
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
+        // Set HOME to workdir so non-root user can write to ~ inside container
+        env.push(format!("HOME={}", step.workdir));
 
         // Bind mount project directory into container workdir
         let host_path = project_dir
@@ -360,10 +362,87 @@ impl DockerExecutor {
         })
     }
 
-    /// Pull image if not available locally
     /// Pull an image if not already available locally.
     pub async fn pull_image(&self, image: &str) -> Result<()> {
         self.ensure_image(image).await
+    }
+
+    /// Run a setup command as root in a temporary container and commit the result
+    /// back to the same image tag. Used by docker-prepare to install tools.
+    pub async fn run_setup_container(&self, image: &str, command: &str) -> Result<()> {
+        use bollard::image::CommitContainerOptions;
+
+        let container_name = format!("pipelight-setup-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+
+        let config = Config {
+            image: Some(image.to_string()),
+            entrypoint: Some(vec!["sh".to_string()]),
+            cmd: Some(vec!["-c".to_string(), command.to_string()]),
+            ..Default::default()
+        };
+
+        let container = self
+            .docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: container_name.clone(),
+                    ..Default::default()
+                }),
+                config,
+            )
+            .await
+            .context("Failed to create setup container")?;
+
+        self.docker
+            .start_container(&container.id, None::<StartContainerOptions<String>>)
+            .await
+            .context("Failed to start setup container")?;
+
+        let wait_opts = WaitContainerOptions {
+            condition: "not-running",
+        };
+        let mut wait_stream = self.docker.wait_container(&container.id, Some(wait_opts));
+        while let Some(result) = wait_stream.next().await {
+            if let Err(e) = result {
+                warn!(error = %e, "Error waiting for setup container");
+                break;
+            }
+        }
+
+        // Parse image:tag for commit
+        let (repo, tag) = if let Some(pos) = image.rfind(':') {
+            (&image[..pos], &image[pos + 1..])
+        } else {
+            (image, "latest")
+        };
+
+        // Commit the container state back to the same image
+        self.docker
+            .commit_container(
+                CommitContainerOptions {
+                    container: container_name.clone(),
+                    repo: repo.to_string(),
+                    tag: tag.to_string(),
+                    ..Default::default()
+                },
+                Config::<String>::default(),
+            )
+            .await
+            .context("Failed to commit setup container")?;
+
+        // Clean up
+        self.docker
+            .remove_container(
+                &container.id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .ok();
+
+        Ok(())
     }
 
     async fn ensure_image(&self, image: &str) -> Result<()> {
