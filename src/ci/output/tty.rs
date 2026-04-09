@@ -155,10 +155,11 @@ impl PipelineProgressUI {
         }
         self.last_log = msg.to_string();
 
-        // Truncate log to fit terminal
-        let max_log_len = 60;
-        let log_display = if msg.len() > max_log_len {
-            format!("{}...", &msg[..max_log_len])
+        // Truncate log to fit terminal (char-safe for multi-byte UTF-8)
+        let max_log_chars = 60;
+        let log_display = if msg.chars().count() > max_log_chars {
+            let truncated: String = msg.chars().take(max_log_chars).collect();
+            format!("{}...", truncated)
         } else {
             msg.to_string()
         };
