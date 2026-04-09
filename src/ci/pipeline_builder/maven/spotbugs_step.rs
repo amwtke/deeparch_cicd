@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
 use crate::ci::parser::{CallbackCommand, OnFailure};
-use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
+use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct SpotbugsStep {
     image: String,
@@ -120,13 +120,14 @@ impl StepDef for SpotbugsStep {
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
         let output = format!("{}{}", stdout, stderr);
-        let bugs = count_pattern(&output, &["Bug", "bug"]);
-        if success {
-            "spotbugs: no bugs found".into()
-        } else if bugs > 0 {
-            format!("spotbugs: {} bugs found", bugs)
-        } else {
+        // Extract "SpotBugs Total: N bugs found" line from shell output
+        if let Some(line) = output.lines().find(|l| l.contains("SpotBugs Total:")) {
+            return line.trim().to_string();
+        }
+        if !success {
             "spotbugs: failed".into()
+        } else {
+            "spotbugs: no bugs found".into()
         }
     }
 }
