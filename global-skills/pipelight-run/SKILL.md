@@ -249,24 +249,35 @@ digraph pmd_callback {
 }
 ```
 
-### Step 1: Search for Existing `pmd-ruleset.xml`
+### Step 1: Search for Existing PMD Configuration
 
-Search the project (including subdirectories/modules) for existing PMD ruleset files:
+Search the project for **any existing PMD configuration** — the project may already have PMD set up. Check in this priority order:
 
 ```
-# Search patterns, in priority order:
-pmd-ruleset.xml
-pmd.xml
-ruleset.xml (only in directories that suggest PMD context)
-config/pmd/*.xml
+# Priority 1: Standalone PMD ruleset files
 **/pmd-ruleset.xml
+**/pmd.xml
+**/config/pmd/*.xml
+**/ruleset.xml  (only in directories that suggest PMD context, e.g. config/pmd/)
+
+# Priority 2: Build tool PMD plugin config (extract the ruleset path)
+pom.xml → look for <artifactId>maven-pmd-plugin</artifactId> → <rulesets><ruleset>path</ruleset>
+build.gradle / build.gradle.kts → look for pmd { ruleSetFiles = ... }
+
+# Priority 3: PMD config in module subdirectories
+**/pmd-ruleset.xml
+module-*/config/pmd/*.xml
 ```
 
-For **multi-module Gradle/Maven** projects, also search inside each module directory (e.g. `module-a/config/pmd/`).
+**IMPORTANT:** Do NOT use files under `target/` or `build/` directories — those are build artifacts and unreliable.
 
-If found:
-1. Copy the file to `<project-root>/pipelight-misc/pmd-ruleset.xml` (where `<project-root>` is the directory containing `pipeline.yml`)
-2. Retry the PMD step: `pipelight retry --run-id <same-id> --step pmd -f pipeline.yml --output json`
+If a standalone ruleset file is found:
+1. Copy it to `<project-root>/pipelight-misc/pmd-ruleset.xml`
+2. Retry the PMD step
+
+If a build tool references a ruleset path (e.g. `<ruleset>config/pmd/custom-rules.xml</ruleset>`):
+1. Locate that file and copy it to `<project-root>/pipelight-misc/pmd-ruleset.xml`
+2. Retry the PMD step
 
 ### Step 2: Search for Coding Guideline Documents
 
@@ -325,30 +336,24 @@ Pipelight uses **PMD 7.x** (currently 7.9.0). Many rules were renamed or removed
 
 If any "Unable to find referenced rule" errors appear, fix the rule names before placing the ruleset.
 
-**When generating from Alibaba Java Coding Guidelines**, the following rules MUST be included (PMD 7.x names):
+**Generating ruleset from coding guidelines — general approach:**
 
-| Alibaba Rule | PMD 7.x Rule | Category |
-|---|---|---|
-| 命名: UpperCamelCase | `ClassNamingConventions` | codestyle |
-| 命名: lowerCamelCase | `MethodNamingConventions`, `FieldNamingConventions`, `LocalVariableNamingConventions`, `FormalParameterNamingConventions` | codestyle |
-| 包名小写 | `PackageCase` | codestyle |
-| 禁止魔法值 | `AvoidLiteralsInIfCondition` | errorprone |
-| if/for/while 必须大括号 | `ControlStatementBraces` | codestyle |
-| switch 必须有 default | `SwitchStmtsShouldHaveDefault` | bestpractices |
-| if-else 不超过 3 层 | `AvoidDeeplyNestedIfStmts` (problemDepth=3) | design |
-| 方法不超过 80 行 | `NcssCount` (methodReportLevel=80) | design |
-| @Override 必须加 | `MissingOverride` | bestpractices |
-| 常量.equals(变量) | `EqualsNull` | errorprone |
-| Integer 用 equals | `CompareObjectsWithEquals` | errorprone |
-| equals+hashCode 成对 | `OverrideBothEqualsAndHashcode` | errorprone |
-| BigDecimal(double) 禁用 | `AvoidDecimalLiteralsInBigDecimalConstructor` | errorprone |
-| 不要 catch 泛型异常 | `AvoidCatchingGenericException` | design |
-| 不要吞异常 | `EmptyCatchBlock` | errorprone |
-| finally 禁止 return | `ReturnFromFinallyBlock` | errorprone |
-| finally 关闭资源 | `CloseResource` | errorprone |
-| 用日志框架 | `AvoidPrintStackTrace`, `ProperLogger` | bestpractices, errorprone |
-| 禁止显式创建线程 | `DoNotUseThreads` | multithreading |
-| SimpleDateFormat 线程安全 | `UnsynchronizedStaticFormatter` | multithreading |
+The LLM must read the found guideline document, identify its rules, and map each rule to PMD 7.x rule references. Different projects use different coding standards — do NOT assume any specific guideline (e.g. Alibaba, Google, SonarQube). Always derive rules from the actual document content.
+
+Common guideline-to-PMD mappings (for reference, not exhaustive):
+
+| Guideline Rule Category | Typical PMD 7.x Rules |
+|---|---|
+| Naming conventions (CamelCase, etc.) | `ClassNamingConventions`, `MethodNamingConventions`, `FieldNamingConventions`, `PackageCase` |
+| Code formatting (braces, etc.) | `ControlStatementBraces` |
+| Control flow (switch default, nesting) | `SwitchStmtsShouldHaveDefault`, `AvoidDeeplyNestedIfStmts` |
+| Method complexity/length | `NcssCount`, `ExcessiveParameterList` |
+| OOP rules (equals, override, etc.) | `MissingOverride`, `CompareObjectsWithEquals`, `OverrideBothEqualsAndHashcode` |
+| Exception handling | `AvoidCatchingGenericException`, `EmptyCatchBlock`, `ReturnFromFinallyBlock`, `CloseResource` |
+| Logging | `AvoidPrintStackTrace`, `ProperLogger` |
+| Concurrency | `DoNotUseThreads`, `UnsynchronizedStaticFormatter` |
+| Numeric precision | `AvoidDecimalLiteralsInBigDecimalConstructor` |
+| Unused code | `UnusedLocalVariable`, `UnusedPrivateField`, `UnusedPrivateMethod` |
 
 **PMD ruleset XML template:**
 
