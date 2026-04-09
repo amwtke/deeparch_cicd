@@ -31,7 +31,7 @@ steps:
 - name: clippy
   image: rust:latest
   commands:
-  - cargo clippy -- -D warnings
+  - rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings
   depends_on:
   - build
   on_failure:
@@ -52,7 +52,7 @@ steps:
 - name: fmt-check
   image: rust:latest
   commands:
-  - cargo fmt -- --check
+  - rustup component add rustfmt 2>/dev/null; cargo fmt -- --check
   depends_on:
   - git-pull
   on_failure:

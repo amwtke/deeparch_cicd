@@ -125,13 +125,14 @@ impl BaseStrategy {
     }
 
     fn report_spotbugs(success: bool, output: &str) -> String {
-        let bug_count = count_pattern(output, &["Bug", "bug"]);
-        if success {
-            "spotbugs: no bugs found".into()
-        } else if bug_count > 0 {
-            format!("spotbugs: {} bugs found", bug_count)
-        } else {
+        // Extract "SpotBugs Total: N bugs found" line from shell output
+        if let Some(line) = output.lines().find(|l| l.contains("SpotBugs Total:")) {
+            return line.trim().to_string();
+        }
+        if !success {
             "spotbugs: failed".into()
+        } else {
+            "spotbugs: no bugs found".into()
         }
     }
 

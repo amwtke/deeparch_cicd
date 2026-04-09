@@ -175,20 +175,68 @@ Pipeline failed with no auto-fix strategy. Report the error:
 
 ### `status: "retryable"`
 
-Pipeline failed but auto-fix is configured. Enter fix-retry loop:
+Pipeline failed but auto-fix is configured. Enter fix-retry loop. **Each round of the loop MUST be printed to the user** so they can see the full discovery → fix → retry process.
+
+#### Fix-Retry Loop
 
 1. Find the failed step (the one with `status: "failed"`)
-2. Read `stderr` to understand the error
-3. Read files listed in `on_failure.context_paths` to understand context
-4. Fix the code
-5. Check `retries_remaining > 0` before retrying
-6. Run retry:
+2. **Print diagnosis** — show what failed and why:
+
+```
+### <step-name> failed (retryable, N retries remaining)
+
+**Error:** <one-line error summary from stderr>
+**File:** <file:line if available from error_context or stderr>
+```
+
+3. Read `stderr` to understand the error
+4. Read files listed in `on_failure.context_paths` to understand context
+5. **Print what you're fixing** — show the cause and the fix:
+
+```
+**Cause:** <root cause explanation>
+**Fix:** <what you changed>
+**Files modified:**
+- `path/to/file.java` — <brief description of change>
+```
+
+6. Fix the code
+7. Check `retries_remaining > 0` before retrying
+8. **Print retry action:**
+
+```
+### Retrying <step-name>...
+```
+
+9. Run retry:
 
 ```bash
 pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml --output json
 ```
 
-7. Parse the new JSON result and repeat from Step 4
+10. Parse the new JSON result and repeat from Step 4
+
+#### Multiple Rounds
+
+If multiple retry rounds occur, print each round sequentially so the user sees the full history. Number them: `### Round 1`, `### Round 2`, etc.
+
+### Success Report (after retries)
+
+When the pipeline eventually succeeds after one or more fix-retry rounds, the final summary table MUST include an **Auto-fix History** section below the step table, listing all files that were modified during the fix-retry loop:
+
+Example:
+
+| Step | Status | Summary |
+|------|--------|---------|
+| build | success | Compiled successfully |
+| pmd | success | PMD Total: 0 violations |
+| test | success | Tests: 42 passed, 0 failed |
+
+**Auto-fix History (1 round):**
+- `src/com/example/Foo.java:128` — removed stray junk text `ddddddd` causing syntax error
+- `src/com/example/Bar.java:45` — fixed missing semicolon
+
+If no auto-fix occurred (pipeline passed on first run), omit this section entirely.
 
 ## Exit Code Reference
 

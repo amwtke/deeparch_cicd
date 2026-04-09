@@ -21,7 +21,9 @@ impl StepDef for ClippyStep {
         StepConfig {
             name: "clippy".into(),
             image: self.image.clone(),
-            commands: vec!["cargo clippy -- -D warnings".into()],
+            commands: vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".into(),
+            ],
             depends_on: vec!["build".into()],
             on_failure: Some(OnFailure {
                 callback_command: CallbackCommand::AutoFix,

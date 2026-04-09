@@ -68,8 +68,12 @@ mod tests {
             image: "rust:1.78".into(),
             build_cmd: vec!["cargo build".into()],
             test_cmd: vec!["cargo test".into()],
-            lint_cmd: Some(vec!["cargo clippy -- -D warnings".into()]),
-            fmt_cmd: Some(vec!["cargo fmt -- --check".into()]),
+            lint_cmd: Some(vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".into(),
+            ]),
+            fmt_cmd: Some(vec![
+                "rustup component add rustfmt 2>/dev/null; cargo fmt -- --check".into(),
+            ]),
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],

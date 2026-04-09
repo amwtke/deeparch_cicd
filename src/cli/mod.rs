@@ -367,7 +367,12 @@ async fn cmd_run(
                 )
             };
             // Record step result for stats
-            step_results.push((step_name.clone(), result.duration, result.success, report_summary.clone()));
+            step_results.push((
+                step_name.clone(),
+                result.duration,
+                result.success,
+                report_summary.clone(),
+            ));
 
             let report_log_path = crate::ci::pipeline_builder::write_step_report(
                 &misc_dir, step_name, &stdout, &stderr,
