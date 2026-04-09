@@ -2,7 +2,7 @@ use console::{style, Emoji, Term};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
-use crate::ci::executor::{LogLine, LogStream, StepResult};
+use crate::ci::executor::{LogLine, LogStream};
 use crate::ci::parser::Pipeline;
 use crate::ci::pipeline_builder::test_parser::TestSummary;
 use crate::ci::scheduler::Scheduler;
@@ -26,6 +26,8 @@ static RUNNING: Emoji<'_, '_> = Emoji("⏳", "[..]");
 pub struct PipelineProgressUI {
     step_names: Vec<String>,
     step_status: Vec<StepStage>,
+    /// Batch boundaries: batches[i] = list of step names that run in parallel
+    batches: Vec<Vec<String>>,
     current_index: usize,
     spinner: Option<ProgressBar>,
     pipeline_name: String,
@@ -47,12 +49,18 @@ impl PipelineProgressUI {
         Self {
             step_names: step_names.to_vec(),
             step_status,
+            batches: vec![],
             current_index: 0,
             spinner: None,
             pipeline_name: String::new(),
             last_log: String::new(),
             verbose,
         }
+    }
+
+    /// Set batch groupings from scheduler output for flow line display.
+    pub fn set_batches(&mut self, schedule: &[Vec<String>]) {
+        self.batches = schedule.to_vec();
     }
 
     /// Print initial header.
@@ -63,33 +71,63 @@ impl PipelineProgressUI {
         println!("{}", self.format_flow_line());
     }
 
-    /// Build the flow line: 🚀 maven-java-ci: ✅build → ⏳test → ⬚package
+    /// Build the flow line showing DAG execution order.
+    /// Parallel steps in same batch joined with ` + `, batches separated with ` → `.
+    /// Example: 🚀 rust-ci: ✅git-pull → ✅build + ✅fmt-check → ⏳test + ⬚clippy
     fn format_flow_line(&self) -> String {
-        let mut parts = Vec::new();
-        for (i, name) in self.step_names.iter().enumerate() {
-            let icon = match self.step_status[i] {
+        let step_icon = |name: &str| -> String {
+            let idx = self.step_names.iter().position(|n| n == name);
+            let stage = idx
+                .map(|i| &self.step_status[i])
+                .unwrap_or(&StepStage::Pending);
+            let icon = match stage {
                 StepStage::Pending => PENDING.to_string(),
                 StepStage::Running => RUNNING.to_string(),
                 StepStage::Success => CHECK.to_string(),
                 StepStage::Failed => CROSS.to_string(),
             };
-            let name_styled = match self.step_status[i] {
+            let name_styled = match stage {
                 StepStage::Pending => style(name).dim().to_string(),
                 StepStage::Running => style(name).yellow().bold().to_string(),
                 StepStage::Success => style(name).green().to_string(),
                 StepStage::Failed => style(name).red().to_string(),
             };
-            parts.push(format!("{}{}", icon, name_styled));
+            format!("{}{}", icon, name_styled)
+        };
+
+        if self.batches.is_empty() {
+            // Fallback: no batch info, show flat list
+            let parts: Vec<String> = self.step_names.iter().map(|n| step_icon(n)).collect();
+            return format!(
+                "{} {}: {}",
+                ROCKET,
+                style(&self.pipeline_name).cyan().bold(),
+                parts.join(&format!(" {} ", style("→").dim()))
+            );
         }
+
+        let batch_parts: Vec<String> = self
+            .batches
+            .iter()
+            .map(|batch| {
+                batch
+                    .iter()
+                    .map(|n| step_icon(n))
+                    .collect::<Vec<_>>()
+                    .join(&format!(" {} ", style("+").dim()))
+            })
+            .collect();
+
         format!(
             "{} {}: {}",
             ROCKET,
             style(&self.pipeline_name).cyan().bold(),
-            parts.join(&format!(" {} ", style("→").dim()))
+            batch_parts.join(&format!(" {} ", style("→").dim()))
         )
     }
 
     /// Reprint the flow line by moving cursor up and overwriting.
+    #[allow(dead_code)]
     fn refresh_flow_line(&self) {
         let term = Term::stderr();
         // Move up 2 lines (flow line + spinner line), clear, reprint flow

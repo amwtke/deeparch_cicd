@@ -139,7 +139,7 @@ impl Pipeline {
         // Check for duplicate step names
         let mut seen = HashMap::new();
         for step in &self.steps {
-            if let Some(_) = seen.insert(&step.name, true) {
+            if seen.insert(&step.name, true).is_some() {
                 bail!("Duplicate step name: '{}'", step.name);
             }
         }
@@ -174,6 +174,7 @@ impl Pipeline {
     }
 
     /// Get merged env for a step (global + step-level, step overrides global)
+    #[allow(dead_code)]
     pub fn merged_env(&self, step: &Step) -> HashMap<String, String> {
         let mut env = self.env.clone();
         env.extend(step.env.clone());

@@ -2,7 +2,7 @@ pub mod clippy_step;
 
 use crate::ci::detector::ProjectInfo;
 use crate::ci::pipeline_builder::base::{BuildStep, FmtStep, TestStep};
-use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
+use crate::ci::pipeline_builder::{PipelineStrategy, StepDef};
 use regex::Regex;
 
 pub struct RustStrategy;

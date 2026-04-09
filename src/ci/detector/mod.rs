@@ -7,4 +7,4 @@ pub mod python;
 pub mod rust_project;
 
 // Re-export base types for external use
-pub use base::{detect_and_generate, ProjectDetector, ProjectInfo, ProjectType};
+pub use base::{detect_and_generate, ProjectInfo, ProjectType};

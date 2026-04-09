@@ -122,6 +122,7 @@ impl Scheduler {
     }
 
     /// Get the execution depth of each step (for display purposes)
+    #[allow(dead_code)]
     pub fn step_depths(&self) -> HashMap<String, usize> {
         let schedule = self.resolve(None).unwrap_or_default();
         let mut depths = HashMap::new();

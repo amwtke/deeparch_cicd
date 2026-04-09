@@ -131,7 +131,7 @@ impl DockerExecutor {
             "pipelight-{}-{}-{}",
             pipeline_name,
             step.name,
-            uuid::Uuid::new_v4().to_string()[..8].to_string()
+            &uuid::Uuid::new_v4().to_string()[..8]
         );
 
         info!(step = %step.name, image = %step.image, "Starting step");
@@ -176,6 +176,25 @@ impl DockerExecutor {
             if std::path::Path::new(host_part).exists() {
                 binds.push(expanded);
             }
+        }
+
+        // Auto-mount cargo cache for Rust steps to avoid re-downloading crates
+        if step.image.contains("rust") {
+            let cache_base = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".pipelight/cache");
+            let registry_cache = cache_base.join("cargo-registry");
+            let git_cache = cache_base.join("cargo-git");
+            let _ = std::fs::create_dir_all(&registry_cache);
+            let _ = std::fs::create_dir_all(&git_cache);
+            binds.push(format!(
+                "{}:/usr/local/cargo/registry",
+                registry_cache.display()
+            ));
+            binds.push(format!(
+                "{}:/usr/local/cargo/git",
+                git_cache.display()
+            ));
         }
 
         let host_config = HostConfig {

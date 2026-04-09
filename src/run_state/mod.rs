@@ -90,6 +90,7 @@ impl RunState {
         self.steps.iter_mut().find(|s| s.name == name)
     }
 
+    #[allow(dead_code)]
     pub fn update_step(
         &mut self,
         name: &str,

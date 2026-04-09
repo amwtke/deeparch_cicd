@@ -68,10 +68,12 @@ pub trait StepDef: Send + Sync {
     fn config(&self) -> StepConfig;
 
     /// Produce a one-line human-readable summary of step execution.
+    #[allow(dead_code)]
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String;
 
     /// Write a timestamped log file and return its path.
     /// Default implementation delegates to `write_step_report`.
+    #[allow(dead_code)]
     fn output_report_path(&self, misc_dir: &Path, stdout: &str, stderr: &str) -> PathBuf {
         let cfg = self.config();
         write_step_report(misc_dir, &cfg.name, stdout, stderr)

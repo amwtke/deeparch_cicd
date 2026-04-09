@@ -21,6 +21,7 @@ pub fn print_log_line(name: &str, line: &LogLine, verbose: bool) {
 }
 
 /// Print step completion with optional report summary and log path
+#[allow(dead_code)]
 pub fn print_step_finish(name: &str, success: bool, duration: std::time::Duration) {
     let status = if success { "OK" } else { "FAIL" };
     println!("[{}] {} ({:.1}s)", name, status, duration.as_secs_f64());
@@ -60,7 +61,7 @@ pub fn print_stats_table(
     total: std::time::Duration,
 ) {
     println!();
-    println!("{:<16} {:<12} {}", "Step", "Duration", "Status");
+    println!("{:<16} {:<12} Status", "Step", "Duration");
     for (name, dur, success) in results {
         let status = if *success { "OK" } else { "FAIL" };
         println!(

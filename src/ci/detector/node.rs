@@ -41,7 +41,7 @@ impl NodeDetector {
             // Find the matching closing brace for the scripts object
             if let Some(open_pos) = scripts_section.find('{') {
                 let mut depth = 0;
-                let section_bytes = scripts_section[open_pos..].as_bytes();
+                let section_bytes = &scripts_section.as_bytes()[open_pos..];
                 let mut close_pos = open_pos;
                 for (i, &b) in section_bytes.iter().enumerate() {
                     match b {

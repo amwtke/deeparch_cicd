@@ -8,6 +8,7 @@ pub struct TestSummary {
 }
 
 impl TestSummary {
+    #[allow(dead_code)]
     pub fn new(passed: u32, failed: u32, skipped: u32) -> Self {
         Self {
             passed,
@@ -16,10 +17,12 @@ impl TestSummary {
         }
     }
 
+    #[allow(dead_code)]
     pub fn total(&self) -> u32 {
         self.passed + self.failed + self.skipped
     }
 
+    #[allow(dead_code)]
     pub fn all_passed(&self) -> bool {
         self.failed == 0
     }

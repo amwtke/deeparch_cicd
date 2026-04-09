@@ -220,18 +220,21 @@ async fn cmd_run(
 
     let executor = DockerExecutor::new().await?;
 
+    let schedule = scheduler.resolve(step_filter.as_deref())?;
+
+    // Build step names in DAG execution order (flattened from schedule batches)
+    let step_names: Vec<String> = schedule.iter().flatten().cloned().collect();
+
     // Set up progress UI (wrapped in Arc<Mutex> so on_log closure can access it)
-    let step_names: Vec<String> = pipeline.steps.iter().map(|s| s.name.clone()).collect();
     let progress: Option<std::sync::Arc<std::sync::Mutex<PipelineProgressUI>>> =
         if mode == OutputMode::Tty {
             let mut p = PipelineProgressUI::new(&step_names, verbose);
+            p.set_batches(&schedule);
             p.print_header(&pipeline.name, pipeline.steps.len());
             Some(std::sync::Arc::new(std::sync::Mutex::new(p)))
         } else {
             None
         };
-
-    let schedule = scheduler.resolve(step_filter.as_deref())?;
 
     let mut has_final_failure = false;
     let mut has_retryable_failure = false;
