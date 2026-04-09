@@ -305,6 +305,26 @@ If found:
 5. Organize supplementary files under `<project-root>/pipelight-misc/pmd/` if needed (e.g. `pipelight-misc/pmd/source-guideline.md` for traceability)
 6. Retry the PMD step: `pipelight retry --run-id <same-id> --step pmd -f pipeline.yml --output json`
 
+**CRITICAL: PMD Version Compatibility**
+
+Pipelight uses **PMD 7.x** (currently 7.9.0). Many rules were renamed or removed between PMD 6.x and 7.x. You **MUST** use PMD 7.x rule names. Common mistakes:
+
+| PMD 6.x (WRONG) | PMD 7.x (CORRECT) | Notes |
+|---|---|---|
+| `UnusedImports` | *(removed)* | Compiler handles this in PMD 7 |
+| `DoNotCallSystemExit` | *(removed)* | No equivalent in PMD 7 |
+| `ExcessiveMethodLength` | `NcssCount` | Use `methodReportLevel` property |
+| `ExcessiveClassLength` | `NcssCount` | Use `classReportLevel` property |
+| `ExcessiveParameterList` minimum=`"8.0"` | minimum=`"8"` | Integer, not float |
+
+**How to verify rule names:** Before writing the ruleset, run this on the host to confirm rules exist:
+
+```bash
+~/.pipelight/cache/pmd-bin-7.9.0/bin/pmd check -d /dev/null -R <your-ruleset.xml> -f text --no-cache 2>&1 | grep -i "Unable to find"
+```
+
+If any "Unable to find referenced rule" errors appear, fix the rule names before placing the ruleset.
+
 **PMD ruleset XML template:**
 
 ```xml
@@ -313,9 +333,9 @@ If found:
          xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
-    <description>Auto-generated from project coding guidelines</description>
+    <description>Auto-generated from project coding guidelines (PMD 7.x compatible)</description>
 
-    <!-- Map each guideline rule to a PMD rule reference -->
+    <!-- Map each guideline rule to a PMD 7.x rule reference -->
     <rule ref="category/java/bestpractices.xml/UnusedPrivateField" />
     <rule ref="category/java/codestyle.xml/MethodNamingConventions" />
     <!-- ... more rules based on the guideline content ... -->

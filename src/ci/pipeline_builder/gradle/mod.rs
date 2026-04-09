@@ -254,6 +254,29 @@ mod tests {
     }
 
     #[test]
+    fn test_pmd_step_detects_invalid_ruleset() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("Cannot load ruleset"), "should detect ruleset loading errors");
+        assert!(cmd.contains("Unable to find referenced rule"), "should detect invalid rule names");
+        assert!(cmd.contains("exit 1"), "should exit 1 on invalid ruleset");
+    }
+
+    #[test]
+    fn test_pmd_callback_includes_pmd_version() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("PMD 7"), "callback message should mention PMD 7.x");
+        assert!(cmd.contains("not PMD 6"), "callback should warn against PMD 6.x rule names");
+    }
+
+    #[test]
     fn test_pmd_report_callback_message() {
         let pmd = pmd_step::PmdStep::new(&make_gradle_info_with_lint());
         let report = pmd.output_report_str(false, "", "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset");

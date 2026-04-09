@@ -65,7 +65,14 @@ INITEOF\n\
                $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
                  -R /workspace/pipelight-misc/pmd-ruleset.xml \
                  -f xml --no-cache \
-                 -r /workspace/pipelight-misc/pmd-report/pmd-result.xml || true; \
+                 -r /workspace/pipelight-misc/pmd-report/pmd-result.xml \
+                 2>/tmp/pmd-stderr.log; \
+               if grep -q 'Cannot load ruleset\\|Unable to find referenced rule' /tmp/pmd-stderr.log 2>/dev/null; then \
+                 echo 'ERROR: PMD ruleset has invalid rules. Details:' >&2; \
+                 grep 'Unable to find referenced rule\\|Cannot load ruleset\\|XML validation error' /tmp/pmd-stderr.log >&2; \
+                 echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - pmd-ruleset.xml contains invalid rule references for PMD {pmd_ver}. LLM must regenerate with correct PMD 7.x rule names.' >&2; \
+                 exit 1; \
+               fi; \
              fi && \
              TOTAL=0 && \
              for f in /workspace/pipelight-misc/pmd-report/*.xml; do \
@@ -76,7 +83,7 @@ INITEOF\n\
              done && \
              echo \"\" && echo \"PMD Total: $TOTAL violations\"; \
              else \
-             echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one.' >&2 && exit 1; \
+             echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD {pmd_ver} rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
              fi",
             cd = cd_prefix,
             pmd_ver = PMD_CLI_VERSION
