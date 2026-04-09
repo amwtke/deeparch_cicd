@@ -191,10 +191,7 @@ impl DockerExecutor {
                 "{}:/usr/local/cargo/registry",
                 registry_cache.display()
             ));
-            binds.push(format!(
-                "{}:/usr/local/cargo/git",
-                git_cache.display()
-            ));
+            binds.push(format!("{}:/usr/local/cargo/git", git_cache.display()));
         }
 
         let host_config = HostConfig {
