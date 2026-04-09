@@ -57,18 +57,19 @@ pub fn print_test_summary(summary: &TestSummary) {
 
 /// Print step duration statistics table
 pub fn print_stats_table(
-    results: &[(String, std::time::Duration, bool)],
+    results: &[(String, std::time::Duration, bool, String)],
     total: std::time::Duration,
 ) {
     println!();
-    println!("{:<16} {:<12} Status", "Step", "Duration");
-    for (name, dur, success) in results {
+    println!("{:<16} {:<12} {:<8} Summary", "Step", "Duration", "Status");
+    for (name, dur, success, summary) in results {
         let status = if *success { "OK" } else { "FAIL" };
         println!(
-            "{:<16} {:<12} {}",
+            "{:<16} {:<12} {:<8} {}",
             name,
             format!("{:.1}s", dur.as_secs_f64()),
-            status
+            status,
+            summary
         );
     }
     println!("{:<16} {:.1}s", "Total", total.as_secs_f64());

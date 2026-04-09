@@ -254,7 +254,7 @@ async fn cmd_run(
     let mut has_final_failure = false;
     let mut has_retryable_failure = false;
     let mut current_batch_index = 0;
-    let mut step_results: Vec<(String, std::time::Duration, bool)> = Vec::new();
+    let mut step_results: Vec<(String, std::time::Duration, bool, String)> = Vec::new();
     let mut test_summary: Option<crate::ci::pipeline_builder::test_parser::TestSummary> = None;
 
     'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
@@ -342,9 +342,6 @@ async fn cmd_run(
                     .await?
             };
 
-            // Record step result for stats
-            step_results.push((step_name.clone(), result.duration, result.success));
-
             let pipeline_step = pipeline.get_step(step_name);
 
             let step_status = if result.success {
@@ -369,6 +366,9 @@ async fn cmd_run(
                     &stderr,
                 )
             };
+            // Record step result for stats
+            step_results.push((step_name.clone(), result.duration, result.success, report_summary.clone()));
+
             let report_log_path = crate::ci::pipeline_builder::write_step_report(
                 &misc_dir, step_name, &stdout, &stderr,
             );

@@ -316,24 +316,31 @@ impl PipelineProgressUI {
     }
 
     /// Print step duration statistics table.
-    pub fn print_stats_table(&self, results: &[(String, Duration, bool)], total: Duration) {
+    pub fn print_stats_table(&self, results: &[(String, Duration, bool, String)], total: Duration) {
         println!();
         println!(
-            "{} {:<16} {:<12} {}",
+            "{} {:<16} {:<12} {}  {}",
             CLOCK,
             style("Step").bold(),
             style("Duration").bold(),
-            style("Status").bold()
+            style("Status").bold(),
+            style("Summary").bold()
         );
-        for (name, dur, success) in results {
+        for (name, dur, success, summary) in results {
             let status = if *success {
                 CHECK.to_string()
             } else {
                 CROSS.to_string()
             };
-            println!("   {:<16} {:<12} {}", name, format_duration(*dur), status);
+            println!(
+                "   {:<16} {:<12} {}  {}",
+                name,
+                format_duration(*dur),
+                status,
+                style(summary).dim()
+            );
         }
-        println!("{}", style("─".repeat(56)).dim());
+        println!("{}", style("─".repeat(72)).dim());
         println!(
             "   {:<16} {}",
             "Total",
