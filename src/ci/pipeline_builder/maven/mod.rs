@@ -61,8 +61,8 @@ impl StepDef for MavenCachedStep {
     fn config(&self) -> StepConfig {
         let mut cfg = self.inner.config();
         cfg.volumes = vec![
-            "~/.m2:/root/.m2".to_string(),
-            "~/.pipelight/cache:/root/.pipelight/cache".to_string(),
+            "~/.m2:/workspace/.m2".to_string(),
+            "~/.pipelight/cache:/workspace/.pipelight/cache".to_string(),
         ];
         if let Some(ref deps) = self.depends_on_override {
             cfg.depends_on = deps.clone();
@@ -259,7 +259,7 @@ mod tests {
         for step in &steps {
             let cfg = step.config();
             assert!(
-                cfg.volumes.contains(&"~/.m2:/root/.m2".to_string()),
+                cfg.volumes.contains(&"~/.m2:/workspace/.m2".to_string()),
                 "step '{}' should have Maven cache volume",
                 cfg.name
             );

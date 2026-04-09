@@ -31,7 +31,7 @@ impl StepDef for PmdStep {
         let cmd = format!(
             "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
              PMD_VER=7.9.0 && \
-             PMD_CACHE=/root/.pipelight/cache && \
+             PMD_CACHE=$HOME/.pipelight/cache && \
              PMD_DIR=$PMD_CACHE/pmd-bin-$PMD_VER && \
              if [ ! -f $PMD_DIR/bin/pmd ]; then \
                echo 'Downloading PMD CLI...' && \

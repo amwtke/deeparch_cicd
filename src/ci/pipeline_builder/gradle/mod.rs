@@ -51,8 +51,8 @@ impl StepDef for GradleCachedStep {
     fn config(&self) -> StepConfig {
         let mut cfg = self.inner.config();
         cfg.volumes = vec![
-            "~/.gradle:/root/.gradle".to_string(),
-            "~/.pipelight/cache:/root/.pipelight/cache".to_string(),
+            "~/.gradle:/workspace/.gradle".to_string(),
+            "~/.pipelight/cache:/workspace/.pipelight/cache".to_string(),
         ];
         if let Some(ref deps) = self.depends_on_override {
             cfg.depends_on = deps.clone();
@@ -197,13 +197,13 @@ mod tests {
         for step in &steps {
             let cfg = step.config();
             assert!(
-                cfg.volumes.contains(&"~/.gradle:/root/.gradle".to_string()),
+                cfg.volumes.contains(&"~/.gradle:/workspace/.gradle".to_string()),
                 "step '{}' should have Gradle cache volume",
                 cfg.name
             );
             assert!(
                 cfg.volumes
-                    .contains(&"~/.pipelight/cache:/root/.pipelight/cache".to_string()),
+                    .contains(&"~/.pipelight/cache:/workspace/.pipelight/cache".to_string()),
                 "step '{}' should have pipelight cache volume",
                 cfg.name
             );

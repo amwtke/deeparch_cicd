@@ -53,7 +53,7 @@ INITEOF\n\
                find . -path '*/build/reports/pmd/*.xml' -type f -exec cp {{}} /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
              else \
                echo 'PMD plugin not found in Gradle, using standalone PMD CLI...' && \
-               PMD_CACHE=/root/.pipelight/cache && \
+               PMD_CACHE=$HOME/.pipelight/cache && \
                PMD_DIR=$PMD_CACHE/pmd-bin-{pmd_ver} && \
                if [ ! -f $PMD_DIR/bin/pmd ]; then \
                  mkdir -p $PMD_CACHE && \
