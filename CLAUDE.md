@@ -109,3 +109,8 @@ src/
     executor/          → 执行器: Docker 容器执行
     output/            → 输出器: 终端日志格式化 (tty/plain/json)
 ```
+
+## Skill 编辑规则
+- 修改 skill 时，必须先改 `global-skills/<skill-name>/SKILL.md`（repo 源文件），再通过 `cp -r global-skills/<skill-name>/ ~/.claude/skills/<skill-name>/` 同步到本地
+- **禁止**直接编辑 `~/.claude/skills/` 下的文件，因为 `/pipelight-sync` 会用 `global-skills/` 覆盖本地
+- 改完后需要 commit + push 到 repo，确保跨机器同步

@@ -140,7 +140,9 @@ JSON structure:
         "retries_remaining": 3,
         "context_paths": ["src/", "Cargo.toml"]
       },
-      "test_summary": { "passed": 42, "failed": 3, "skipped": 1 }
+      "test_summary": { "passed": 42, "failed": 3, "skipped": 1 },
+      "report_summary": "Compiled successfully",
+      "report_path": "pipelight-misc/build-20260410T002026.log"
     }
   ]
 }
@@ -150,7 +152,18 @@ JSON structure:
 
 ### `status: "success"`
 
-Report success to user. Show step durations if relevant.
+Report success to user with a summary table including Step, Status, and Summary columns. The Summary column shows each step's `report_summary` field from the JSON output.
+
+Example:
+
+| Step | Status | Summary |
+|------|--------|---------|
+| git-pull | skipped | — |
+| build | success | Compiled successfully |
+| pmd | success | PMD Total: 0 violations |
+| spotbugs | success | SpotBugs Total: 0 bugs found |
+| test | success | Tests: 42 passed, 0 failed |
+| package | success | Packaged successfully |
 
 ### `status: "failed"`
 
