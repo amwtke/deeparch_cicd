@@ -325,6 +325,31 @@ Pipelight uses **PMD 7.x** (currently 7.9.0). Many rules were renamed or removed
 
 If any "Unable to find referenced rule" errors appear, fix the rule names before placing the ruleset.
 
+**When generating from Alibaba Java Coding Guidelines**, the following rules MUST be included (PMD 7.x names):
+
+| Alibaba Rule | PMD 7.x Rule | Category |
+|---|---|---|
+| 命名: UpperCamelCase | `ClassNamingConventions` | codestyle |
+| 命名: lowerCamelCase | `MethodNamingConventions`, `FieldNamingConventions`, `LocalVariableNamingConventions`, `FormalParameterNamingConventions` | codestyle |
+| 包名小写 | `PackageCase` | codestyle |
+| 禁止魔法值 | `AvoidLiteralsInIfCondition` | errorprone |
+| if/for/while 必须大括号 | `ControlStatementBraces` | codestyle |
+| switch 必须有 default | `SwitchStmtsShouldHaveDefault` | bestpractices |
+| if-else 不超过 3 层 | `AvoidDeeplyNestedIfStmts` (problemDepth=3) | design |
+| 方法不超过 80 行 | `NcssCount` (methodReportLevel=80) | design |
+| @Override 必须加 | `MissingOverride` | bestpractices |
+| 常量.equals(变量) | `EqualsNull` | errorprone |
+| Integer 用 equals | `CompareObjectsWithEquals` | errorprone |
+| equals+hashCode 成对 | `OverrideBothEqualsAndHashcode` | errorprone |
+| BigDecimal(double) 禁用 | `AvoidDecimalLiteralsInBigDecimalConstructor` | errorprone |
+| 不要 catch 泛型异常 | `AvoidCatchingGenericException` | design |
+| 不要吞异常 | `EmptyCatchBlock` | errorprone |
+| finally 禁止 return | `ReturnFromFinallyBlock` | errorprone |
+| finally 关闭资源 | `CloseResource` | errorprone |
+| 用日志框架 | `AvoidPrintStackTrace`, `ProperLogger` | bestpractices, errorprone |
+| 禁止显式创建线程 | `DoNotUseThreads` | multithreading |
+| SimpleDateFormat 线程安全 | `UnsynchronizedStaticFormatter` | multithreading |
+
 **PMD ruleset XML template:**
 
 ```xml
@@ -338,6 +363,9 @@ If any "Unable to find referenced rule" errors appear, fix the rule names before
     <!-- Map each guideline rule to a PMD 7.x rule reference -->
     <rule ref="category/java/bestpractices.xml/UnusedPrivateField" />
     <rule ref="category/java/codestyle.xml/MethodNamingConventions" />
+    <rule ref="category/java/codestyle.xml/ControlStatementBraces" />
+    <rule ref="category/java/bestpractices.xml/SwitchStmtsShouldHaveDefault" />
+    <rule ref="category/java/errorprone.xml/AvoidDecimalLiteralsInBigDecimalConstructor" />
     <!-- ... more rules based on the guideline content ... -->
 </ruleset>
 ```

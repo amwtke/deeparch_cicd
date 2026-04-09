@@ -53,8 +53,28 @@ impl StepDef for PmdStep {
                echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - pmd-ruleset.xml contains invalid rule references for PMD 7.9.0. LLM must regenerate with correct PMD 7.x rule names.' >&2; \
                exit 1; \
              fi; \
-             TOTAL=$(grep -c '<violation' /workspace/pipelight-misc/pmd-report/pmd-result.xml 2>/dev/null || echo 0) && \
-             echo \"\" && echo \"PMD Total: $TOTAL violations\"; \
+             TOTAL=$(grep -c '<violation' /workspace/pipelight-misc/pmd-report/pmd-result.xml 2>/dev/null || echo 0); \
+             REPORT=/workspace/pipelight-misc/pmd-report; \
+             echo \"\"; echo \"PMD Total: $TOTAL violations\"; \
+             echo \"\"; echo \"=== Violations by Rule ===\"; \
+             grep -o 'rule=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+               | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
+             echo \"\"; echo \"=== Top 10 Files ===\"; \
+             grep -o 'name=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+               | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
+             $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+               -R /workspace/pipelight-misc/pmd-ruleset.xml \
+               -f html --no-cache --no-progress \
+               -r $REPORT/pmd-result.html 2>/dev/null || true; \
+             ( echo \"PMD Report Summary\"; echo \"==================\"; \
+               echo \"Total violations: $TOTAL\"; echo \"\"; \
+               echo \"By Rule:\"; \
+               grep -o 'rule=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+                 | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
+               echo \"\"; echo \"Top 10 Files:\"; \
+               grep -o 'name=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+                 | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
+             ) > $REPORT/pmd-summary.txt 2>/dev/null; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD 7.9.0 rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
              fi",

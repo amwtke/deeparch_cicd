@@ -74,14 +74,44 @@ INITEOF\n\
                  exit 1; \
                fi; \
              fi && \
-             TOTAL=0 && \
-             for f in /workspace/pipelight-misc/pmd-report/*.xml; do \
+             REPORT=/workspace/pipelight-misc/pmd-report; \
+             TOTAL=0; \
+             for f in $REPORT/*.xml; do \
                [ -f \"$f\" ] || continue; \
                COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null || echo 0); \
                if [ \"$COUNT\" -gt 0 ]; then echo \"  $(basename $f .xml): $COUNT violations\"; fi; \
                TOTAL=$((TOTAL + COUNT)); \
-             done && \
-             echo \"\" && echo \"PMD Total: $TOTAL violations\"; \
+             done; \
+             echo \"\"; echo \"PMD Total: $TOTAL violations\"; \
+             echo \"\"; echo \"=== Violations by Rule ===\"; \
+             for f in $REPORT/*.xml; do \
+               [ -f \"$f\" ] || continue; \
+               grep -o 'rule=\"[^\"]*\"' \"$f\" 2>/dev/null; \
+             done | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
+             echo \"\"; echo \"=== Top 10 Files ===\"; \
+             for f in $REPORT/*.xml; do \
+               [ -f \"$f\" ] || continue; \
+               grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
+             done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
+             if [ -f $PMD_DIR/bin/pmd ] 2>/dev/null; then \
+               $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+                 -R /workspace/pipelight-misc/pmd-ruleset.xml \
+                 -f html --no-cache --no-progress \
+                 -r $REPORT/pmd-result.html 2>/dev/null || true; \
+             fi; \
+             ( echo \"PMD Report Summary\"; echo \"==================\"; \
+               echo \"Total violations: $TOTAL\"; echo \"\"; \
+               echo \"By Rule:\"; \
+               for f in $REPORT/*.xml; do \
+                 [ -f \"$f\" ] || continue; \
+                 grep -o 'rule=\"[^\"]*\"' \"$f\" 2>/dev/null; \
+               done | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
+               echo \"\"; echo \"Top 10 Files:\"; \
+               for f in $REPORT/*.xml; do \
+                 [ -f \"$f\" ] || continue; \
+                 grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
+               done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
+             ) > $REPORT/pmd-summary.txt 2>/dev/null; \
              else \
              echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD {pmd_ver} rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
              fi",
