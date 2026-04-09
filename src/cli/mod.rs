@@ -211,10 +211,25 @@ async fn cmd_run(
     let mut state = RunState::new(&run_id, &pipeline.name);
     let pipeline_start = std::time::Instant::now();
 
-    // Clear and recreate pipelight-misc/ for fresh logs each run
+    // Clear logs and report directories in pipelight-misc/, but preserve config files
+    // (e.g. pmd-ruleset.xml, spotbugs-exclude.xml) to avoid expensive regeneration.
     let misc_dir = project_dir.join("pipelight-misc");
     if misc_dir.exists() {
-        std::fs::remove_dir_all(&misc_dir).context("Failed to clean pipelight-misc/ directory")?;
+        if let Ok(entries) = std::fs::read_dir(&misc_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Remove log files and report directories; keep everything else (rulesets, exclude filters)
+                if name_str.ends_with(".log") || name_str.ends_with("-report") {
+                    if path.is_dir() {
+                        let _ = std::fs::remove_dir_all(&path);
+                    } else {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
     }
     std::fs::create_dir_all(&misc_dir).context("Failed to create pipelight-misc/ directory")?;
 
