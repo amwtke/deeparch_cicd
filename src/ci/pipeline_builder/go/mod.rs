@@ -1,9 +1,9 @@
 pub mod vet_step;
 
-use regex::Regex;
 use crate::ci::detector::ProjectInfo;
+use crate::ci::pipeline_builder::base::{BuildStep, FmtStep, LintStep, TestStep};
 use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
-use crate::ci::pipeline_builder::base::{BuildStep, TestStep, LintStep, FmtStep};
+use regex::Regex;
 
 pub struct GoStrategy;
 
@@ -12,7 +12,9 @@ fn parse_go_test(output: &str) -> Option<String> {
     let fail_re = Regex::new(r"(?m)^FAIL\s+").unwrap();
     let passed = ok_re.find_iter(output).count() as u32;
     let failed = fail_re.find_iter(output).count() as u32;
-    if passed == 0 && failed == 0 { return None; }
+    if passed == 0 && failed == 0 {
+        return None;
+    }
     Some(format!("{} passed, {} failed", passed, failed))
 }
 

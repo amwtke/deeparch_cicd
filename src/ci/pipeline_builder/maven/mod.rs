@@ -3,16 +3,16 @@ pub mod package_step;
 pub mod pmd_step;
 pub mod spotbugs_step;
 
-use regex::Regex;
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef, test_parser};
 use crate::ci::pipeline_builder::base::{self, BuildStep, TestStep};
+use crate::ci::pipeline_builder::{test_parser, PipelineStrategy, StepConfig, StepDef};
+use regex::Regex;
 
 pub struct MavenStrategy;
 
 fn parse_maven_test(output: &str) -> Option<String> {
-    let re = Regex::new(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)")
-        .unwrap();
+    let re =
+        Regex::new(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)").unwrap();
     let mut total_run: u32 = 0;
     let mut total_failures: u32 = 0;
     let mut total_errors: u32 = 0;
@@ -25,10 +25,15 @@ fn parse_maven_test(output: &str) -> Option<String> {
         total_errors += cap[3].parse::<u32>().unwrap_or(0);
         total_skipped += cap[4].parse::<u32>().unwrap_or(0);
     }
-    if !found { return None; }
+    if !found {
+        return None;
+    }
     let passed = total_run.saturating_sub(total_failures + total_errors + total_skipped);
     let failed = total_failures + total_errors;
-    Some(format!("{} passed, {} failed, {} skipped", passed, failed, total_skipped))
+    Some(format!(
+        "{} passed, {} failed, {} skipped",
+        passed, failed, total_skipped
+    ))
 }
 
 /// Wrapper that adds Maven cache volume to any step
@@ -39,10 +44,16 @@ struct MavenCachedStep {
 
 impl MavenCachedStep {
     fn wrap(inner: Box<dyn StepDef>) -> Self {
-        Self { inner, depends_on_override: None }
+        Self {
+            inner,
+            depends_on_override: None,
+        }
     }
     fn wrap_with_deps(inner: Box<dyn StepDef>, deps: Vec<String>) -> Self {
-        Self { inner, depends_on_override: Some(deps) }
+        Self {
+            inner,
+            depends_on_override: Some(deps),
+        }
     }
 }
 
@@ -68,7 +79,13 @@ impl PipelineStrategy for MavenStrategy {
         "maven-java-ci".into()
     }
 
-    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+    fn output_report_str(
+        &self,
+        step_name: &str,
+        success: bool,
+        stdout: &str,
+        stderr: &str,
+    ) -> String {
         if step_name == "test" {
             let output = format!("{}{}", stdout, stderr);
             if let Some(summary) = parse_maven_test(&output) {
@@ -93,10 +110,16 @@ impl PipelineStrategy for MavenStrategy {
             total_errors += cap[3].parse::<u32>().unwrap_or(0);
             total_skipped += cap[4].parse::<u32>().unwrap_or(0);
         }
-        if !found { return None; }
+        if !found {
+            return None;
+        }
         let passed = total_run.saturating_sub(total_failures + total_errors + total_skipped);
         let failed = total_failures + total_errors;
-        Some(test_parser::TestSummary { passed, failed, skipped: total_skipped })
+        Some(test_parser::TestSummary {
+            passed,
+            failed,
+            skipped: total_skipped,
+        })
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<Box<dyn StepDef>> {
@@ -104,24 +127,37 @@ impl PipelineStrategy for MavenStrategy {
         let mut quality_step_names: Vec<String> = vec![];
 
         // Build
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(BuildStep::new(info)))));
+        steps.push(Box::new(MavenCachedStep::wrap(Box::new(BuildStep::new(
+            info,
+        )))));
 
         // Quality checks
         if info.lint_cmd.is_some() {
-            steps.push(Box::new(MavenCachedStep::wrap(Box::new(checkstyle_step::CheckstyleStep::new(info)))));
+            steps.push(Box::new(MavenCachedStep::wrap(Box::new(
+                checkstyle_step::CheckstyleStep::new(info),
+            ))));
             quality_step_names.push("checkstyle".into());
         }
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(spotbugs_step::SpotbugsStep::new(info)))));
+        steps.push(Box::new(MavenCachedStep::wrap(Box::new(
+            spotbugs_step::SpotbugsStep::new(info),
+        ))));
         quality_step_names.push("spotbugs".into());
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(pmd_step::PmdStep::new(info)))));
+        steps.push(Box::new(MavenCachedStep::wrap(Box::new(
+            pmd_step::PmdStep::new(info),
+        ))));
         quality_step_names.push("pmd".into());
 
         // Test depends on quality steps
         let test_step = TestStep::new(info).with_parser(parse_maven_test);
-        steps.push(Box::new(MavenCachedStep::wrap_with_deps(Box::new(test_step), quality_step_names)));
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(test_step),
+            quality_step_names,
+        )));
 
         // Package
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(package_step::PackageStep::new(info)))));
+        steps.push(Box::new(MavenCachedStep::wrap(Box::new(
+            package_step::PackageStep::new(info),
+        ))));
 
         steps
     }
@@ -175,7 +211,10 @@ mod tests {
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
         // build, checkstyle, spotbugs, pmd, test, package
-        assert_eq!(names, vec!["build", "checkstyle", "spotbugs", "pmd", "test", "package"]);
+        assert_eq!(
+            names,
+            vec!["build", "checkstyle", "spotbugs", "pmd", "test", "package"]
+        );
         // test depends on quality steps
         let test_cfg = steps[4].config();
         assert_eq!(test_cfg.depends_on, vec!["checkstyle", "spotbugs", "pmd"]);
@@ -219,8 +258,11 @@ mod tests {
         let steps = strategy.steps(&info);
         for step in &steps {
             let cfg = step.config();
-            assert!(cfg.volumes.contains(&"~/.m2:/root/.m2".to_string()),
-                "step '{}' should have Maven cache volume", cfg.name);
+            assert!(
+                cfg.volumes.contains(&"~/.m2:/root/.m2".to_string()),
+                "step '{}' should have Maven cache volume",
+                cfg.name
+            );
         }
     }
 
@@ -230,7 +272,11 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
         let of = pmd_cfg.on_failure.unwrap();
         assert_eq!(of.callback_command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(of.max_retries, 2);
@@ -241,7 +287,11 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
         let cmd = &pmd_cfg.commands[0];
         assert!(cmd.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset"));
         assert!(cmd.contains("pipelight-misc/pmd-ruleset.xml"));
@@ -252,10 +302,20 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
         let cmd = &pmd_cfg.commands[0];
-        assert!(cmd.contains("Cannot load ruleset"), "should detect ruleset loading errors");
-        assert!(cmd.contains("Unable to find referenced rule"), "should detect invalid rule names");
+        assert!(
+            cmd.contains("Cannot load ruleset"),
+            "should detect ruleset loading errors"
+        );
+        assert!(
+            cmd.contains("Unable to find referenced rule"),
+            "should detect invalid rule names"
+        );
         assert!(cmd.contains("exit 1"), "should exit 1 on invalid ruleset");
     }
 
@@ -264,10 +324,20 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let pmd_cfg = steps.iter().find(|s| s.config().name == "pmd").unwrap().config();
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
         let cmd = &pmd_cfg.commands[0];
-        assert!(cmd.contains("PMD 7"), "callback message should mention PMD 7.x");
-        assert!(cmd.contains("not PMD 6"), "callback should warn against PMD 6.x rule names");
+        assert!(
+            cmd.contains("PMD 7"),
+            "callback message should mention PMD 7.x"
+        );
+        assert!(
+            cmd.contains("not PMD 6"),
+            "callback should warn against PMD 6.x rule names"
+        );
     }
 
     #[test]
@@ -276,8 +346,15 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let cfg = steps.iter().find(|s| s.config().name == "spotbugs").unwrap().config();
-        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::AutoFix);
+        let cfg = steps
+            .iter()
+            .find(|s| s.config().name == "spotbugs")
+            .unwrap()
+            .config();
+        assert_eq!(
+            cfg.on_failure.unwrap().callback_command,
+            CallbackCommand::AutoFix
+        );
     }
 
     #[test]
@@ -286,8 +363,15 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let cfg = steps.iter().find(|s| s.config().name == "checkstyle").unwrap().config();
-        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::AutoFix);
+        let cfg = steps
+            .iter()
+            .find(|s| s.config().name == "checkstyle")
+            .unwrap()
+            .config();
+        assert_eq!(
+            cfg.on_failure.unwrap().callback_command,
+            CallbackCommand::AutoFix
+        );
     }
 
     #[test]
@@ -296,14 +380,24 @@ mod tests {
         let info = make_maven_info_with_lint();
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
-        let cfg = steps.iter().find(|s| s.config().name == "package").unwrap().config();
-        assert_eq!(cfg.on_failure.unwrap().callback_command, CallbackCommand::Abort);
+        let cfg = steps
+            .iter()
+            .find(|s| s.config().name == "package")
+            .unwrap()
+            .config();
+        assert_eq!(
+            cfg.on_failure.unwrap().callback_command,
+            CallbackCommand::Abort
+        );
     }
 
     #[test]
     fn test_parse_maven_test_single_module() {
         let output = "Tests run: 42, Failures: 0, Errors: 0, Skipped: 2";
-        assert_eq!(parse_maven_test(output).unwrap(), "40 passed, 0 failed, 2 skipped");
+        assert_eq!(
+            parse_maven_test(output).unwrap(),
+            "40 passed, 0 failed, 2 skipped"
+        );
     }
 
     #[test]
@@ -312,7 +406,10 @@ mod tests {
 Tests run: 10, Failures: 1, Errors: 0, Skipped: 0
 Tests run: 20, Failures: 0, Errors: 2, Skipped: 1
 Tests run: 5, Failures: 0, Errors: 0, Skipped: 0";
-        assert_eq!(parse_maven_test(output).unwrap(), "31 passed, 3 failed, 1 skipped");
+        assert_eq!(
+            parse_maven_test(output).unwrap(),
+            "31 passed, 3 failed, 1 skipped"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
-use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct ClippyStep {
     image: String,
@@ -36,11 +36,17 @@ impl StepDef for ClippyStep {
         let output = format!("{}{}", stdout, stderr);
         let warnings = count_pattern(&output, &["warning:", "WARNING"]);
         if success {
-            if warnings > 0 { format!("clippy: {} warnings", warnings) }
-            else { "clippy: no issues found".into() }
+            if warnings > 0 {
+                format!("clippy: {} warnings", warnings)
+            } else {
+                "clippy: no issues found".into()
+            }
         } else {
-            if warnings > 0 { format!("clippy: {} issues found", warnings) }
-            else { "clippy: failed".into() }
+            if warnings > 0 {
+                format!("clippy: {} issues found", warnings)
+            } else {
+                "clippy: failed".into()
+            }
         }
     }
 }

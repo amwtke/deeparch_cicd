@@ -1,9 +1,9 @@
 pub mod clippy_step;
 
-use regex::Regex;
 use crate::ci::detector::ProjectInfo;
+use crate::ci::pipeline_builder::base::{BuildStep, FmtStep, TestStep};
 use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
-use crate::ci::pipeline_builder::base::{BuildStep, TestStep, FmtStep};
+use regex::Regex;
 
 pub struct RustStrategy;
 
@@ -19,8 +19,13 @@ fn parse_rust_test(output: &str) -> Option<String> {
         total_failed += cap[2].parse::<u32>().unwrap_or(0);
         total_ignored += cap[3].parse::<u32>().unwrap_or(0);
     }
-    if !found { return None; }
-    Some(format!("{} passed, {} failed, {} ignored", total_passed, total_failed, total_ignored))
+    if !found {
+        return None;
+    }
+    Some(format!(
+        "{} passed, {} failed, {} ignored",
+        total_passed, total_failed, total_ignored
+    ))
 }
 
 impl PipelineStrategy for RustStrategy {
@@ -63,8 +68,12 @@ mod tests {
             image: "rust:1.78".into(),
             build_cmd: vec!["cargo build".into()],
             test_cmd: vec!["cargo test".into()],
-            lint_cmd: Some(vec!["cargo clippy -- -D warnings".into()]),
-            fmt_cmd: Some(vec!["cargo fmt -- --check".into()]),
+            lint_cmd: Some(vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".into(),
+            ]),
+            fmt_cmd: Some(vec![
+                "rustup component add rustfmt 2>/dev/null; cargo fmt -- --check".into(),
+            ]),
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
@@ -127,7 +136,10 @@ mod tests {
     #[test]
     fn test_parse_rust_test_single() {
         let output = "test result: ok. 42 passed; 0 failed; 2 ignored";
-        assert_eq!(parse_rust_test(output).unwrap(), "42 passed, 0 failed, 2 ignored");
+        assert_eq!(
+            parse_rust_test(output).unwrap(),
+            "42 passed, 0 failed, 2 ignored"
+        );
     }
 
     #[test]
@@ -135,7 +147,10 @@ mod tests {
         let output = "\
 test result: ok. 10 passed; 0 failed; 1 ignored
 test result: FAILED. 5 passed; 2 failed; 0 ignored";
-        assert_eq!(parse_rust_test(output).unwrap(), "15 passed, 2 failed, 1 ignored");
+        assert_eq!(
+            parse_rust_test(output).unwrap(),
+            "15 passed, 2 failed, 1 ignored"
+        );
     }
 
     #[test]

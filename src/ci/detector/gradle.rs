@@ -51,19 +51,16 @@ impl GradleDetector {
     /// 2. org.springframework.boot:spring-boot*:3.2.0
     fn extract_spring_boot_version(content: &str) -> Option<String> {
         // Plugin block: id 'org.springframework.boot' version '3.2.0'
-        let plugin_re = Regex::new(
-            r#"id\s*['"]org\.springframework\.boot['"]\s*version\s*['"]([^'"]+)['"]"#,
-        )
-        .ok()?;
+        let plugin_re =
+            Regex::new(r#"id\s*['"]org\.springframework\.boot['"]\s*version\s*['"]([^'"]+)['"]"#)
+                .ok()?;
         if let Some(caps) = plugin_re.captures(content) {
             return caps.get(1).map(|m| m.as_str().to_string());
         }
 
         // Dependency: org.springframework.boot:spring-boot*:3.2.0
-        let dep_re = Regex::new(
-            r#"org\.springframework\.boot:spring-boot[^:]*:([0-9][^\s'"]+)"#,
-        )
-        .ok()?;
+        let dep_re =
+            Regex::new(r#"org\.springframework\.boot:spring-boot[^:]*:([0-9][^\s'"]+)"#).ok()?;
         if let Some(caps) = dep_re.captures(content) {
             return caps.get(1).map(|m| m.as_str().to_string());
         }
@@ -201,7 +198,11 @@ mod tests {
     #[test]
     fn test_analyze_jdk_version() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("build.gradle"), "sourceCompatibility = '21'").unwrap();
+        fs::write(
+            dir.path().join("build.gradle"),
+            "sourceCompatibility = '21'",
+        )
+        .unwrap();
         let info = GradleDetector.analyze(dir.path()).unwrap();
         assert_eq!(info.language_version, Some("21".into()));
         assert!(info.image.contains("21"));
@@ -224,7 +225,11 @@ sourceCompatibility = '17'
     #[test]
     fn test_analyze_legacy_jdk_1_8() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("build.gradle"), "sourceCompatibility = '1.8'").unwrap();
+        fs::write(
+            dir.path().join("build.gradle"),
+            "sourceCompatibility = '1.8'",
+        )
+        .unwrap();
         let info = GradleDetector.analyze(dir.path()).unwrap();
         assert_eq!(info.language_version, Some("8".into()));
         assert_eq!(info.image, "gradle:8-jdk8");

@@ -1,10 +1,10 @@
 pub mod base;
-pub mod maven;
+pub mod go;
 pub mod gradle;
-pub mod rust_lang;
+pub mod maven;
 pub mod node;
 pub mod python;
-pub mod go;
+pub mod rust_lang;
 pub mod test_parser;
 
 use std::collections::HashMap;
@@ -88,7 +88,13 @@ pub trait PipelineStrategy {
 
     /// Parse step output into a human-readable summary line.
     /// Default: delegates to BaseStrategy for common steps.
-    fn output_report_str(&self, step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+    fn output_report_str(
+        &self,
+        step_name: &str,
+        success: bool,
+        stdout: &str,
+        stderr: &str,
+    ) -> String {
         base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
     }
 
@@ -204,7 +210,11 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
     }
 
     if let Err(e) = std::fs::write(&log_path, &content) {
-        tracing::warn!("Failed to write step report to {}: {}", log_path.display(), e);
+        tracing::warn!(
+            "Failed to write step report to {}: {}",
+            log_path.display(),
+            e
+        );
     }
 
     log_path

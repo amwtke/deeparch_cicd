@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
-use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct FmtStep {
     pub image: String,
@@ -103,7 +103,11 @@ mod tests {
         info.fmt_cmd = Some(vec!["cargo fmt -- --check".into()]);
         let step = FmtStep::new(&info).unwrap();
         assert_eq!(
-            step.output_report_str(false, "error: left behind trailing whitespace\nerror: diff\n", ""),
+            step.output_report_str(
+                false,
+                "error: left behind trailing whitespace\nerror: diff\n",
+                ""
+            ),
             "fmt-check: 2 errors"
         );
     }

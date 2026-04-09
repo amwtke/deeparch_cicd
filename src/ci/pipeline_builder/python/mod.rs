@@ -1,9 +1,9 @@
 pub mod mypy_step;
 
-use regex::Regex;
 use crate::ci::detector::ProjectInfo;
+use crate::ci::pipeline_builder::base::{BuildStep, FmtStep, LintStep, TestStep};
 use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
-use crate::ci::pipeline_builder::base::{BuildStep, TestStep, LintStep, FmtStep};
+use regex::Regex;
 
 pub struct PythonStrategy;
 
@@ -11,11 +11,25 @@ fn parse_python_test(output: &str) -> Option<String> {
     let passed_re = Regex::new(r"(\d+) passed").unwrap();
     let failed_re = Regex::new(r"(\d+) failed").unwrap();
     let skipped_re = Regex::new(r"(\d+) skipped").unwrap();
-    let passed: u32 = passed_re.captures(output).and_then(|c| c[1].parse().ok()).unwrap_or(0);
-    let failed: u32 = failed_re.captures(output).and_then(|c| c[1].parse().ok()).unwrap_or(0);
-    let skipped: u32 = skipped_re.captures(output).and_then(|c| c[1].parse().ok()).unwrap_or(0);
-    if passed == 0 && failed == 0 && skipped == 0 { return None; }
-    Some(format!("{} passed, {} failed, {} skipped", passed, failed, skipped))
+    let passed: u32 = passed_re
+        .captures(output)
+        .and_then(|c| c[1].parse().ok())
+        .unwrap_or(0);
+    let failed: u32 = failed_re
+        .captures(output)
+        .and_then(|c| c[1].parse().ok())
+        .unwrap_or(0);
+    let skipped: u32 = skipped_re
+        .captures(output)
+        .and_then(|c| c[1].parse().ok())
+        .unwrap_or(0);
+    if passed == 0 && failed == 0 && skipped == 0 {
+        return None;
+    }
+    Some(format!(
+        "{} passed, {} failed, {} skipped",
+        passed, failed, skipped
+    ))
 }
 
 impl PipelineStrategy for PythonStrategy {
@@ -118,13 +132,19 @@ mod tests {
     #[test]
     fn test_parse_python_test_basic() {
         let output = "10 passed, 2 failed, 1 skipped";
-        assert_eq!(parse_python_test(output).unwrap(), "10 passed, 2 failed, 1 skipped");
+        assert_eq!(
+            parse_python_test(output).unwrap(),
+            "10 passed, 2 failed, 1 skipped"
+        );
     }
 
     #[test]
     fn test_parse_python_test_only_passed() {
         let output = "42 passed";
-        assert_eq!(parse_python_test(output).unwrap(), "42 passed, 0 failed, 0 skipped");
+        assert_eq!(
+            parse_python_test(output).unwrap(),
+            "42 passed, 0 failed, 0 skipped"
+        );
     }
 
     #[test]

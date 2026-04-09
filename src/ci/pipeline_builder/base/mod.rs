@@ -1,14 +1,14 @@
-pub mod git_pull_step;
 pub mod build_step;
-pub mod test_step;
-pub mod lint_step;
 pub mod fmt_step;
+pub mod git_pull_step;
+pub mod lint_step;
+pub mod test_step;
 
-pub use git_pull_step::GitPullStep;
 pub use build_step::BuildStep;
-pub use test_step::TestStep;
-pub use lint_step::LintStep;
 pub use fmt_step::FmtStep;
+pub use git_pull_step::GitPullStep;
+pub use lint_step::LintStep;
+pub use test_step::TestStep;
 
 use super::count_pattern;
 
@@ -17,18 +17,31 @@ pub struct BaseStrategy;
 impl BaseStrategy {
     /// Default report string for common steps. Language strategies can override
     /// specific steps and delegate the rest here.
-    pub fn default_report_str(step_name: &str, success: bool, stdout: &str, stderr: &str) -> String {
+    pub fn default_report_str(
+        step_name: &str,
+        success: bool,
+        stdout: &str,
+        stderr: &str,
+    ) -> String {
         let output = format!("{}{}", stdout, stderr);
         match step_name {
             "git-pull" => Self::report_git_pull(&output),
             "build" => Self::report_build(success, &output),
             "test" => Self::report_test_generic(success, &output),
-            "lint" | "clippy" | "checkstyle" | "vet" => Self::report_lint(success, step_name, &output),
+            "lint" | "clippy" | "checkstyle" | "vet" => {
+                Self::report_lint(success, step_name, &output)
+            }
             "fmt-check" | "typecheck" | "mypy" => Self::report_check(success, step_name, &output),
             "spotbugs" => Self::report_spotbugs(success, &output),
             "pmd" => Self::report_pmd(success, &output),
             "package" => Self::report_package(success, &output),
-            _ => if success { "OK".into() } else { "Failed (exit non-zero)".into() },
+            _ => {
+                if success {
+                    "OK".into()
+                } else {
+                    "Failed (exit non-zero)".into()
+                }
+            }
         }
     }
 
@@ -36,15 +49,18 @@ impl BaseStrategy {
         if output.contains("Already up to date") || output.contains("Already up-to-date") {
             "Already up to date".into()
         } else if output.contains("skipping") || output.contains("Skipping") {
-            let line = output.lines()
+            let line = output
+                .lines()
                 .find(|l| l.contains("skipping"))
                 .unwrap_or("Skipped");
             line.trim().into()
         } else if output.contains("files changed") || output.contains("file changed") {
-            output.lines()
+            output
+                .lines()
                 .find(|l| l.contains("files changed") || l.contains("file changed"))
                 .unwrap_or("Pulled latest changes")
-                .trim().into()
+                .trim()
+                .into()
         } else if output.contains("Pulling") {
             "Pulled latest changes".into()
         } else {
@@ -71,7 +87,11 @@ impl BaseStrategy {
     }
 
     fn report_test_generic(success: bool, _output: &str) -> String {
-        if success { "Tests passed".into() } else { "Tests failed".into() }
+        if success {
+            "Tests passed".into()
+        } else {
+            "Tests failed".into()
+        }
     }
 
     fn report_lint(success: bool, name: &str, output: &str) -> String {
@@ -131,6 +151,10 @@ impl BaseStrategy {
     }
 
     fn report_package(success: bool, _output: &str) -> String {
-        if success { "Package created".into() } else { "Package failed".into() }
+        if success {
+            "Package created".into()
+        } else {
+            "Package failed".into()
+        }
     }
 }

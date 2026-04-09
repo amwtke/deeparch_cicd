@@ -9,7 +9,11 @@ pub struct TestSummary {
 
 impl TestSummary {
     pub fn new(passed: u32, failed: u32, skipped: u32) -> Self {
-        Self { passed, failed, skipped }
+        Self {
+            passed,
+            failed,
+            skipped,
+        }
     }
 
     pub fn total(&self) -> u32 {

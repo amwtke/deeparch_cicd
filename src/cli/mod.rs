@@ -4,11 +4,11 @@ use std::path::PathBuf;
 
 use crate::ci::executor::DockerExecutor;
 use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
-use crate::ci::output::{resolve_output_mode, OutputMode};
 use crate::ci::output::{json, plain};
-use crate::ci::parser::{Pipeline, CallbackCommand};
-use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
+use crate::ci::output::{resolve_output_mode, OutputMode};
+use crate::ci::parser::{CallbackCommand, Pipeline};
 use crate::ci::scheduler::Scheduler;
+use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 
 #[derive(Parser)]
 #[command(name = "pipelight", version, about = "Lightweight CLI CI/CD tool")]
@@ -123,6 +123,13 @@ pub enum Command {
         #[arg(short, long, default_value = ".")]
         dir: PathBuf,
     },
+
+    /// Pull all Docker images required by pipeline.yml
+    DockerPrepare {
+        /// Path to pipeline config file
+        #[arg(short, long, default_value = "pipeline.yml")]
+        file: PathBuf,
+    },
 }
 
 pub async fn dispatch(cli: Cli) -> Result<i32> {
@@ -131,7 +138,9 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
     }
 
     let command = cli.command.ok_or_else(|| {
-        anyhow::anyhow!("No subcommand provided. Use --help for usage or --list-steps to list project steps.")
+        anyhow::anyhow!(
+            "No subcommand provided. Use --help for usage or --list-steps to list project steps."
+        )
     })?;
 
     match command {
@@ -162,6 +171,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             cmd_status(run_id, mode).await
         }
         Command::Clean { dir } => cmd_clean(dir).await,
+        Command::DockerPrepare { file } => cmd_docker_prepare(file).await,
     }
 }
 
@@ -176,11 +186,12 @@ async fn cmd_run(
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
-    let pipeline =
-        Pipeline::from_file(&file).context(format!("Failed to load pipeline: {}", file.display()))?;
+    let pipeline = Pipeline::from_file(&file)
+        .context(format!("Failed to load pipeline: {}", file.display()))?;
 
     // Resolve project directory from pipeline file location
-    let project_dir = file.canonicalize()
+    let project_dir = file
+        .canonicalize()
         .context("Failed to resolve pipeline file path")?
         .parent()
         .expect("pipeline file must have a parent directory")
@@ -203,23 +214,22 @@ async fn cmd_run(
     // Clear and recreate pipelight-misc/ for fresh logs each run
     let misc_dir = project_dir.join("pipelight-misc");
     if misc_dir.exists() {
-        std::fs::remove_dir_all(&misc_dir)
-            .context("Failed to clean pipelight-misc/ directory")?;
+        std::fs::remove_dir_all(&misc_dir).context("Failed to clean pipelight-misc/ directory")?;
     }
-    std::fs::create_dir_all(&misc_dir)
-        .context("Failed to create pipelight-misc/ directory")?;
+    std::fs::create_dir_all(&misc_dir).context("Failed to create pipelight-misc/ directory")?;
 
     let executor = DockerExecutor::new().await?;
 
     // Set up progress UI (wrapped in Arc<Mutex> so on_log closure can access it)
     let step_names: Vec<String> = pipeline.steps.iter().map(|s| s.name.clone()).collect();
-    let progress: Option<std::sync::Arc<std::sync::Mutex<PipelineProgressUI>>> = if mode == OutputMode::Tty {
-        let mut p = PipelineProgressUI::new(&step_names, verbose);
-        p.print_header(&pipeline.name, pipeline.steps.len());
-        Some(std::sync::Arc::new(std::sync::Mutex::new(p)))
-    } else {
-        None
-    };
+    let progress: Option<std::sync::Arc<std::sync::Mutex<PipelineProgressUI>>> =
+        if mode == OutputMode::Tty {
+            let mut p = PipelineProgressUI::new(&step_names, verbose);
+            p.print_header(&pipeline.name, pipeline.steps.len());
+            Some(std::sync::Arc::new(std::sync::Mutex::new(p)))
+        } else {
+            None
+        };
 
     let schedule = scheduler.resolve(step_filter.as_deref())?;
 
@@ -240,8 +250,14 @@ async fn cmd_run(
                     status: StepStatus::Skipped,
                     exit_code: None,
                     duration_ms: None,
-                    image: pipeline.get_step(step_name).map(|s| s.image.clone()).unwrap_or_default(),
-                    command: pipeline.get_step(step_name).map(|s| s.commands.join(" && ")).unwrap_or_default(),
+                    image: pipeline
+                        .get_step(step_name)
+                        .map(|s| s.image.clone())
+                        .unwrap_or_default(),
+                    command: pipeline
+                        .get_step(step_name)
+                        .map(|s| s.commands.join(" && "))
+                        .unwrap_or_default(),
                     stdout: None,
                     stderr: None,
                     error_context: None,
@@ -252,18 +268,27 @@ async fn cmd_run(
                 });
                 if let Some(ref progress) = progress {
                     progress.lock().unwrap().start_step(step_name);
-                    progress.lock().unwrap().finish_step(step_name, true, std::time::Duration::ZERO);
+                    progress.lock().unwrap().finish_step(
+                        step_name,
+                        true,
+                        std::time::Duration::ZERO,
+                    );
                 }
                 continue;
             }
 
-            let mut step = pipeline.get_step(step_name).expect("step must exist").clone();
+            let mut step = pipeline
+                .get_step(step_name)
+                .expect("step must exist")
+                .clone();
 
             // Inject git credentials into git-pull step if configured
             if step_name == "git-pull" {
                 if let Some(ref creds) = pipeline.git_credentials {
-                    step.env.insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
-                    step.env.insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
+                    step.env
+                        .insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
+                    step.env
+                        .insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
                 }
             }
 
@@ -280,23 +305,23 @@ async fn cmd_run(
             let m = mode.clone();
             let v = verbose;
             let progress_ref = progress.clone();
-            let on_log = move |line: &crate::ci::executor::LogLine| {
-                match m {
-                    OutputMode::Plain => {
-                        plain::print_log_line(&sn, line, v);
-                    }
-                    OutputMode::Tty => {
-                        if let Some(ref p) = progress_ref {
-                            p.lock().unwrap().update_log(&sn, line);
-                        }
-                    }
-                    _ => {}
+            let on_log = move |line: &crate::ci::executor::LogLine| match m {
+                OutputMode::Plain => {
+                    plain::print_log_line(&sn, line, v);
                 }
+                OutputMode::Tty => {
+                    if let Some(ref p) = progress_ref {
+                        p.lock().unwrap().update_log(&sn, line);
+                    }
+                }
+                _ => {}
             };
             let result = if step.local {
                 DockerExecutor::run_step_local(&step, &project_dir, on_log).await?
             } else {
-                executor.run_step(&pipeline.name, &step, &project_dir, on_log).await?
+                executor
+                    .run_step(&pipeline.name, &step, &project_dir, on_log)
+                    .await?
             };
 
             // Record step result for stats
@@ -314,13 +339,23 @@ async fn cmd_run(
             let stderr = result.stderr_string();
 
             // Generate report: summary string + write log file
-            let report_summary = if let Some(strategy) = crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline) {
+            let report_summary = if let Some(strategy) =
+                crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline)
+            {
                 strategy.output_report_str(step_name, result.success, &stdout, &stderr)
             } else {
-                crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(step_name, result.success, &stdout, &stderr)
+                crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
+                    step_name,
+                    result.success,
+                    &stdout,
+                    &stderr,
+                )
             };
-            let report_log_path = crate::ci::pipeline_builder::write_step_report(&misc_dir, step_name, &stdout, &stderr);
-            let report_path_str = report_log_path.strip_prefix(&project_dir)
+            let report_log_path = crate::ci::pipeline_builder::write_step_report(
+                &misc_dir, step_name, &stdout, &stderr,
+            );
+            let report_path_str = report_log_path
+                .strip_prefix(&project_dir)
                 .unwrap_or(&report_log_path)
                 .to_string_lossy()
                 .to_string();
@@ -328,33 +363,46 @@ async fn cmd_run(
             // Finish progress for this step with report info
             if let Some(ref progress) = progress {
                 progress.lock().unwrap().finish_step_with_report(
-                    step_name, result.success, result.duration,
-                    Some(&report_summary), Some(&report_path_str),
+                    step_name,
+                    result.success,
+                    result.duration,
+                    Some(&report_summary),
+                    Some(&report_path_str),
                 );
             }
             if mode == OutputMode::Plain {
-                plain::print_step_report(step_name, result.success, result.duration, &report_summary, &report_path_str);
+                plain::print_step_report(
+                    step_name,
+                    result.success,
+                    result.duration,
+                    &report_summary,
+                    &report_path_str,
+                );
             }
 
             // Build on_failure state from pipeline config
-            let on_failure_state = pipeline_step
-                .and_then(|s| s.on_failure.as_ref())
-                .map(|of| OnFailureState {
-                    callback_command: match of.callback_command {
-                        CallbackCommand::Abort => "abort",
-                        CallbackCommand::AutoFix => "auto_fix",
-                        CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
-                        CallbackCommand::Notify => "notify",
-                    }.to_string(),
-                    max_retries: of.max_retries,
-                    retries_remaining: of.max_retries,
-                    context_paths: of.context_paths.clone(),
-                });
+            let on_failure_state =
+                pipeline_step
+                    .and_then(|s| s.on_failure.as_ref())
+                    .map(|of| OnFailureState {
+                        callback_command: match of.callback_command {
+                            CallbackCommand::Abort => "abort",
+                            CallbackCommand::AutoFix => "auto_fix",
+                            CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
+                            CallbackCommand::Notify => "notify",
+                        }
+                        .to_string(),
+                        max_retries: of.max_retries,
+                        retries_remaining: of.max_retries,
+                        context_paths: of.context_paths.clone(),
+                    });
 
             // Parse test output for backward-compat test_summary field
             let step_test_summary = if step_name == "test" {
                 let full_output = format!("{}{}", &stdout, &stderr);
-                if let Some(strategy) = crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline) {
+                if let Some(strategy) =
+                    crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline)
+                {
                     let parsed = strategy.parse_test_output(&full_output);
                     if parsed.is_some() {
                         test_summary = parsed.clone();
@@ -373,9 +421,19 @@ async fn cmd_run(
                 exit_code: Some(result.exit_code),
                 duration_ms: Some(result.duration.as_millis() as u64),
                 image: pipeline_step.map(|s| s.image.clone()).unwrap_or_default(),
-                command: pipeline_step.map(|s| s.commands.join(" && ")).unwrap_or_default(),
-                stdout: if stdout.is_empty() { None } else { Some(stdout) },
-                stderr: if stderr.is_empty() { None } else { Some(stderr) },
+                command: pipeline_step
+                    .map(|s| s.commands.join(" && "))
+                    .unwrap_or_default(),
+                stdout: if stdout.is_empty() {
+                    None
+                } else {
+                    Some(stdout)
+                },
+                stderr: if stderr.is_empty() {
+                    None
+                } else {
+                    Some(stderr)
+                },
                 error_context: None,
                 on_failure: on_failure_state,
                 test_summary: step_test_summary,
@@ -414,8 +472,14 @@ async fn cmd_run(
                     status: StepStatus::Skipped,
                     exit_code: None,
                     duration_ms: None,
-                    image: pipeline.get_step(step_name).map(|s| s.image.clone()).unwrap_or_default(),
-                    command: pipeline.get_step(step_name).map(|s| s.commands.join(" && ")).unwrap_or_default(),
+                    image: pipeline
+                        .get_step(step_name)
+                        .map(|s| s.image.clone())
+                        .unwrap_or_default(),
+                    command: pipeline
+                        .get_step(step_name)
+                        .map(|s| s.commands.join(" && "))
+                        .unwrap_or_default(),
                     stdout: None,
                     stderr: None,
                     error_context: None,
@@ -534,7 +598,8 @@ async fn cmd_retry(
     // Load pipeline and create executor
     let pipeline = Pipeline::from_file(&file)
         .context(format!("Failed to load pipeline: {}", file.display()))?;
-    let project_dir = file.canonicalize()
+    let project_dir = file
+        .canonicalize()
         .context("Failed to resolve pipeline file path")?
         .parent()
         .expect("pipeline file must have a parent directory")
@@ -552,15 +617,21 @@ async fn cmd_retry(
     // Inject git credentials if configured
     if step_name == "git-pull" {
         if let Some(ref creds) = pipeline.git_credentials {
-            retry_step.env.insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
-            retry_step.env.insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
+            retry_step
+                .env
+                .insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
+            retry_step
+                .env
+                .insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
         }
     }
 
     let result = if retry_step.local {
         DockerExecutor::run_step_local(&retry_step, &project_dir, |_| {}).await?
     } else {
-        executor.run_step(&pipeline.name, &retry_step, &project_dir, |_| {}).await?
+        executor
+            .run_step(&pipeline.name, &retry_step, &project_dir, |_| {})
+            .await?
     };
 
     // Update step state
@@ -577,8 +648,16 @@ async fn cmd_retry(
         ss.duration_ms = Some(result.duration.as_millis() as u64);
         let stdout = result.stdout_string();
         let stderr = result.stderr_string();
-        ss.stdout = if stdout.is_empty() { None } else { Some(stdout) };
-        ss.stderr = if stderr.is_empty() { None } else { Some(stderr) };
+        ss.stdout = if stdout.is_empty() {
+            None
+        } else {
+            Some(stdout)
+        };
+        ss.stderr = if stderr.is_empty() {
+            None
+        } else {
+            Some(stderr)
+        };
     }
 
     // If retried step succeeded, run downstream Skipped steps
@@ -618,15 +697,21 @@ async fn cmd_retry(
             // Inject git credentials if configured
             if skipped_name == "git-pull" {
                 if let Some(ref creds) = pipeline.git_credentials {
-                    skipped_step.env.insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
-                    skipped_step.env.insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
+                    skipped_step
+                        .env
+                        .insert("GIT_PIPELIGHT_USER".into(), creds.username.clone());
+                    skipped_step
+                        .env
+                        .insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
                 }
             }
 
             let sr = if skipped_step.local {
                 DockerExecutor::run_step_local(&skipped_step, &project_dir, |_| {}).await?
             } else {
-                executor.run_step(&pipeline.name, &skipped_step, &project_dir, |_| {}).await?
+                executor
+                    .run_step(&pipeline.name, &skipped_step, &project_dir, |_| {})
+                    .await?
             };
 
             // Update state
@@ -643,8 +728,16 @@ async fn cmd_retry(
                 ss.duration_ms = Some(sr.duration.as_millis() as u64);
                 let stdout = sr.stdout_string();
                 let stderr = sr.stderr_string();
-                ss.stdout = if stdout.is_empty() { None } else { Some(stdout) };
-                ss.stderr = if stderr.is_empty() { None } else { Some(stderr) };
+                ss.stdout = if stdout.is_empty() {
+                    None
+                } else {
+                    Some(stdout)
+                };
+                ss.stderr = if stderr.is_empty() {
+                    None
+                } else {
+                    Some(stderr)
+                };
             }
 
             // If this step failed, stop based on its strategy
@@ -663,7 +756,11 @@ async fn cmd_retry(
         s.status == StepStatus::Failed
             && s.on_failure
                 .as_ref()
-                .map(|of| (of.callback_command == "auto_fix" || of.callback_command == "auto_gen_pmd_ruleset") && of.retries_remaining > 0)
+                .map(|of| {
+                    (of.callback_command == "auto_fix"
+                        || of.callback_command == "auto_gen_pmd_ruleset")
+                        && of.retries_remaining > 0
+                })
                 .unwrap_or(false)
     });
 
@@ -718,15 +815,22 @@ async fn cmd_init(dir: PathBuf, output_path: PathBuf) -> Result<i32> {
         println!("Framework: {}", fw);
     }
     println!("Docker image: {}", info.image);
-    println!("Steps: {}", pipeline.steps.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+    println!(
+        "Steps: {}",
+        pipeline
+            .steps
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     for warning in &info.warnings {
         eprintln!("WARNING: {}", warning);
     }
 
     // Serialize to YAML
-    let yaml = serde_yaml::to_string(&pipeline)
-        .context("Failed to serialize pipeline to YAML")?;
+    let yaml = serde_yaml::to_string(&pipeline).context("Failed to serialize pipeline to YAML")?;
 
     // Write file
     std::fs::write(&output_path, &yaml)
@@ -762,15 +866,9 @@ async fn cmd_list_steps(dir: PathBuf) -> Result<i32> {
             style(&step.name).bold(),
             style(&deps).dim()
         );
-        println!(
-            "     image:    {}",
-            style(&step.image).dim()
-        );
+        println!("     image:    {}", style(&step.image).dim());
         for cmd in &step.commands {
-            println!(
-                "     command:  {}",
-                style(cmd).green()
-            );
+            println!("     command:  {}", style(cmd).green());
         }
 
         if let Some(ref on_failure) = step.on_failure {
@@ -782,23 +880,16 @@ async fn cmd_list_steps(dir: PathBuf) -> Result<i32> {
         }
 
         if step.allow_failure {
-            println!(
-                "     {}",
-                style("allow_failure: true").yellow()
-            );
+            println!("     {}", style("allow_failure: true").yellow());
         }
 
         println!();
     }
 
-    println!(
-        "  {} steps total\n",
-        style(pipeline.steps.len()).bold()
-    );
+    println!("  {} steps total\n", style(pipeline.steps.len()).bold());
 
     Ok(0)
 }
-
 
 async fn cmd_clean(dir: PathBuf) -> Result<i32> {
     use console::style;
@@ -808,15 +899,13 @@ async fn cmd_clean(dir: PathBuf) -> Result<i32> {
 
     let pipeline_file = dir.join("pipeline.yml");
     if pipeline_file.exists() {
-        std::fs::remove_file(&pipeline_file)
-            .context("Failed to remove pipeline.yml")?;
+        std::fs::remove_file(&pipeline_file).context("Failed to remove pipeline.yml")?;
         removed.push("pipeline.yml");
     }
 
     let misc_dir = dir.join("pipelight-misc");
     if misc_dir.exists() {
-        std::fs::remove_dir_all(&misc_dir)
-            .context("Failed to remove pipelight-misc/")?;
+        std::fs::remove_dir_all(&misc_dir).context("Failed to remove pipelight-misc/")?;
         removed.push("pipelight-misc/");
     }
 
@@ -843,6 +932,62 @@ async fn cmd_status(run_id: String, mode: OutputMode) -> Result<i32> {
     Ok(0)
 }
 
+async fn cmd_docker_prepare(file: PathBuf) -> Result<i32> {
+    use std::collections::BTreeSet;
+    use tracing::info;
+
+    let pipeline = Pipeline::from_file(&file)
+        .context(format!("Failed to load pipeline: {}", file.display()))?;
+
+    // Collect unique images (skip local steps and empty images)
+    let images: BTreeSet<String> = pipeline
+        .steps
+        .iter()
+        .filter(|s| !s.local && !s.image.is_empty())
+        .map(|s| s.image.clone())
+        .collect();
+
+    if images.is_empty() {
+        println!("No Docker images to pull (all steps are local).");
+        return Ok(0);
+    }
+
+    println!(
+        "Pulling {} Docker image(s) from {}...\n",
+        images.len(),
+        file.display()
+    );
+
+    let executor = DockerExecutor::new().await?;
+    let mut failed = Vec::new();
+
+    for image in &images {
+        print!("  {} ... ", image);
+        match executor.pull_image(image).await {
+            Ok(_) => {
+                println!("OK");
+                info!(image = %image, "Image pulled successfully");
+            }
+            Err(e) => {
+                println!("FAILED ({})", e);
+                failed.push(image.clone());
+            }
+        }
+    }
+
+    println!();
+    if failed.is_empty() {
+        println!(
+            "All images ready. You can now run: pipelight run -f {}",
+            file.display()
+        );
+        Ok(0)
+    } else {
+        println!("Failed to pull: {}", failed.join(", "));
+        Ok(1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ci::pipeline_builder::write_step_report;
@@ -853,7 +998,11 @@ mod tests {
         let path = write_step_report(dir.path(), "build", "compile output", "error: failed");
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "compile output\nerror: failed");
-        assert!(path.file_name().unwrap().to_string_lossy().starts_with("build-"));
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("build-"));
         assert!(path.extension().unwrap() == "log");
     }
 
@@ -897,7 +1046,11 @@ mod tests {
                 CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
                 CallbackCommand::Notify => "notify",
             };
-            assert_eq!(result, *expected, "CallbackCommand::{:?} should serialize to '{}'", variant, expected);
+            assert_eq!(
+                result, *expected,
+                "CallbackCommand::{:?} should serialize to '{}'",
+                variant, expected
+            );
         }
     }
 

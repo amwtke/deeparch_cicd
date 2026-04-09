@@ -1,6 +1,6 @@
-pub mod tty;
 pub mod json;
 pub mod plain;
+pub mod tty;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutputMode {

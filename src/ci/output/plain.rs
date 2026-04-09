@@ -1,6 +1,6 @@
 use crate::ci::executor::{LogLine, LogStream};
-use crate::run_state::{RunState, StepStatus};
 use crate::ci::pipeline_builder::test_parser::TestSummary;
+use crate::run_state::{RunState, StepStatus};
 
 /// Print step start
 pub fn print_step_start(name: &str, image: &str) {
@@ -27,25 +27,48 @@ pub fn print_step_finish(name: &str, success: bool, duration: std::time::Duratio
 }
 
 /// Print step completion with report summary and log path
-pub fn print_step_report(name: &str, success: bool, duration: std::time::Duration, summary: &str, log_path: &str) {
+pub fn print_step_report(
+    name: &str,
+    success: bool,
+    duration: std::time::Duration,
+    summary: &str,
+    log_path: &str,
+) {
     let status = if success { "OK" } else { "FAIL" };
-    println!("[{}] {} ({:.1}s) {} → {}", name, status, duration.as_secs_f64(), summary, log_path);
+    println!(
+        "[{}] {} ({:.1}s) {} → {}",
+        name,
+        status,
+        duration.as_secs_f64(),
+        summary,
+        log_path
+    );
 }
 
 /// Print test summary
 pub fn print_test_summary(summary: &TestSummary) {
     println!();
-    println!("Test Summary: {} passed, {} failed, {} skipped",
-        summary.passed, summary.failed, summary.skipped);
+    println!(
+        "Test Summary: {} passed, {} failed, {} skipped",
+        summary.passed, summary.failed, summary.skipped
+    );
 }
 
 /// Print step duration statistics table
-pub fn print_stats_table(results: &[(String, std::time::Duration, bool)], total: std::time::Duration) {
+pub fn print_stats_table(
+    results: &[(String, std::time::Duration, bool)],
+    total: std::time::Duration,
+) {
     println!();
     println!("{:<16} {:<12} {}", "Step", "Duration", "Status");
     for (name, dur, success) in results {
         let status = if *success { "OK" } else { "FAIL" };
-        println!("{:<16} {:<12} {}", name, format!("{:.1}s", dur.as_secs_f64()), status);
+        println!(
+            "{:<16} {:<12} {}",
+            name,
+            format!("{:.1}s", dur.as_secs_f64()),
+            status
+        );
     }
     println!("{:<16} {:.1}s", "Total", total.as_secs_f64());
     println!();

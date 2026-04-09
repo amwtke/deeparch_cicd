@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::ci::executor::{LogLine, LogStream, StepResult};
 use crate::ci::parser::Pipeline;
-use crate::ci::scheduler::Scheduler;
 use crate::ci::pipeline_builder::test_parser::TestSummary;
+use crate::ci::scheduler::Scheduler;
 
 static ROCKET: Emoji<'_, '_> = Emoji("🚀 ", ">> ");
 static CHECK: Emoji<'_, '_> = Emoji("✅", "[OK]");
@@ -292,12 +292,7 @@ impl PipelineProgressUI {
             } else {
                 CROSS.to_string()
             };
-            println!(
-                "   {:<16} {:<12} {}",
-                name,
-                format_duration(*dur),
-                status
-            );
+            println!("   {:<16} {:<12} {}", name, format_duration(*dur), status);
         }
         println!("{}", style("─".repeat(56)).dim());
         println!(

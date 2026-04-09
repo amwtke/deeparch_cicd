@@ -81,8 +81,7 @@ impl ProjectDetector for PythonDetector {
         // Extract python version (only from pyproject.toml)
         let python_version = if has_pyproject {
             let pyproject_content = fs::read_to_string(dir.join("pyproject.toml"))?;
-            Self::extract_python_version(&pyproject_content)
-                .unwrap_or_else(|| "3.12".to_string())
+            Self::extract_python_version(&pyproject_content).unwrap_or_else(|| "3.12".to_string())
         } else {
             "3.12".to_string()
         };
@@ -151,7 +150,11 @@ mod tests {
     #[test]
     fn test_detect_with_pyproject_toml() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"myapp\"\n").unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"myapp\"\n",
+        )
+        .unwrap();
         let detector = PythonDetector;
         assert!(detector.detect(dir.path()));
     }
@@ -159,7 +162,11 @@ mod tests {
     #[test]
     fn test_detect_with_setup_py() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("setup.py"), "from setuptools import setup\n").unwrap();
+        fs::write(
+            dir.path().join("setup.py"),
+            "from setuptools import setup\n",
+        )
+        .unwrap();
         let detector = PythonDetector;
         assert!(detector.detect(dir.path()));
     }
@@ -212,7 +219,11 @@ python_requires = ">=3.10"
     #[test]
     fn test_analyze_framework_detection() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("requirements.txt"), "fastapi==0.100.0\nuvicorn==0.23.0\n").unwrap();
+        fs::write(
+            dir.path().join("requirements.txt"),
+            "fastapi==0.100.0\nuvicorn==0.23.0\n",
+        )
+        .unwrap();
         let detector = PythonDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.framework, Some("fastapi".into()));
@@ -221,7 +232,11 @@ python_requires = ">=3.10"
     #[test]
     fn test_analyze_pytest_detected() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("requirements.txt"), "pytest==7.4.0\nrequests==2.28.0\n").unwrap();
+        fs::write(
+            dir.path().join("requirements.txt"),
+            "pytest==7.4.0\nrequests==2.28.0\n",
+        )
+        .unwrap();
         let detector = PythonDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.test_cmd, vec!["pytest"]);
@@ -234,7 +249,10 @@ python_requires = ">=3.10"
         let detector = PythonDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.lint_cmd, Some(vec!["ruff check .".to_string()]));
-        assert_eq!(info.fmt_cmd, Some(vec!["ruff format --check .".to_string()]));
+        assert_eq!(
+            info.fmt_cmd,
+            Some(vec!["ruff format --check .".to_string()])
+        );
     }
 
     #[test]
@@ -249,7 +267,11 @@ python_requires = ">=3.10"
     #[test]
     fn test_analyze_build_cmd_pyproject() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"myapp\"\n").unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"myapp\"\n",
+        )
+        .unwrap();
         let detector = PythonDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.build_cmd, vec!["pip install ."]);

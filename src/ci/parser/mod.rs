@@ -50,7 +50,10 @@ pub struct Step {
     pub env: HashMap<String, String>,
 
     /// Working directory inside the container
-    #[serde(default = "default_workdir", skip_serializing_if = "is_default_workdir")]
+    #[serde(
+        default = "default_workdir",
+        skip_serializing_if = "is_default_workdir"
+    )]
     pub workdir: String,
 
     /// Continue pipeline even if this step fails
@@ -420,7 +423,11 @@ steps:
             );
             let pipeline = Pipeline::from_str(&yaml).unwrap();
             let of = pipeline.steps[0].on_failure.as_ref().unwrap();
-            assert_eq!(of.callback_command, expected, "failed for yaml value: {}", yaml_val);
+            assert_eq!(
+                of.callback_command, expected,
+                "failed for yaml value: {}",
+                yaml_val
+            );
 
             // Verify serialization roundtrip
             let serialized = serde_yaml::to_string(&pipeline).unwrap();

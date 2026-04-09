@@ -107,7 +107,14 @@ fn list_test_pipeline_shows_steps() {
 
 #[test]
 fn dry_run_plain_succeeds() {
-    let out = pipelight(&["run", "-f", "pipeline.yml", "--dry-run", "--output", "plain"]);
+    let out = pipelight(&[
+        "run",
+        "-f",
+        "pipeline.yml",
+        "--dry-run",
+        "--output",
+        "plain",
+    ]);
     assert!(out.status.success());
 }
 
@@ -120,16 +127,19 @@ fn dry_run_tty_succeeds() {
 #[test]
 fn dry_run_with_custom_run_id() {
     let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--run-id", "my-custom-id",
+        "run",
+        "-f",
+        "pipeline.yml",
+        "--dry-run",
+        "--run-id",
+        "my-custom-id",
     ]);
     assert!(out.status.success());
 }
 
 #[test]
 fn dry_run_with_step_filter() {
-    let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--step", "build",
-    ]);
+    let out = pipelight(&["run", "-f", "pipeline.yml", "--dry-run", "--step", "build"]);
     assert!(out.status.success());
 }
 
@@ -137,7 +147,12 @@ fn dry_run_with_step_filter() {
 fn dry_run_nonexistent_step_filter() {
     // Filtering for a non-existent step — current behavior: returns error or empty plan
     let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--step", "no-such-step",
+        "run",
+        "-f",
+        "pipeline.yml",
+        "--dry-run",
+        "--step",
+        "no-such-step",
     ]);
     // Dry-run with unknown step may succeed (empty plan) or fail — just verify no crash
     // The important thing is it doesn't panic
@@ -189,7 +204,13 @@ fn retry_requires_step_flag() {
 #[test]
 fn retry_nonexistent_run_fails() {
     let out = pipelight(&[
-        "retry", "--run-id", "ghost-run", "--step", "build", "-f", "pipeline.yml",
+        "retry",
+        "--run-id",
+        "ghost-run",
+        "--step",
+        "build",
+        "-f",
+        "pipeline.yml",
     ]);
     assert!(!out.status.success());
 }
@@ -197,8 +218,15 @@ fn retry_nonexistent_run_fails() {
 #[test]
 fn retry_with_json_output_nonexistent_run() {
     let out = pipelight(&[
-        "retry", "--run-id", "ghost", "--step", "build",
-        "-f", "pipeline.yml", "--output", "json",
+        "retry",
+        "--run-id",
+        "ghost",
+        "--step",
+        "build",
+        "-f",
+        "pipeline.yml",
+        "--output",
+        "json",
     ]);
     assert!(!out.status.success());
 }
@@ -221,11 +249,17 @@ fn init_detects_rust_project() {
     assert!(out.status.success());
 
     let s = String::from_utf8_lossy(&out.stdout);
-    assert!(s.contains("Rust") || s.contains("rust"), "should detect Rust project");
+    assert!(
+        s.contains("Rust") || s.contains("rust"),
+        "should detect Rust project"
+    );
 
     // Verify generated YAML is valid
     let content = std::fs::read_to_string(&out_path).unwrap();
-    assert!(content.contains("steps"), "generated YAML should have steps");
+    assert!(
+        content.contains("steps"),
+        "generated YAML should have steps"
+    );
 }
 
 // ===========================================================================
@@ -237,10 +271,22 @@ fn run_help_shows_output_flag() {
     let out = pipelight(&["run", "--help"]);
     assert!(out.status.success());
     let s = stdout(&out);
-    assert!(s.contains("--output"), "run --help should document --output flag");
-    assert!(s.contains("--dry-run"), "run --help should document --dry-run flag");
-    assert!(s.contains("--run-id"), "run --help should document --run-id flag");
-    assert!(s.contains("--verbose"), "run --help should document --verbose flag");
+    assert!(
+        s.contains("--output"),
+        "run --help should document --output flag"
+    );
+    assert!(
+        s.contains("--dry-run"),
+        "run --help should document --dry-run flag"
+    );
+    assert!(
+        s.contains("--run-id"),
+        "run --help should document --run-id flag"
+    );
+    assert!(
+        s.contains("--verbose"),
+        "run --help should document --verbose flag"
+    );
 }
 
 #[test]
@@ -275,9 +321,7 @@ fn unknown_subcommand_fails() {
 #[test]
 fn run_with_invalid_output_mode_falls_back() {
     // Invalid output mode should fall back to auto-detect, not crash
-    let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--output", "xml",
-    ]);
+    let out = pipelight(&["run", "-f", "pipeline.yml", "--dry-run", "--output", "xml"]);
     assert!(out.status.success());
 }
 
@@ -287,8 +331,6 @@ fn run_with_invalid_output_mode_falls_back() {
 
 #[test]
 fn dry_run_with_verbose_flag() {
-    let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--verbose",
-    ]);
+    let out = pipelight(&["run", "-f", "pipeline.yml", "--dry-run", "--verbose"]);
     assert!(out.status.success());
 }

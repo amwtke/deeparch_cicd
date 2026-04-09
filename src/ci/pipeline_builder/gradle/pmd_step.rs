@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
-use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 /// PMD version used for standalone CLI fallback when the Gradle PMD plugin is unavailable.
 const PMD_CLI_VERSION: &str = "7.9.0";
@@ -144,8 +144,12 @@ INITEOF\n\
             }
         }
         let violation_count = count_pattern(&output, &["violation", "Violation"]);
-        if !success && violation_count == 0 { "pmd: failed".into() }
-        else if violation_count > 0 { format!("pmd: {} violations (report only)", violation_count) }
-        else { "pmd: no violations".into() }
+        if !success && violation_count == 0 {
+            "pmd: failed".into()
+        } else if violation_count > 0 {
+            format!("pmd: {} violations (report only)", violation_count)
+        } else {
+            "pmd: no violations".into()
+        }
     }
 }

@@ -36,6 +36,7 @@ indicatif = "0.17"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3"
+libc = "0.2"
 atty = "0.2"
 dirs = "5"
 regex = "1"

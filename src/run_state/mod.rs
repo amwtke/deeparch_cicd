@@ -124,17 +124,15 @@ impl RunState {
             .context(format!("Failed to create run directory: {}", dir.display()))?;
         let path = dir.join("status.json");
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)
-            .context(format!("Failed to write {}", path.display()))?;
+        std::fs::write(&path, json).context(format!("Failed to write {}", path.display()))?;
         Ok(())
     }
 
     pub fn load(base: &Path, run_id: &str) -> Result<Self> {
         let path = Self::run_dir(base, run_id).join("status.json");
-        let content = std::fs::read_to_string(&path)
-            .context(format!("Failed to read {}", path.display()))?;
-        let state: Self = serde_json::from_str(&content)
-            .context("Failed to parse status.json")?;
+        let content =
+            std::fs::read_to_string(&path).context(format!("Failed to read {}", path.display()))?;
+        let state: Self = serde_json::from_str(&content).context("Failed to parse status.json")?;
         Ok(state)
     }
 
@@ -318,11 +316,29 @@ mod tests {
         });
 
         state.decrement_retries("s");
-        assert_eq!(state.get_step("s").unwrap().on_failure.as_ref().unwrap().retries_remaining, 0);
+        assert_eq!(
+            state
+                .get_step("s")
+                .unwrap()
+                .on_failure
+                .as_ref()
+                .unwrap()
+                .retries_remaining,
+            0
+        );
 
         // Decrementing at 0 should stay at 0
         state.decrement_retries("s");
-        assert_eq!(state.get_step("s").unwrap().on_failure.as_ref().unwrap().retries_remaining, 0);
+        assert_eq!(
+            state
+                .get_step("s")
+                .unwrap()
+                .on_failure
+                .as_ref()
+                .unwrap()
+                .retries_remaining,
+            0
+        );
     }
 
     #[test]

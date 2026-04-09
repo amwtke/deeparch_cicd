@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
-use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct BuildStep {
     pub image: String,
@@ -103,14 +103,16 @@ mod tests {
     #[test]
     fn test_report_warnings() {
         let step = BuildStep::new(&make_info());
-        let report = step.output_report_str(true, "warning: unused variable\nwarning: dead code\n", "");
+        let report =
+            step.output_report_str(true, "warning: unused variable\nwarning: dead code\n", "");
         assert_eq!(report, "Build succeeded (2 warnings)");
     }
 
     #[test]
     fn test_report_failure() {
         let step = BuildStep::new(&make_info());
-        let report = step.output_report_str(false, "", "error: cannot find value\nerror: aborting\n");
+        let report =
+            step.output_report_str(false, "", "error: cannot find value\nerror: aborting\n");
         assert_eq!(report, "Build failed (2 errors)");
     }
 }

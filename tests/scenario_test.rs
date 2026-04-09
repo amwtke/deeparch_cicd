@@ -17,7 +17,16 @@ fn test_validate_pipeline_with_on_failure() {
 #[test]
 fn test_dry_run_with_output_flag() {
     let output = Command::new("cargo")
-        .args(["run", "--", "run", "-f", "pipeline.yml", "--dry-run", "--output", "json"])
+        .args([
+            "run",
+            "--",
+            "run",
+            "-f",
+            "pipeline.yml",
+            "--dry-run",
+            "--output",
+            "json",
+        ])
         .output()
         .expect("Failed to run pipelight");
     assert!(output.status.success());
@@ -27,7 +36,16 @@ fn test_dry_run_with_output_flag() {
 #[test]
 fn test_dry_run_with_plain_output() {
     let output = Command::new("cargo")
-        .args(["run", "--", "run", "-f", "pipeline.yml", "--dry-run", "--output", "plain"])
+        .args([
+            "run",
+            "--",
+            "run",
+            "-f",
+            "pipeline.yml",
+            "--dry-run",
+            "--output",
+            "plain",
+        ])
         .output()
         .expect("Failed to run pipelight");
     assert!(output.status.success());
@@ -37,12 +55,26 @@ fn test_dry_run_with_plain_output() {
 #[test]
 fn test_retry_nonexistent_run_id() {
     let output = Command::new("cargo")
-        .args(["run", "--", "retry", "--run-id", "nonexistent-xyz", "--step", "build", "-f", "pipeline.yml"])
+        .args([
+            "run",
+            "--",
+            "retry",
+            "--run-id",
+            "nonexistent-xyz",
+            "--step",
+            "build",
+            "-f",
+            "pipeline.yml",
+        ])
         .output()
         .expect("Failed to run pipelight");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("nonexistent-xyz") || stderr.contains("No run found") || stderr.contains("Failed to read"));
+    assert!(
+        stderr.contains("nonexistent-xyz")
+            || stderr.contains("No run found")
+            || stderr.contains("Failed to read")
+    );
 }
 
 /// Test that status fails gracefully when run-id doesn't exist
@@ -75,7 +107,15 @@ fn test_list_pipeline_steps() {
 #[test]
 fn test_retry_without_step_shows_error() {
     let output = Command::new("cargo")
-        .args(["run", "--", "retry", "--run-id", "some-id", "-f", "pipeline.yml"])
+        .args([
+            "run",
+            "--",
+            "retry",
+            "--run-id",
+            "some-id",
+            "-f",
+            "pipeline.yml",
+        ])
         .output()
         .expect("Failed to run pipelight");
     // Should either error because no --step or because run-id doesn't exist
@@ -86,7 +126,16 @@ fn test_retry_without_step_shows_error() {
 #[test]
 fn test_run_accepts_run_id() {
     let output = Command::new("cargo")
-        .args(["run", "--", "run", "-f", "pipeline.yml", "--dry-run", "--run-id", "custom-id-123"])
+        .args([
+            "run",
+            "--",
+            "run",
+            "-f",
+            "pipeline.yml",
+            "--dry-run",
+            "--run-id",
+            "custom-id-123",
+        ])
         .output()
         .expect("Failed to run pipelight");
     assert!(output.status.success());

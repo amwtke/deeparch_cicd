@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
-use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct TypecheckStep {
     image: String,
@@ -38,8 +38,11 @@ impl StepDef for TypecheckStep {
         if success {
             "typecheck: passed".into()
         } else {
-            if errors > 0 { format!("typecheck: {} errors", errors) }
-            else { "typecheck: failed".into() }
+            if errors > 0 {
+                format!("typecheck: {} errors", errors)
+            } else {
+                "typecheck: failed".into()
+            }
         }
     }
 }

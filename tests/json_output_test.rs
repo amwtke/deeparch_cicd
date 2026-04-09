@@ -35,7 +35,10 @@ fn parse_json(output: &std::process::Output) -> Value {
 /// Return absolute path to a test fixture pipeline file.
 fn fixture(name: &str) -> String {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
-    let p = std::path::PathBuf::from(manifest).join("tests").join("fixtures").join(name);
+    let p = std::path::PathBuf::from(manifest)
+        .join("tests")
+        .join("fixtures")
+        .join(name);
     p.to_string_lossy().to_string()
 }
 
@@ -45,9 +48,7 @@ fn fixture(name: &str) -> String {
 
 #[test]
 fn json_dry_run_returns_valid_json() {
-    let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--output", "json",
-    ]);
+    let out = pipelight(&["run", "-f", "pipeline.yml", "--dry-run", "--output", "json"]);
     assert!(out.status.success());
     // Should produce no JSON on dry-run (dry-run exits before execution)
     // OR produce valid JSON — either way, should not crash
@@ -55,9 +56,7 @@ fn json_dry_run_returns_valid_json() {
 
 #[test]
 fn json_dry_run_exit_code_zero() {
-    let out = pipelight(&[
-        "run", "-f", "pipeline.yml", "--dry-run", "--output", "json",
-    ]);
+    let out = pipelight(&["run", "-f", "pipeline.yml", "--dry-run", "--output", "json"]);
     assert!(out.status.success(), "dry-run should always exit 0");
 }
 
@@ -211,7 +210,8 @@ fn json_status_failed_pipeline_structure() {
     std::fs::write(
         run_dir.join("status.json"),
         serde_json::to_string_pretty(&state_json).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let out = pipelight(&["status", "--run-id", &run_id, "--output", "json"]);
     assert!(out.status.success());
@@ -281,7 +281,8 @@ fn json_status_retryable_pipeline() {
     std::fs::write(
         run_dir.join("status.json"),
         serde_json::to_string_pretty(&state_json).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let out = pipelight(&["status", "--run-id", &run_id, "--output", "json"]);
     assert!(out.status.success());
@@ -308,7 +309,8 @@ fn json_status_plain_mode_is_not_json() {
     std::fs::write(
         run_dir.join("status.json"),
         serde_json::to_string_pretty(&state_json).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let out = pipelight(&["status", "--run-id", &run_id, "--output", "plain"]);
     assert!(out.status.success());
@@ -319,7 +321,10 @@ fn json_status_plain_mode_is_not_json() {
         serde_json::from_str::<Value>(&s).is_err(),
         "plain mode output should not be valid JSON"
     );
-    assert!(s.contains("Pipeline:"), "plain mode should show Pipeline: header");
+    assert!(
+        s.contains("Pipeline:"),
+        "plain mode should show Pipeline: header"
+    );
 
     cleanup_run(&run_id);
 }
@@ -345,10 +350,14 @@ fn json_pipeline_status_enum_values() {
         std::fs::write(
             run_dir.join("status.json"),
             serde_json::to_string_pretty(&state).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let out = pipelight(&["status", "--run-id", &run_id, "--output", "json"]);
-        assert!(out.status.success(), "status command should succeed for status={status}");
+        assert!(
+            out.status.success(),
+            "status command should succeed for status={status}"
+        );
 
         let json = parse_json(&out);
         assert_eq!(json["status"].as_str().unwrap(), *status);
@@ -385,7 +394,8 @@ fn json_step_status_enum_values() {
         std::fs::write(
             run_dir.join("status.json"),
             serde_json::to_string_pretty(&state).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let out = pipelight(&["status", "--run-id", &run_id, "--output", "json"]);
         assert!(out.status.success());
@@ -433,7 +443,8 @@ fn json_status_with_test_summary() {
     std::fs::write(
         run_dir.join("status.json"),
         serde_json::to_string_pretty(&state).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let out = pipelight(&["status", "--run-id", &run_id, "--output", "json"]);
     assert!(out.status.success());
@@ -474,7 +485,8 @@ fn json_status_without_test_summary_omits_field() {
     std::fs::write(
         run_dir.join("status.json"),
         serde_json::to_string_pretty(&state).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let out = pipelight(&["status", "--run-id", &run_id, "--output", "json"]);
     assert!(out.status.success());
@@ -504,7 +516,11 @@ fn json_real_execution_success() {
         .output()
         .unwrap();
 
-    assert!(out.status.success(), "exit code should be 0, stderr: {}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "exit code should be 0, stderr: {}",
+        stderr(&out)
+    );
 
     let json = parse_json(&out);
     assert_eq!(json["status"].as_str().unwrap(), "success");
@@ -600,7 +616,8 @@ fn json_real_execution_allow_failure() {
     let json = parse_json(&out);
     // Pipeline should succeed because allow_failure=true
     assert_eq!(
-        json["status"].as_str().unwrap(), "success",
+        json["status"].as_str().unwrap(),
+        "success",
         "allow_failure step should not block pipeline"
     );
 
@@ -611,7 +628,10 @@ fn json_real_execution_allow_failure() {
     assert_eq!(steps[1]["status"].as_str().unwrap(), "success");
     // The downstream step should have run
     let after_stdout = steps[1]["stdout"].as_str().unwrap_or("");
-    assert!(after_stdout.contains("I still run"), "downstream step should have executed");
+    assert!(
+        after_stdout.contains("I still run"),
+        "downstream step should have executed"
+    );
 }
 
 #[test]
@@ -621,7 +641,9 @@ fn json_real_execution_with_custom_run_id() {
     let custom_id = format!("custom-{}", uuid_short());
 
     let out = Command::new("cargo")
-        .args(["run", "--quiet", "--", "run", "-f", &f, "--output", "json", "--run-id", &custom_id])
+        .args([
+            "run", "--quiet", "--", "run", "-f", &f, "--output", "json", "--run-id", &custom_id,
+        ])
         .output()
         .unwrap();
 
@@ -645,7 +667,10 @@ fn plain_real_execution_success() {
 
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let s = stdout(&out);
-    assert!(s.contains("[hello]"), "plain mode should prefix with step name");
+    assert!(
+        s.contains("[hello]"),
+        "plain mode should prefix with step name"
+    );
     assert!(s.contains("OK"), "plain mode should show OK for success");
 }
 
@@ -661,7 +686,10 @@ fn plain_real_execution_failure_shows_step_info() {
 
     assert!(!out.status.success());
     let s = stdout(&out);
-    assert!(s.contains("[will-fail]"), "plain mode should show step name");
+    assert!(
+        s.contains("[will-fail]"),
+        "plain mode should show step name"
+    );
     assert!(s.contains("FAIL"), "plain mode should show FAIL");
 }
 

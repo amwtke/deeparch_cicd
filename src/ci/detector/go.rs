@@ -11,7 +11,7 @@ impl GoDetector {
     /// Extract Go version from go.mod content.
     /// Looks for `go 1.22` style directive.
     fn extract_go_version(content: &str) -> String {
-        if let Ok(re) = Regex::new(r"^go\s+(\d+\.\d+)", ) {
+        if let Ok(re) = Regex::new(r"^go\s+(\d+\.\d+)") {
             for line in content.lines() {
                 if let Some(caps) = re.captures(line.trim()) {
                     if let Some(version) = caps.get(1) {
@@ -73,7 +73,11 @@ mod tests {
     #[test]
     fn test_detect_go_project() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("go.mod"), "module example.com/myapp\n\ngo 1.22\n").unwrap();
+        fs::write(
+            dir.path().join("go.mod"),
+            "module example.com/myapp\n\ngo 1.22\n",
+        )
+        .unwrap();
         let detector = GoDetector;
         assert!(detector.detect(dir.path()));
     }
@@ -110,7 +114,11 @@ mod tests {
     #[test]
     fn test_analyze_commands() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("go.mod"), "module example.com/myapp\n\ngo 1.22\n").unwrap();
+        fs::write(
+            dir.path().join("go.mod"),
+            "module example.com/myapp\n\ngo 1.22\n",
+        )
+        .unwrap();
         let detector = GoDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.build_cmd, vec!["go build ./..."]);
@@ -122,8 +130,16 @@ mod tests {
     #[test]
     fn test_analyze_with_golangci_lint() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("go.mod"), "module example.com/myapp\n\ngo 1.22\n").unwrap();
-        fs::write(dir.path().join(".golangci.yml"), "linters:\n  enable:\n    - govet\n").unwrap();
+        fs::write(
+            dir.path().join("go.mod"),
+            "module example.com/myapp\n\ngo 1.22\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(".golangci.yml"),
+            "linters:\n  enable:\n    - govet\n",
+        )
+        .unwrap();
         let detector = GoDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.lint_cmd, Some(vec!["golangci-lint run".to_string()]));
@@ -132,8 +148,16 @@ mod tests {
     #[test]
     fn test_analyze_with_golangci_yaml_extension() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("go.mod"), "module example.com/myapp\n\ngo 1.22\n").unwrap();
-        fs::write(dir.path().join(".golangci.yaml"), "linters:\n  enable:\n    - govet\n").unwrap();
+        fs::write(
+            dir.path().join("go.mod"),
+            "module example.com/myapp\n\ngo 1.22\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(".golangci.yaml"),
+            "linters:\n  enable:\n    - govet\n",
+        )
+        .unwrap();
         let detector = GoDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.lint_cmd, Some(vec!["golangci-lint run".to_string()]));

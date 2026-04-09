@@ -1,10 +1,10 @@
 pub mod base;
-pub mod maven;
+pub mod go;
 pub mod gradle;
-pub mod rust_project;
+pub mod maven;
 pub mod node;
 pub mod python;
-pub mod go;
+pub mod rust_project;
 
 // Re-export base types for external use
-pub use base::{ProjectDetector, ProjectInfo, ProjectType, detect_and_generate};
+pub use base::{detect_and_generate, ProjectDetector, ProjectInfo, ProjectType};

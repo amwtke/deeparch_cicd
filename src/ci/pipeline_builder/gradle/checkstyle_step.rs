@@ -1,6 +1,6 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
-use crate::ci::pipeline_builder::{StepConfig, StepDef, count_pattern};
+use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct CheckstyleStep {
     image: String,
@@ -42,11 +42,17 @@ impl StepDef for CheckstyleStep {
         let output = format!("{}{}", stdout, stderr);
         let violations = count_pattern(&output, &["violation", "Violation", "[WARN]", "WARNING"]);
         if success {
-            if violations > 0 { format!("checkstyle: passed ({} warnings)", violations) }
-            else { "checkstyle: no issues found".into() }
+            if violations > 0 {
+                format!("checkstyle: passed ({} warnings)", violations)
+            } else {
+                "checkstyle: no issues found".into()
+            }
         } else {
-            if violations > 0 { format!("checkstyle: {} issues found", violations) }
-            else { "checkstyle: failed".into() }
+            if violations > 0 {
+                format!("checkstyle: {} issues found", violations)
+            } else {
+                "checkstyle: failed".into()
+            }
         }
     }
 }

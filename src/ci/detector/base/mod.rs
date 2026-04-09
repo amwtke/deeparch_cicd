@@ -103,7 +103,12 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
             // Skip hidden directories and common non-project dirs
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" || name_str == "dist" || name_str == "build" {
+            if name_str.starts_with('.')
+                || name_str == "node_modules"
+                || name_str == "target"
+                || name_str == "dist"
+                || name_str == "build"
+            {
                 continue;
             }
             for detector in &detectors {
@@ -111,7 +116,8 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
                     let mut info = detector.analyze(&subpath)?;
                     let subdir_name = name_str.to_string();
                     info = adapt_for_subdir(info, &subdir_name);
-                    let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
+                    let (pipeline, _step_defs) =
+                        crate::ci::pipeline_builder::generate_pipeline(&info);
                     return Ok((info, pipeline));
                 }
             }
@@ -133,7 +139,8 @@ fn adapt_for_subdir(mut info: ProjectInfo, subdir: &str) -> ProjectInfo {
             .collect()
     };
     let prefix_path = |paths: Vec<String>| -> Vec<String> {
-        paths.into_iter()
+        paths
+            .into_iter()
             .map(|p| format!("{}/{}", subdir, p))
             .collect()
     };
@@ -150,7 +157,6 @@ fn adapt_for_subdir(mut info: ProjectInfo, subdir: &str) -> ProjectInfo {
     info
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,8 +170,12 @@ mod tests {
             image: "rust:1.78-slim".into(),
             build_cmd: vec!["cargo build".into()],
             test_cmd: vec!["cargo test".into()],
-            lint_cmd: Some(vec!["cargo clippy -- -D warnings".into()]),
-            fmt_cmd: Some(vec!["cargo fmt -- --check".into()]),
+            lint_cmd: Some(vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".into(),
+            ]),
+            fmt_cmd: Some(vec![
+                "rustup component add rustfmt 2>/dev/null; cargo fmt -- --check".into(),
+            ]),
             source_paths: vec!["src/".into()],
             config_files: vec!["Cargo.toml".into()],
             warnings: vec![],
@@ -179,7 +189,9 @@ mod tests {
         assert_eq!(pipeline.steps[0].name, "git-pull");
         assert_eq!(pipeline.steps[1].name, "build");
         // build should depend on git-pull
-        assert!(pipeline.steps[1].depends_on.contains(&"git-pull".to_string()));
+        assert!(pipeline.steps[1]
+            .depends_on
+            .contains(&"git-pull".to_string()));
     }
 
     #[test]

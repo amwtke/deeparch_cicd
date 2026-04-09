@@ -52,8 +52,12 @@ impl ProjectDetector for RustDetector {
             image: "rust:latest".to_string(),
             build_cmd: vec!["cargo build".to_string()],
             test_cmd: vec!["cargo test".to_string()],
-            lint_cmd: Some(vec!["cargo clippy -- -D warnings".to_string()]),
-            fmt_cmd: Some(vec!["cargo fmt -- --check".to_string()]),
+            lint_cmd: Some(vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".to_string(),
+            ]),
+            fmt_cmd: Some(vec![
+                "rustup component add rustfmt 2>/dev/null; cargo fmt -- --check".to_string(),
+            ]),
             source_paths: vec!["src/".to_string()],
             config_files: vec!["Cargo.toml".to_string()],
             warnings: vec![],
@@ -131,13 +135,27 @@ rust-version = "1.78"
     #[test]
     fn test_analyze_commands() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"foo\"\nedition = \"2021\"").unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"foo\"\nedition = \"2021\"",
+        )
+        .unwrap();
         let detector = RustDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert_eq!(info.build_cmd, vec!["cargo build"]);
         assert_eq!(info.test_cmd, vec!["cargo test"]);
-        assert_eq!(info.lint_cmd, Some(vec!["cargo clippy -- -D warnings".to_string()]));
-        assert_eq!(info.fmt_cmd, Some(vec!["cargo fmt -- --check".to_string()]));
+        assert_eq!(
+            info.lint_cmd,
+            Some(vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".to_string()
+            ])
+        );
+        assert_eq!(
+            info.fmt_cmd,
+            Some(vec![
+                "rustup component add rustfmt 2>/dev/null; cargo fmt -- --check".to_string()
+            ])
+        );
         assert_eq!(info.image, "rust:latest");
     }
 }

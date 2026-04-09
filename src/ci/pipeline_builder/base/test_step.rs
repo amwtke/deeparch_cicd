@@ -1,5 +1,5 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
+use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct TestStep {

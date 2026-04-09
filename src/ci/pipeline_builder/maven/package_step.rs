@@ -1,5 +1,5 @@
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{OnFailure, CallbackCommand};
+use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct PackageStep {
@@ -9,7 +9,10 @@ pub struct PackageStep {
 
 impl PackageStep {
     pub fn new(info: &ProjectInfo) -> Self {
-        Self { image: info.image.clone(), subdir: info.subdir.clone() }
+        Self {
+            image: info.image.clone(),
+            subdir: info.subdir.clone(),
+        }
     }
 }
 
@@ -34,6 +37,10 @@ impl StepDef for PackageStep {
     }
 
     fn output_report_str(&self, success: bool, _stdout: &str, _stderr: &str) -> String {
-        if success { "Package created".into() } else { "Package failed".into() }
+        if success {
+            "Package created".into()
+        } else {
+            "Package failed".into()
+        }
     }
 }

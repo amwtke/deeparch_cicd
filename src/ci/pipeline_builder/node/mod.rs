@@ -1,9 +1,9 @@
 pub mod typecheck_step;
 
-use regex::Regex;
 use crate::ci::detector::ProjectInfo;
+use crate::ci::pipeline_builder::base::{BuildStep, FmtStep, LintStep, TestStep};
 use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
-use crate::ci::pipeline_builder::base::{BuildStep, TestStep, LintStep, FmtStep};
+use regex::Regex;
 
 pub struct NodeStrategy;
 
@@ -24,7 +24,10 @@ fn parse_node_test(output: &str) -> Option<String> {
     // Jest format
     let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").unwrap();
     if let Some(cap) = jest_re.captures(output) {
-        let failed: u32 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        let failed: u32 = cap
+            .get(1)
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0);
         let passed: u32 = cap[2].parse().unwrap_or(0);
         return Some(format!("{} passed, {} failed", passed, failed));
     }
@@ -118,7 +121,10 @@ mod tests {
         let strategy = NodeStrategy;
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
-        assert_eq!(names, vec!["build", "typecheck", "lint", "test", "fmt-check"]);
+        assert_eq!(
+            names,
+            vec!["build", "typecheck", "lint", "test", "fmt-check"]
+        );
     }
 
     #[test]

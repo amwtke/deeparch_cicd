@@ -975,6 +975,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "indicatif",
+ "libc",
  "petgraph",
  "regex",
  "serde",
