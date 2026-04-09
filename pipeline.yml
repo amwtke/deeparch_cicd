@@ -4,9 +4,7 @@ git_credentials:
   password: your_token_or_password
 steps:
 - name: git-pull
-  image: alpine/git:latest
   commands:
-  - if [ -n "$GIT_PIPELIGHT_USER" ] && [ -n "$GIT_PIPELIGHT_PASS" ]; then git config credential.helper '!f() { echo username=$GIT_PIPELIGHT_USER; echo password=$GIT_PIPELIGHT_PASS; }; f'; fi
   - if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi
   - if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi
   - echo "Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))..."
@@ -17,9 +15,7 @@ steps:
     callback_command: abort
     max_retries: 0
     context_paths: []
-  volumes:
-  - ~/.ssh:/root/.ssh:ro
-  - ~/.gitconfig:/root/.gitconfig:ro
+  local: true
 - name: build
   image: rust:latest
   commands:

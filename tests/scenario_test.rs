@@ -64,11 +64,11 @@ fn test_list_pipeline_steps() {
         .expect("Failed to run pipelight");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("git-pull"));
     assert!(stdout.contains("build"));
-    assert!(stdout.contains("lint"));
+    assert!(stdout.contains("clippy"));
     assert!(stdout.contains("test"));
     assert!(stdout.contains("fmt-check"));
-    assert!(stdout.contains("security-audit"));
 }
 
 /// Test that retry requires --step flag

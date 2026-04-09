@@ -77,7 +77,7 @@ fn list_shows_all_steps() {
     let out = pipelight(&["list", "-f", "pipeline.yml"]);
     assert!(out.status.success());
     let s = stdout(&out);
-    for step in &["build", "lint", "test", "fmt-check", "security-audit"] {
+    for step in &["git-pull", "build", "clippy", "test", "fmt-check"] {
         assert!(s.contains(step), "list output should contain step '{step}'");
     }
 }
@@ -87,7 +87,7 @@ fn list_shows_dependencies() {
     let out = pipelight(&["list", "-f", "pipeline.yml"]);
     assert!(out.status.success());
     let s = stdout(&out);
-    // test depends on build, security-audit depends on build
+    // test depends on build, clippy depends on build
     assert!(s.contains("build"), "should show dependency info");
 }
 
