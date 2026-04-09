@@ -197,7 +197,8 @@ mod tests {
         for step in &steps {
             let cfg = step.config();
             assert!(
-                cfg.volumes.contains(&"~/.gradle:/workspace/.gradle".to_string()),
+                cfg.volumes
+                    .contains(&"~/.gradle:/workspace/.gradle".to_string()),
                 "step '{}' should have Gradle cache volume",
                 cfg.name
             );
