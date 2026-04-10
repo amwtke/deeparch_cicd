@@ -625,9 +625,15 @@ mod tests {
         state.mark_unexecuted_as_skipped(&schedule, 1, info_fn);
 
         // git-pull: already in state, should NOT be duplicated
-        assert_eq!(state.steps.iter().filter(|s| s.name == "git-pull").count(), 1);
+        assert_eq!(
+            state.steps.iter().filter(|s| s.name == "git-pull").count(),
+            1
+        );
         // fmt-check: already in state as Failed, should NOT be overwritten
-        assert_eq!(state.get_step("fmt-check").unwrap().status, StepStatus::Failed);
+        assert_eq!(
+            state.get_step("fmt-check").unwrap().status,
+            StepStatus::Failed
+        );
         // build: was NOT in state, should now be Skipped
         let build = state.get_step("build").unwrap();
         assert_eq!(build.status, StepStatus::Skipped);
@@ -635,7 +641,10 @@ mod tests {
         assert_eq!(build.command, "cmd-build");
         // test & clippy: next batch, should be Skipped
         assert_eq!(state.get_step("test").unwrap().status, StepStatus::Skipped);
-        assert_eq!(state.get_step("clippy").unwrap().status, StepStatus::Skipped);
+        assert_eq!(
+            state.get_step("clippy").unwrap().status,
+            StepStatus::Skipped
+        );
         // Total steps: git-pull + fmt-check + build + test + clippy = 5
         assert_eq!(state.steps.len(), 5);
     }
@@ -745,9 +754,15 @@ mod tests {
         // lint, test, fmt-check: now Skipped
         assert_eq!(state.get_step("lint").unwrap().status, StepStatus::Skipped);
         assert_eq!(state.get_step("test").unwrap().status, StepStatus::Skipped);
-        assert_eq!(state.get_step("fmt-check").unwrap().status, StepStatus::Skipped);
+        assert_eq!(
+            state.get_step("fmt-check").unwrap().status,
+            StepStatus::Skipped
+        );
         // package: next batch, also Skipped
-        assert_eq!(state.get_step("package").unwrap().status, StepStatus::Skipped);
+        assert_eq!(
+            state.get_step("package").unwrap().status,
+            StepStatus::Skipped
+        );
         assert_eq!(state.steps.len(), 5);
     }
 }
