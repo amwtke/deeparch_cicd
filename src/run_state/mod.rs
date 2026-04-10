@@ -378,6 +378,147 @@ mod tests {
     }
 
     #[test]
+    fn test_skip_action_serialization_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = RunState::new("skip-run-1", "my-pipeline");
+        state.status = PipelineStatus::Success;
+        state.add_step(StepState {
+            name: "git-pull".into(),
+            status: StepStatus::Skipped,
+            exit_code: Some(1),
+            duration_ms: Some(500),
+            image: "".into(),
+            command: "git pull --rebase".into(),
+            stdout: None,
+            stderr: Some("fatal: SSL error".into()),
+            error_context: None,
+            on_failure: Some(OnFailureState {
+                exception_key: "unrecognized".into(),
+                command: CallbackCommand::FailAndSkip,
+                action: CallbackCommandAction::Skip,
+                max_retries: 0,
+                retries_remaining: 0,
+                context_paths: vec![],
+            }),
+            test_summary: None,
+            report_summary: Some("git-pull skipped".into()),
+            report_path: None,
+        });
+        state.add_step(StepState {
+            name: "build".into(),
+            status: StepStatus::Success,
+            exit_code: Some(0),
+            duration_ms: Some(3000),
+            image: "maven:3.9".into(),
+            command: "mvn compile".into(),
+            stdout: Some("BUILD SUCCESS".into()),
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        state.save(dir.path()).unwrap();
+        let loaded = RunState::load(dir.path(), "skip-run-1").unwrap();
+
+        let git_pull = loaded.get_step("git-pull").unwrap();
+        assert_eq!(git_pull.status, StepStatus::Skipped);
+        let of = git_pull.on_failure.as_ref().unwrap();
+        assert_eq!(of.command, CallbackCommand::FailAndSkip);
+        assert_eq!(of.action, CallbackCommandAction::Skip);
+        assert_eq!(of.max_retries, 0);
+
+        let build = loaded.get_step("build").unwrap();
+        assert_eq!(build.status, StepStatus::Success);
+    }
+
+    #[test]
+    fn test_pipeline_success_with_skipped_steps() {
+        let mut state = RunState::new("run-skip", "p");
+        state.add_step(StepState {
+            name: "git-pull".into(),
+            status: StepStatus::Skipped,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "".into(),
+            command: "git pull".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+        state.add_step(StepState {
+            name: "build".into(),
+            status: StepStatus::Success,
+            exit_code: Some(0),
+            duration_ms: None,
+            image: "rust:1.78".into(),
+            command: "cargo build".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        // Skipped + Success should count as all_success
+        let all_success = state
+            .steps
+            .iter()
+            .all(|s| s.status == StepStatus::Success || s.status == StepStatus::Skipped);
+        assert!(all_success);
+    }
+
+    #[test]
+    fn test_pipeline_not_success_with_failed_and_skipped() {
+        let mut state = RunState::new("run-fail", "p");
+        state.add_step(StepState {
+            name: "git-pull".into(),
+            status: StepStatus::Skipped,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "".into(),
+            command: "git pull".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+        state.add_step(StepState {
+            name: "build".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "rust:1.78".into(),
+            command: "cargo build".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        // Skipped + Failed should NOT count as all_success
+        let all_success = state
+            .steps
+            .iter()
+            .all(|s| s.status == StepStatus::Success || s.status == StepStatus::Skipped);
+        assert!(!all_success);
+    }
+
+    #[test]
     fn test_default_base_dir() {
         let base = RunState::default_base_dir();
         assert!(base.to_string_lossy().contains(".pipelight"));

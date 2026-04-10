@@ -249,6 +249,31 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_git_fail_default() {
+        let mapping = ExceptionMapping::new(CallbackCommand::GitFail);
+        let resolved = mapping.resolve(
+            1,
+            "",
+            "fatal: unable to access 'https://example.com/repo.git/': SSL error",
+            None,
+        );
+        assert_eq!(resolved.exception_key, "unrecognized");
+        assert_eq!(resolved.command, CallbackCommand::GitFail);
+        assert_eq!(resolved.max_retries, 0);
+        assert!(resolved.context_paths.is_empty());
+    }
+
+    #[test]
+    fn test_to_on_failure_git_fail() {
+        let mapping = ExceptionMapping::new(CallbackCommand::GitFail);
+        let of = mapping.to_on_failure();
+        assert_eq!(of.callback_command, CallbackCommand::GitFail);
+        assert_eq!(of.max_retries, 0);
+        assert!(of.context_paths.is_empty());
+        assert!(of.exceptions.is_empty());
+    }
+
+    #[test]
     fn test_to_on_failure_empty_entries() {
         let mapping = ExceptionMapping::new(CallbackCommand::Abort);
         let of = mapping.to_on_failure();

@@ -359,13 +359,13 @@ mod tests {
         let info = make_rust_info();
         let (pipeline, _step_defs) = generate_pipeline(&info);
 
-        // git-pull: RuntimeError, no retries
+        // git-pull: GitFail, no retries (skip and continue)
         let git_pull = pipeline.get_step("git-pull").unwrap();
         let of = git_pull
             .on_failure
             .as_ref()
             .expect("git-pull should have on_failure");
-        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert_eq!(of.callback_command, CallbackCommand::GitFail);
         assert_eq!(of.max_retries, 0);
 
         // build: AutoFix, 3 retries

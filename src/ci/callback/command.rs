@@ -11,6 +11,7 @@ pub enum CallbackCommand {
     AutoFix,
     AutoGenPmdRuleset,
     FailAndSkip,
+    GitFail,
 }
 
 pub struct CallbackCommandDef {
@@ -68,6 +69,15 @@ impl CallbackCommandRegistry {
                         .into(),
             },
         );
+        registry.register(
+            CallbackCommand::GitFail,
+            CallbackCommandDef {
+                action: CallbackCommandAction::Skip,
+                description:
+                    "Git operation failed (network, auth, merge conflict). Step is marked as skipped and pipeline continues."
+                        .into(),
+            },
+        );
         registry
     }
 
@@ -103,6 +113,7 @@ mod tests {
                 "\"auto_gen_pmd_ruleset\"",
             ),
             (CallbackCommand::FailAndSkip, "\"fail_and_skip\""),
+            (CallbackCommand::GitFail, "\"git_fail\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -134,6 +145,10 @@ mod tests {
             registry.action_for(&CallbackCommand::FailAndSkip),
             CallbackCommandAction::Skip
         );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::GitFail),
+            CallbackCommandAction::Skip
+        );
     }
 
     #[test]
@@ -144,6 +159,13 @@ mod tests {
     }
 
     #[test]
+    fn test_registry_git_fail_description() {
+        let registry = CallbackCommandRegistry::new();
+        let def = registry.get(&CallbackCommand::GitFail).unwrap();
+        assert!(def.description.contains("Git operation failed"));
+    }
+
+    #[test]
     fn test_registry_all_variants_registered() {
         let registry = CallbackCommandRegistry::new();
         assert!(registry.get(&CallbackCommand::RuntimeError).is_some());
@@ -151,5 +173,6 @@ mod tests {
         assert!(registry.get(&CallbackCommand::AutoFix).is_some());
         assert!(registry.get(&CallbackCommand::AutoGenPmdRuleset).is_some());
         assert!(registry.get(&CallbackCommand::FailAndSkip).is_some());
+        assert!(registry.get(&CallbackCommand::GitFail).is_some());
     }
 }

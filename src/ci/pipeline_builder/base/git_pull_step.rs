@@ -28,7 +28,7 @@ impl StepDef for GitPullStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::RuntimeError)
+        ExceptionMapping::new(CallbackCommand::GitFail)
     }
 
     fn output_report_str(&self, _success: bool, stdout: &str, stderr: &str) -> String {
@@ -76,8 +76,54 @@ mod tests {
     fn test_exception_mapping() {
         let step = GitPullStep::new();
         let resolved = step.exception_mapping().resolve(1, "", "some error", None);
-        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
+        assert_eq!(resolved.command, CallbackCommand::GitFail);
         assert_eq!(resolved.max_retries, 0);
+    }
+
+    #[test]
+    fn test_exception_mapping_ssl_error() {
+        let step = GitPullStep::new();
+        let stderr = "fatal: unable to access 'https://gitlab.example.com/repo.git/': LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to gitlab.example.com:443 ";
+        let resolved = step.exception_mapping().resolve(1, "", stderr, None);
+        assert_eq!(resolved.command, CallbackCommand::GitFail);
+        assert_eq!(resolved.max_retries, 0);
+        assert_eq!(resolved.exception_key, "unrecognized");
+    }
+
+    #[test]
+    fn test_exception_mapping_auth_error() {
+        let step = GitPullStep::new();
+        let stderr = "fatal: Authentication failed for 'https://gitlab.example.com/repo.git/'";
+        let resolved = step.exception_mapping().resolve(128, "", stderr, None);
+        assert_eq!(resolved.command, CallbackCommand::GitFail);
+        assert_eq!(resolved.max_retries, 0);
+    }
+
+    #[test]
+    fn test_exception_mapping_merge_conflict() {
+        let step = GitPullStep::new();
+        let stderr = "CONFLICT (content): Merge conflict in src/main.rs\nAutomatic merge failed; fix conflicts and then commit the result.";
+        let resolved = step.exception_mapping().resolve(1, "", stderr, None);
+        assert_eq!(resolved.command, CallbackCommand::GitFail);
+    }
+
+    #[test]
+    fn test_exception_mapping_to_on_failure() {
+        let step = GitPullStep::new();
+        let of = step.exception_mapping().to_on_failure();
+        assert_eq!(of.callback_command, CallbackCommand::GitFail);
+        assert_eq!(of.max_retries, 0);
+        assert!(of.context_paths.is_empty());
+    }
+
+    #[test]
+    fn test_git_fail_action_is_skip() {
+        use crate::ci::callback::command::CallbackCommandRegistry;
+        let registry = CallbackCommandRegistry::new();
+        assert_eq!(
+            registry.action_for(&CallbackCommand::GitFail),
+            crate::ci::callback::action::CallbackCommandAction::Skip
+        );
     }
 
     #[test]
