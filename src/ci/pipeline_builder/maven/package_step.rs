@@ -33,7 +33,7 @@ impl StepDef for PackageStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
     }
 
     fn output_report_str(&self, success: bool, _stdout: &str, _stderr: &str) -> String {

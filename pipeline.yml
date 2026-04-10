@@ -12,7 +12,7 @@ steps:
   - 'git pull --rebase || { if $STASHED; then git stash pop; fi; echo ''ERROR: git pull --rebase failed — possible merge conflict''; exit 1; }'
   - 'if $STASHED; then echo ''Restoring stashed changes...''; git stash pop || { echo ''ERROR: stash pop conflict — run git stash pop manually''; exit 1; }; fi'
   on_failure:
-    callback_command: abort
+    callback_command: runtime_error
     max_retries: 0
     context_paths: []
   local: true
@@ -46,7 +46,7 @@ steps:
   depends_on:
   - build
   on_failure:
-    callback_command: notify
+    callback_command: abort
     max_retries: 0
     context_paths: []
 - name: fmt-check

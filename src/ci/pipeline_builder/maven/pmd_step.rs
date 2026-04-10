@@ -92,7 +92,7 @@ impl StepDef for PmdStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
             .add("ruleset_not_found", ExceptionEntry {
                 command: CallbackCommand::AutoGenPmdRuleset,
                 max_retries: 2,

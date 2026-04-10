@@ -359,7 +359,7 @@ mod tests {
         let info = make_maven_info_with_lint();
         let step = package_step::PackageStep::new(&info);
         let resolved = step.exception_mapping().resolve(1, "", "some package error", None);
-        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
     }
 
     #[test]

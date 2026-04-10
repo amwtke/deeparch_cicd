@@ -28,7 +28,7 @@ impl StepDef for GitPullStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
     }
 
     fn output_report_str(&self, _success: bool, stdout: &str, stderr: &str) -> String {
@@ -76,7 +76,7 @@ mod tests {
     fn test_exception_mapping() {
         let step = GitPullStep::new();
         let resolved = step.exception_mapping().resolve(1, "", "some error", None);
-        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
         assert_eq!(resolved.max_retries, 0);
     }
 

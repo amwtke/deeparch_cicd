@@ -94,7 +94,7 @@ mod tests {
     use super::*;
 
     fn test_mapping() -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
             .add(
                 "ruleset_not_found",
                 ExceptionEntry {
@@ -165,7 +165,7 @@ mod tests {
         let mapping = test_mapping();
         let resolved = mapping.resolve(1, "", "some unknown error", None);
         assert_eq!(resolved.exception_key, "unrecognized");
-        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
         assert_eq!(resolved.max_retries, 0);
         assert!(resolved.context_paths.is_empty());
     }
@@ -180,7 +180,7 @@ mod tests {
             None,
         );
         assert_eq!(resolved.exception_key, "totally_unknown_key");
-        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
         assert_eq!(resolved.max_retries, 0);
     }
 

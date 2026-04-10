@@ -6,8 +6,8 @@ use super::action::CallbackCommandAction;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CallbackCommand {
+    RuntimeError,
     Abort,
-    Notify,
     AutoFix,
     AutoGenPmdRuleset,
 }
@@ -28,14 +28,14 @@ impl CallbackCommandRegistry {
             commands: HashMap::new(),
         };
         registry.register(
-            CallbackCommand::Abort,
+            CallbackCommand::RuntimeError,
             CallbackCommandDef {
                 action: CallbackCommandAction::RuntimeError,
                 description: "Runtime error in tool itself. Pipeline terminates.".into(),
             },
         );
         registry.register(
-            CallbackCommand::Notify,
+            CallbackCommand::Abort,
             CallbackCommandDef {
                 action: CallbackCommandAction::Abort,
                 description: "Tool detected serious code problem. Pipeline terminates.".into(),
@@ -85,8 +85,8 @@ mod tests {
     #[test]
     fn test_serde_roundtrip_all_variants() {
         for (variant, expected_str) in [
+            (CallbackCommand::RuntimeError, "\"runtime_error\""),
             (CallbackCommand::Abort, "\"abort\""),
-            (CallbackCommand::Notify, "\"notify\""),
             (CallbackCommand::AutoFix, "\"auto_fix\""),
             (CallbackCommand::AutoGenPmdRuleset, "\"auto_gen_pmd_ruleset\""),
         ] {
@@ -101,11 +101,11 @@ mod tests {
     fn test_registry_built_in_commands() {
         let registry = CallbackCommandRegistry::new();
         assert_eq!(
-            registry.action_for(&CallbackCommand::Abort),
+            registry.action_for(&CallbackCommand::RuntimeError),
             CallbackCommandAction::RuntimeError
         );
         assert_eq!(
-            registry.action_for(&CallbackCommand::Notify),
+            registry.action_for(&CallbackCommand::Abort),
             CallbackCommandAction::Abort
         );
         assert_eq!(
@@ -128,8 +128,8 @@ mod tests {
     #[test]
     fn test_registry_all_variants_registered() {
         let registry = CallbackCommandRegistry::new();
+        assert!(registry.get(&CallbackCommand::RuntimeError).is_some());
         assert!(registry.get(&CallbackCommand::Abort).is_some());
-        assert!(registry.get(&CallbackCommand::Notify).is_some());
         assert!(registry.get(&CallbackCommand::AutoFix).is_some());
         assert!(registry.get(&CallbackCommand::AutoGenPmdRuleset).is_some());
     }

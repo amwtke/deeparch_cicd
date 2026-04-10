@@ -83,7 +83,7 @@ pub trait StepDef: Send + Sync {
     /// Default: empty mapping with Abort fallback (all failures are fatal).
     #[allow(dead_code)]
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
     }
 
     /// Analyze execution output to identify the exception key.
