@@ -26,8 +26,8 @@ steps:
     callback_command: auto_fix
     max_retries: 3
     context_paths:
-    - src/
     - Cargo.toml
+    - src/
 - name: clippy
   image: rust:latest
   commands:
