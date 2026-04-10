@@ -90,7 +90,9 @@ JSON structure:
       "stderr": "...",
       "error_context": { "files": ["..."], "lines": ["..."], "error_type": "..." },
       "on_failure": {
-        "callback_command": "auto_fix | auto_gen_pmd_ruleset | abort | notify",
+        "exception_key": "compile_error",
+        "command": "auto_fix",
+        "action": "retry",
         "max_retries": 3,
         "retries_remaining": 3,
         "context_paths": ["src/", "Cargo.toml"]
@@ -120,9 +122,9 @@ Pipeline failed with no auto-fix strategy. Report the error:
 Pipeline failed but auto-fix is configured. Enter fix-retry loop:
 
 1. Find the failed step (the one with `status: "failed"`)
-2. Read `stderr` to understand the error
-3. Read files listed in `on_failure.context_paths` to understand context
-4. Fix the code
+2. Read `on_failure.command` — look it up in the **Command Mapping Table** above
+3. Execute the command's **LLM reasoning instructions**
+4. Read files listed in `on_failure.context_paths` to understand context
 5. Check `retries_remaining > 0` before retrying
 6. Run retry:
 
@@ -139,6 +141,33 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 | 0 | Pipeline succeeded |
 | 1 | Pipeline retryable (has auto_fix steps with retries left) |
 | 2 | Pipeline failed (abort/notify, or retries exhausted) |
+
+## Callback Command Reference
+
+When a step fails, the JSON `on_failure` object contains three layers of information:
+
+| Field | Meaning |
+|-------|---------|
+| `exception_key` | What went wrong (step-internal identifier) |
+| `command` | The CallbackCommand that was resolved (determines LLM reasoning strategy) |
+| `action` | The behavior type: `retry`, `abort`, or `notify` |
+
+### Action Quick Reference
+
+| action | LLM behavior |
+|--------|-------------|
+| `retry` | Execute the command's reasoning instructions below, then `pipelight retry --step <name>` |
+| `abort` | Report error to user, do not attempt fix |
+| `notify` | Report results to user, do not attempt fix |
+
+### Command Mapping Table
+
+| command | action | LLM reasoning instructions |
+|---------|--------|---------------------------|
+| `auto_fix` | retry | 1. Read stderr to understand error 2. Read files in context_paths 3. Fix source code only (never build config) 4. Retry |
+| `auto_gen_pmd_ruleset` | retry | 1. Search project for existing PMD ruleset 2. Found → copy to `pipelight-misc/pmd-ruleset.xml` → retry 3. Not found → search for coding guideline docs 4. Found docs → read, generate PMD 7.x ruleset XML → retry 5. Nothing found → report and `--skip pmd` |
+| `abort` | abort | Report failed step + stderr + error_context to user |
+| `notify` | notify | Report test results / summary to user |
 
 ## Pipelight-misc Convention
 
