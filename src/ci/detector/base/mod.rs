@@ -184,12 +184,13 @@ mod tests {
         };
         let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
         assert_eq!(pipeline.name, "rust-ci");
-        // git-pull + RustStrategy: git-pull, build, clippy, test, fmt-check
-        assert_eq!(pipeline.steps.len(), 5);
-        assert_eq!(pipeline.steps[0].name, "git-pull");
-        assert_eq!(pipeline.steps[1].name, "build");
+        // ping-pong + git-pull + RustStrategy: ping-pong, git-pull, build, clippy, test, fmt-check
+        assert_eq!(pipeline.steps.len(), 6);
+        assert_eq!(pipeline.steps[0].name, "ping-pong");
+        assert_eq!(pipeline.steps[1].name, "git-pull");
+        assert_eq!(pipeline.steps[2].name, "build");
         // build should depend on git-pull
-        assert!(pipeline.steps[1]
+        assert!(pipeline.steps[2]
             .depends_on
             .contains(&"git-pull".to_string()));
     }
@@ -212,11 +213,12 @@ mod tests {
             subdir: None,
         };
         let (pipeline, _step_defs) = crate::ci::pipeline_builder::generate_pipeline(&info);
-        // git-pull + GoStrategy: git-pull, build, vet, test (no lint, no fmt)
-        assert_eq!(pipeline.steps.len(), 4);
-        assert_eq!(pipeline.steps[0].name, "git-pull");
-        assert_eq!(pipeline.steps[1].name, "build");
-        assert_eq!(pipeline.steps[2].name, "vet");
-        assert_eq!(pipeline.steps[3].name, "test");
+        // ping-pong + git-pull + GoStrategy: ping-pong, git-pull, build, vet, test (no lint, no fmt)
+        assert_eq!(pipeline.steps.len(), 5);
+        assert_eq!(pipeline.steps[0].name, "ping-pong");
+        assert_eq!(pipeline.steps[1].name, "git-pull");
+        assert_eq!(pipeline.steps[2].name, "build");
+        assert_eq!(pipeline.steps[3].name, "vet");
+        assert_eq!(pipeline.steps[4].name, "test");
     }
 }

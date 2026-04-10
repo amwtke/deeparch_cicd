@@ -219,6 +219,8 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
     let git_pull = base::GitPullStep::new();
 
     let mut map: HashMap<String, Box<dyn StepDef>> = HashMap::new();
+    let ping_pong = base::PingPongStep::new();
+    map.insert(ping_pong.config().name, Box::new(ping_pong));
     map.insert(git_pull.config().name, Box::new(git_pull));
     for sd in step_defs {
         map.insert(sd.config().name, sd);
@@ -237,12 +239,12 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
     let mut step_defs = strategy.steps(info);
     let name = strategy.pipeline_name(info);
 
-    // Prepend git-pull and wire root steps to depend on it
+    // Prepend ping-pong (first) → git-pull (second), wire dependencies
+    let ping_pong = base::PingPongStep::new();
+    let ping_pong_name = ping_pong.config().name.clone();
+
     let git_pull = base::GitPullStep::new();
-    let git_pull_name = {
-        let cfg = git_pull.config();
-        cfg.name.clone()
-    };
+    let git_pull_name = git_pull.config().name.clone();
 
     for sd in &mut step_defs {
         let cfg = sd.config();
@@ -252,9 +254,14 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
         }
     }
 
-    // Collect configs, wiring root steps to depend on git-pull
-    let git_pull_cfg = git_pull.config();
-    let mut all_configs: Vec<StepConfig> = vec![git_pull_cfg];
+    // Collect configs: ping-pong first, then git-pull (depends on ping-pong),
+    // then strategy steps (root steps depend on git-pull)
+    let ping_pong_cfg = ping_pong.config();
+
+    let mut git_pull_cfg = git_pull.config();
+    git_pull_cfg.depends_on.push(ping_pong_name.clone());
+
+    let mut all_configs: Vec<StepConfig> = vec![ping_pong_cfg, git_pull_cfg];
 
     for sd in &step_defs {
         let mut cfg = sd.config();
@@ -264,8 +271,9 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
         all_configs.push(cfg);
     }
 
-    // Build the full step def list with git-pull at the front
-    let mut all_step_defs: Vec<Box<dyn StepDef>> = vec![Box::new(git_pull)];
+    // Build the full step def list with ping-pong and git-pull at the front
+    let mut all_step_defs: Vec<Box<dyn StepDef>> =
+        vec![Box::new(ping_pong), Box::new(git_pull)];
     all_step_defs.extend(step_defs);
 
     // Convert configs to Steps, then attach on_failure from exception_mapping
@@ -359,8 +367,19 @@ mod tests {
         let info = make_rust_info();
         let (pipeline, _step_defs) = generate_pipeline(&info);
 
-        // git-pull: GitFail, no retries (skip and continue)
+        // ping-pong: Ping, 9 retries (first step in pipeline)
+        let ping_pong = pipeline.get_step("ping-pong").unwrap();
+        let of = ping_pong
+            .on_failure
+            .as_ref()
+            .expect("ping-pong should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::Ping);
+        assert_eq!(of.max_retries, 9);
+        assert!(ping_pong.depends_on.is_empty());
+
+        // git-pull: GitFail, no retries (depends on ping-pong)
         let git_pull = pipeline.get_step("git-pull").unwrap();
+        assert!(git_pull.depends_on.contains(&"ping-pong".to_string()));
         let of = git_pull
             .on_failure
             .as_ref()
@@ -413,6 +432,7 @@ mod tests {
         let info = make_rust_info();
         let (pipeline, _) = generate_pipeline(&info);
         let defs = step_defs_for_pipeline(&pipeline).expect("should find rust strategy");
+        assert!(defs.contains_key("ping-pong"));
         assert!(defs.contains_key("git-pull"));
         assert!(defs.contains_key("build"));
         assert!(defs.contains_key("test"));

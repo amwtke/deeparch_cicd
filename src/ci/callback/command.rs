@@ -12,6 +12,7 @@ pub enum CallbackCommand {
     AutoGenPmdRuleset,
     FailAndSkip,
     GitFail,
+    Ping,
 }
 
 pub struct CallbackCommandDef {
@@ -78,6 +79,15 @@ impl CallbackCommandRegistry {
                         .into(),
             },
         );
+        registry.register(
+            CallbackCommand::Ping,
+            CallbackCommandDef {
+                action: CallbackCommandAction::Retry,
+                description:
+                    "Ping-pong communication test. LLM prints 'pong' and retries the step."
+                        .into(),
+            },
+        );
         registry
     }
 
@@ -114,6 +124,7 @@ mod tests {
             ),
             (CallbackCommand::FailAndSkip, "\"fail_and_skip\""),
             (CallbackCommand::GitFail, "\"git_fail\""),
+            (CallbackCommand::Ping, "\"ping\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -149,6 +160,10 @@ mod tests {
             registry.action_for(&CallbackCommand::GitFail),
             CallbackCommandAction::Skip
         );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::Ping),
+            CallbackCommandAction::Retry
+        );
     }
 
     #[test]
@@ -174,5 +189,13 @@ mod tests {
         assert!(registry.get(&CallbackCommand::AutoGenPmdRuleset).is_some());
         assert!(registry.get(&CallbackCommand::FailAndSkip).is_some());
         assert!(registry.get(&CallbackCommand::GitFail).is_some());
+        assert!(registry.get(&CallbackCommand::Ping).is_some());
+    }
+
+    #[test]
+    fn test_registry_ping_description() {
+        let registry = CallbackCommandRegistry::new();
+        let def = registry.get(&CallbackCommand::Ping).unwrap();
+        assert!(def.description.contains("Ping-pong"));
     }
 }

@@ -2,12 +2,14 @@ pub mod build_step;
 pub mod fmt_step;
 pub mod git_pull_step;
 pub mod lint_step;
+pub mod ping_pong_step;
 pub mod test_step;
 
 pub use build_step::BuildStep;
 pub use fmt_step::FmtStep;
 pub use git_pull_step::GitPullStep;
 pub use lint_step::LintStep;
+pub use ping_pong_step::PingPongStep;
 pub use test_step::TestStep;
 
 use super::count_pattern;
@@ -25,6 +27,18 @@ impl BaseStrategy {
     ) -> String {
         let output = format!("{}{}", stdout, stderr);
         match step_name {
+            "ping-pong" => {
+                if success {
+                    "Ping-pong completed (10 rounds)".into()
+                } else {
+                    output
+                        .lines()
+                        .find(|l| l.contains("ping (round"))
+                        .unwrap_or("ping")
+                        .trim()
+                        .into()
+                }
+            }
             "git-pull" => Self::report_git_pull(&output),
             "build" => Self::report_build(success, &output),
             "test" => Self::report_test_generic(success, &output),

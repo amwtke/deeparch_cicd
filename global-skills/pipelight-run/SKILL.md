@@ -189,10 +189,23 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 |-----------|--------|---------|--------|--------|
 | `auto_fix` | retry | 见下方 **`auto_fix` 详细流程** | `pipelight retry` 重试该 step | retries 耗尽则报告失败 |
 | `auto_gen_pmd_ruleset` | retry | 见下方 **`auto_gen_pmd_ruleset` 详细流程** | `pipelight retry` 重试该 step | skip PMD: `pipelight retry --skip pmd` |
+| `ping` | retry | 在终端打印 `pong`，然后 `pipelight retry` 重试该 step | `pipelight retry` 重试该 step | 10 轮完成后 step 自动成功 |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
 | `abort` | abort | 报告错误，不重试 | — | — |
+
+#### `ping` 详细流程
+
+Ping-pong 通信测试，验证 pipelight 与 LLM 的回调交互是否正常。
+
+1. 读取失败 step 的 `stdout`，确认包含 `ping (round N/10)`
+2. **在终端打印 `pong`**（直接输出文本 "pong" 给用户看）
+3. 执行 `pipelight retry --run-id <id> --step ping-pong -f pipeline.yml --output json`
+4. 解析 JSON，如果 step 再次失败且 `on_failure.command` 仍为 `ping`，重复步骤 1-3
+5. 第 10 轮时 step 会自动 exit 0（成功），pipeline 继续执行下一个 step
+
+> **注意**：ping 回调不需要读取任何文件或修改代码，仅打印 pong 并 retry。
 
 #### `auto_fix` 详细流程
 
