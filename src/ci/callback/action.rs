@@ -6,6 +6,7 @@ pub enum CallbackCommandAction {
     Retry,
     RuntimeError,
     Abort,
+    Skip,
 }
 
 #[cfg(test)]
@@ -18,6 +19,7 @@ mod tests {
             (CallbackCommandAction::Retry, "\"retry\""),
             (CallbackCommandAction::RuntimeError, "\"runtime_error\""),
             (CallbackCommandAction::Abort, "\"abort\""),
+            (CallbackCommandAction::Skip, "\"skip\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);

@@ -96,9 +96,9 @@ impl StepDef for PmdStep {
             .add(
                 "ruleset_not_found",
                 ExceptionEntry {
-                    command: CallbackCommand::AutoGenPmdRuleset,
-                    max_retries: 2,
-                    context_paths: self.source_paths.clone(),
+                    command: CallbackCommand::FailAndSkip,
+                    max_retries: 0,
+                    context_paths: vec![],
                 },
             )
             .add(

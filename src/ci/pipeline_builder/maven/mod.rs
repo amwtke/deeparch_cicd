@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pmd_step_uses_auto_gen_strategy() {
+    fn test_pmd_step_ruleset_not_found_skips() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
@@ -286,8 +286,8 @@ mod tests {
             "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset",
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
-        assert_eq!(resolved.command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(resolved.max_retries, 2);
+        assert_eq!(resolved.command, CallbackCommand::FailAndSkip);
+        assert_eq!(resolved.max_retries, 0);
     }
 
     #[test]

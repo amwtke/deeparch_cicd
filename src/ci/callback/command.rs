@@ -10,6 +10,7 @@ pub enum CallbackCommand {
     Abort,
     AutoFix,
     AutoGenPmdRuleset,
+    FailAndSkip,
 }
 
 pub struct CallbackCommandDef {
@@ -58,6 +59,15 @@ impl CallbackCommandRegistry {
                         .into(),
             },
         );
+        registry.register(
+            CallbackCommand::FailAndSkip,
+            CallbackCommandDef {
+                action: CallbackCommandAction::Skip,
+                description:
+                    "Step cannot run because prerequisites are missing. Step is marked as skipped and pipeline continues."
+                        .into(),
+            },
+        );
         registry
     }
 
@@ -92,6 +102,7 @@ mod tests {
                 CallbackCommand::AutoGenPmdRuleset,
                 "\"auto_gen_pmd_ruleset\"",
             ),
+            (CallbackCommand::FailAndSkip, "\"fail_and_skip\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -119,6 +130,10 @@ mod tests {
             registry.action_for(&CallbackCommand::AutoGenPmdRuleset),
             CallbackCommandAction::Retry
         );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::FailAndSkip),
+            CallbackCommandAction::Skip
+        );
     }
 
     #[test]
@@ -135,5 +150,6 @@ mod tests {
         assert!(registry.get(&CallbackCommand::Abort).is_some());
         assert!(registry.get(&CallbackCommand::AutoFix).is_some());
         assert!(registry.get(&CallbackCommand::AutoGenPmdRuleset).is_some());
+        assert!(registry.get(&CallbackCommand::FailAndSkip).is_some());
     }
 }

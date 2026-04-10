@@ -408,7 +408,7 @@ async fn cmd_run(
             }
 
             // Build on_failure state: prefer runtime exception resolve, fall back to YAML config
-            let on_failure_state = if !result.success {
+            let mut on_failure_state = if !result.success {
                 // Try runtime resolve via StepDef exception_mapping
                 if let Some(ref defs) = step_def_map {
                     if let Some(sd) = defs.get(step_name) {
@@ -517,8 +517,15 @@ async fn cmd_run(
             // Handle failure
             let allow_failure = pipeline_step.map(|s| s.allow_failure).unwrap_or(false);
             if !result.success && !allow_failure {
-                if let Some(ref ofs) = on_failure_state {
+                if let Some(ref mut ofs) = on_failure_state {
                     match ofs.action {
+                        CallbackCommandAction::Skip => {
+                            // Mark this step as skipped and continue pipeline
+                            if let Some(last) = state.steps.last_mut() {
+                                last.status = StepStatus::Skipped;
+                            }
+                            continue;
+                        }
                         CallbackCommandAction::Retry if ofs.max_retries > 0 => {
                             has_retryable_failure = true;
                             break 'outer;
@@ -824,7 +831,10 @@ async fn cmd_retry(
     }
 
     // Determine overall status
-    let all_success = state.steps.iter().all(|s| s.status == StepStatus::Success);
+    let all_success = state
+        .steps
+        .iter()
+        .all(|s| s.status == StepStatus::Success || s.status == StepStatus::Skipped);
     let has_retryable = state.steps.iter().any(|s| {
         s.status == StepStatus::Failed
             && s.on_failure
