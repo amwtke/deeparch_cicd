@@ -115,7 +115,7 @@ Pipeline failed with no auto-fix strategy. Report the error:
 - Show which step failed
 - Show `stderr` content
 - Show `error_context` if present
-- Do NOT attempt auto-fix (strategy is `abort` or `notify`)
+- Do NOT attempt auto-fix (action is `runtime_error` or `abort`)
 
 ### `status: "retryable"`
 
@@ -140,7 +140,7 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 |-----------|---------|
 | 0 | Pipeline succeeded |
 | 1 | Pipeline retryable (has auto_fix steps with retries left) |
-| 2 | Pipeline failed (abort/notify, or retries exhausted) |
+| 2 | Pipeline failed (runtime_error/abort, or retries exhausted) |
 
 ## Callback Command Reference
 
@@ -148,26 +148,28 @@ When a step fails, the JSON `on_failure` object contains three layers of informa
 
 | Field | Meaning |
 |-------|---------|
-| `exception_key` | What went wrong (step-internal identifier) |
-| `command` | The CallbackCommand that was resolved (determines LLM reasoning strategy) |
-| `action` | The behavior type: `retry`, `abort`, or `notify` |
+| Field | Type | Meaning |
+|-------|------|---------|
+| `exception_key` | String | What went wrong (step-internal identifier, e.g. `compile_error`, `ruleset_not_found`) |
+| `command` | CallbackCommand | The command that was resolved — determines LLM reasoning strategy |
+| `action` | CallbackCommandAction | The behavior type: `retry`, `runtime_error`, or `abort` |
 
-### Action Quick Reference
+### CallbackCommandAction Quick Reference
 
-| action | LLM behavior |
-|--------|-------------|
-| `retry` | Execute the command's reasoning instructions below, then `pipelight retry --step <name>` |
-| `abort` | Report error to user, do not attempt fix |
-| `notify` | Report results to user, do not attempt fix |
+| action | Meaning | LLM behavior |
+|--------|---------|-------------|
+| `retry` | LLM can fix this | Execute the command's reasoning instructions below, then `pipelight retry --step <name>` |
+| `runtime_error` | Tool itself errored (hasn't started checking code) | Report error to user, do not attempt fix |
+| `abort` | Tool detected serious code problem | Report error to user, do not attempt fix |
 
-### Command Mapping Table
+### CallbackCommand Mapping Table
 
-| command | action | LLM reasoning instructions |
-|---------|--------|---------------------------|
-| `auto_fix` | retry | 1. Read stderr to understand error 2. Read files in context_paths 3. Fix source code only (never build config) 4. Retry |
-| `auto_gen_pmd_ruleset` | retry | 1. Search project for existing PMD ruleset 2. Found → copy to `pipelight-misc/pmd-ruleset.xml` → retry 3. Not found → search for coding guideline docs 4. Found docs → read, generate PMD 7.x ruleset XML → retry 5. Nothing found → report and `--skip pmd` |
-| `abort` | abort | Report failed step + stderr + error_context to user |
-| `notify` | notify | Report test results / summary to user |
+| command (CallbackCommand) | action (CallbackCommandAction) | LLM reasoning instructions |
+|---------------------------|-------------------------------|---------------------------|
+| `auto_fix` | `retry` | 1. Read stderr to understand error 2. Read files in context_paths 3. Fix source code only (never build config) 4. Retry |
+| `auto_gen_pmd_ruleset` | `retry` | 1. Search project for existing PMD ruleset 2. Found → copy to `pipelight-misc/pmd-ruleset.xml` → retry 3. Not found → search for coding guideline docs 4. Found docs → read, generate PMD 7.x ruleset XML → retry 5. Nothing found → report and `--skip pmd` |
+| `runtime_error` | `runtime_error` | Report failed step + stderr to user. Tool itself had a runtime error (e.g. git pull failed, Docker unavailable). |
+| `abort` | `abort` | Report failed step + stderr + error_context to user. Tool detected serious code problem (e.g. tests failed). |
 
 ## Pipelight-misc Convention
 
@@ -212,7 +214,7 @@ When auto-fixing failures, you may ONLY modify **application source code** (`.ja
 
 ## PMD Callback Protocol: `auto_gen_pmd_ruleset`
 
-When the PMD step fails with `callback_command: "auto_gen_pmd_ruleset"` and stderr contains `PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset`, pipelight is asking you to find or generate a PMD ruleset before retrying.
+When the PMD step fails with `command: "auto_gen_pmd_ruleset"` (action: `retry`) and stderr contains `PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset`, pipelight is asking you to find or generate a PMD ruleset before retrying.
 
 ### Callback Flow
 
