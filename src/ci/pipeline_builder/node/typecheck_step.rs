@@ -24,7 +24,6 @@ impl StepDef for TypecheckStep {
             image: self.image.clone(),
             commands: vec!["npx tsc --noEmit".into()],
             depends_on: vec!["build".into()],
-            on_failure: None,
             ..Default::default()
         }
     }

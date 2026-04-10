@@ -24,7 +24,6 @@ impl StepDef for MypyStep {
             image: self.image.clone(),
             commands: vec!["pip install mypy && mypy .".into()],
             depends_on: vec!["build".into()],
-            on_failure: None,
             ..Default::default()
         }
     }

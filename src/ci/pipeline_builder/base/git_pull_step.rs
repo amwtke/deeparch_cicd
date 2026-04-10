@@ -23,7 +23,6 @@ impl StepDef for GitPullStep {
                 "git pull --rebase || { if $STASHED; then git stash pop; fi; echo 'ERROR: git pull --rebase failed — possible merge conflict'; exit 1; }".into(),
                 "if $STASHED; then echo 'Restoring stashed changes...'; git stash pop || { echo 'ERROR: stash pop conflict — run git stash pop manually'; exit 1; }; fi".into(),
             ],
-            on_failure: None,
             ..Default::default()
         }
     }
@@ -71,7 +70,6 @@ mod tests {
         assert!(cfg.image.is_empty());
         assert!(cfg.depends_on.is_empty());
         assert!(cfg.volumes.is_empty());
-        assert!(cfg.on_failure.is_none());
     }
 
     #[test]

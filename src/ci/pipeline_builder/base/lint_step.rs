@@ -25,7 +25,6 @@ impl StepDef for LintStep {
             name: "lint".into(),
             image: self.image.clone(),
             commands: self.lint_cmd.clone(),
-            on_failure: None,
             ..Default::default()
         }
     }
@@ -103,7 +102,6 @@ mod tests {
         let step = LintStep::new(&info).unwrap();
         let cfg = step.config();
         assert_eq!(cfg.name, "lint");
-        assert!(cfg.on_failure.is_none());
     }
 
     #[test]

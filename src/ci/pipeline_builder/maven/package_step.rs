@@ -28,7 +28,6 @@ impl StepDef for PackageStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["test".into()],
-            on_failure: None,
             ..Default::default()
         }
     }

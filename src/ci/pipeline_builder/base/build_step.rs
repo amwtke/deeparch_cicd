@@ -27,7 +27,6 @@ impl StepDef for BuildStep {
             name: "build".into(),
             image: self.image.clone(),
             commands: self.build_cmd.clone(),
-            on_failure: None,
             ..Default::default()
         }
     }
@@ -99,7 +98,6 @@ mod tests {
         assert_eq!(cfg.image, "rust:latest");
         assert_eq!(cfg.commands, vec!["cargo build"]);
         assert!(cfg.depends_on.is_empty());
-        assert!(cfg.on_failure.is_none());
     }
 
     #[test]

@@ -24,7 +24,6 @@ impl StepDef for VetStep {
             image: self.image.clone(),
             commands: vec!["go vet ./...".into()],
             depends_on: vec!["build".into()],
-            on_failure: None,
             ..Default::default()
         }
     }

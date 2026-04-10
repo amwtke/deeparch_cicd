@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::detector::{ProjectInfo, ProjectType};
-use crate::ci::parser::{OnFailure, Pipeline, Step};
+use crate::ci::parser::{Pipeline, Step};
 
 /// Data carrier for a single pipeline step (renamed from old StepDef struct).
 #[derive(Debug, Clone)]
@@ -23,7 +23,6 @@ pub struct StepConfig {
     pub commands: Vec<String>,
     pub depends_on: Vec<String>,
     pub workdir: String,
-    pub on_failure: Option<OnFailure>,
     pub allow_failure: bool,
     pub volumes: Vec<String>,
     pub local: bool,
@@ -37,7 +36,6 @@ impl Default for StepConfig {
             commands: vec![],
             depends_on: vec![],
             workdir: "/workspace".into(),
-            on_failure: None,
             allow_failure: false,
             volumes: vec![],
             local: false,
@@ -53,7 +51,7 @@ impl From<StepConfig> for Step {
             commands: sc.commands,
             depends_on: sc.depends_on,
             workdir: sc.workdir,
-            on_failure: sc.on_failure,
+            on_failure: None,
             allow_failure: sc.allow_failure,
             volumes: sc.volumes,
             local: sc.local,

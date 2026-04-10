@@ -25,7 +25,6 @@ impl StepDef for FmtStep {
             name: "fmt-check".into(),
             image: self.image.clone(),
             commands: self.fmt_cmd.clone(),
-            on_failure: None,
             ..Default::default()
         }
     }
@@ -97,7 +96,6 @@ mod tests {
         let step = FmtStep::new(&info).unwrap();
         let cfg = step.config();
         assert_eq!(cfg.name, "fmt-check");
-        assert!(cfg.on_failure.is_none());
     }
 
     #[test]

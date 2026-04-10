@@ -31,7 +31,6 @@ impl StepDef for TestStep {
             image: self.image.clone(),
             commands: self.test_cmd.clone(),
             depends_on: vec!["build".into()],
-            on_failure: None,
             ..Default::default()
         }
     }
@@ -85,7 +84,6 @@ mod tests {
         let cfg = step.config();
         assert_eq!(cfg.name, "test");
         assert_eq!(cfg.depends_on, vec!["build"]);
-        assert!(cfg.on_failure.is_none());
     }
 
     #[test]

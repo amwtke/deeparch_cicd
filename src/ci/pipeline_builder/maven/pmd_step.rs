@@ -86,7 +86,6 @@ impl StepDef for PmdStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
-            on_failure: None,
             ..Default::default()
         }
     }
