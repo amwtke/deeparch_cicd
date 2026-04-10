@@ -75,6 +75,10 @@ pub struct Step {
     /// Run commands locally (no Docker container)
     #[serde(default, skip_serializing_if = "is_false")]
     pub local: bool,
+
+    /// Whether this step is active. Inactive steps are skipped at runtime.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub active: bool,
 }
 
 fn default_workdir() -> String {
@@ -87,6 +91,14 @@ fn is_default_workdir(s: &str) -> bool {
 
 fn is_false(b: &bool) -> bool {
     !b
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 // Re-export the canonical CallbackCommand from callback module
@@ -466,5 +478,60 @@ steps:
         assert!(pipeline.get_step("build").is_some());
         assert!(pipeline.get_step("test").is_some());
         assert!(pipeline.get_step("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_active_defaults_to_true() {
+        let yaml = r#"
+name: test
+steps:
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        assert!(pipeline.steps[0].active);
+    }
+
+    #[test]
+    fn test_active_false_parsed() {
+        let yaml = r#"
+name: test
+steps:
+  - name: ping-pong
+    local: true
+    active: false
+    commands: [echo ping]
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        assert!(!pipeline.steps[0].active, "ping-pong should be inactive");
+        assert!(pipeline.steps[1].active, "build should be active");
+    }
+
+    #[test]
+    fn test_active_false_serialized_in_yaml() {
+        let yaml = r#"
+name: test
+steps:
+  - name: ping-pong
+    local: true
+    active: false
+    commands: [echo ping]
+  - name: build
+    image: rust:1.78
+    commands: [echo hi]
+"#;
+        let pipeline = Pipeline::from_str(yaml).unwrap();
+        let serialized = serde_yaml::to_string(&pipeline).unwrap();
+        // active: false should appear in YAML; active: true should be omitted
+        assert!(serialized.contains("active: false"));
+        assert_eq!(
+            serialized.matches("active:").count(),
+            1,
+            "only inactive steps should have 'active' in YAML"
+        );
     }
 }

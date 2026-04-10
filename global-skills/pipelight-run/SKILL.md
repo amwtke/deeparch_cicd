@@ -54,6 +54,7 @@ digraph pipelight {
 | `--verbose` | Show full container output | `/pipelight-run --verbose` |
 | `--docker-prepare` | Pull all Docker images from pipeline.yml without running pipeline | `/pipelight-run --docker-prepare` |
 | `--clean` | Remove pipeline.yml and pipelight-misc/ from current project | `/pipelight-run --clean` |
+| `--ping-pong` | Enable ping-pong communication test step (inactive by default) | `/pipelight-run --ping-pong` |
 
 Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
 
@@ -112,6 +113,7 @@ pipelight run -f pipeline.yml --output json --run-id <short-id>
 - If `--step` was passed, add `--step <name>` to run only that step
 - If `--dry-run` was passed, add `--dry-run` to show plan without executing
 - If `--verbose` was passed, add `--verbose` to show full container output
+- If `--ping-pong` was passed, add `--ping-pong` to activate the ping-pong communication test step
 
 ## Step 3: Parse JSON Result
 

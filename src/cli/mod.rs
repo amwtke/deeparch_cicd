@@ -58,6 +58,10 @@ pub enum Command {
         /// Show full container output
         #[arg(long)]
         verbose: bool,
+
+        /// Enable ping-pong communication test step
+        #[arg(long)]
+        ping_pong: bool,
     },
 
     /// Validate pipeline config
@@ -154,7 +158,13 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             output,
             run_id,
             verbose,
-        } => cmd_run(file, step, skip, dry_run, output, run_id, verbose).await,
+            ping_pong,
+        } => {
+            cmd_run(
+                file, step, skip, dry_run, output, run_id, verbose, ping_pong,
+            )
+            .await
+        }
         Command::Init { dir, output } => cmd_init(dir, output).await,
         Command::Validate { file } => cmd_validate(file).await,
         Command::List { file } => cmd_list(file).await,
@@ -177,6 +187,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cmd_run(
     file: PathBuf,
     step_filter: Option<String>,
@@ -185,11 +196,19 @@ async fn cmd_run(
     output: Option<String>,
     run_id: Option<String>,
     verbose: bool,
+    ping_pong: bool,
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
-    let pipeline = Pipeline::from_file(&file)
+    let mut pipeline = Pipeline::from_file(&file)
         .context(format!("Failed to load pipeline: {}", file.display()))?;
+
+    // Activate ping-pong step if --ping-pong flag is set
+    if ping_pong {
+        if let Some(step) = pipeline.steps.iter_mut().find(|s| s.name == "ping-pong") {
+            step.active = true;
+        }
+    }
 
     // Resolve project directory from pipeline file location
     let project_dir = file
@@ -268,8 +287,12 @@ async fn cmd_run(
         current_batch_index = batch_idx;
 
         for step_name in batch {
-            // Skip steps specified by --skip
-            if skip_steps.contains(step_name) {
+            // Skip inactive steps or steps specified by --skip
+            let is_inactive = pipeline
+                .get_step(step_name)
+                .map(|s| !s.active)
+                .unwrap_or(false);
+            if is_inactive || skip_steps.contains(step_name) {
                 state.add_step(StepState {
                     name: step_name.clone(),
                     status: StepStatus::Skipped,

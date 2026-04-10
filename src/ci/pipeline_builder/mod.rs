@@ -26,6 +26,7 @@ pub struct StepConfig {
     pub allow_failure: bool,
     pub volumes: Vec<String>,
     pub local: bool,
+    pub active: bool,
 }
 
 impl Default for StepConfig {
@@ -39,6 +40,7 @@ impl Default for StepConfig {
             allow_failure: false,
             volumes: vec![],
             local: false,
+            active: true,
         }
     }
 }
@@ -57,6 +59,7 @@ impl From<StepConfig> for Step {
             local: sc.local,
             env: HashMap::new(),
             condition: None,
+            active: sc.active,
         }
     }
 }
@@ -272,8 +275,7 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
     }
 
     // Build the full step def list with ping-pong and git-pull at the front
-    let mut all_step_defs: Vec<Box<dyn StepDef>> =
-        vec![Box::new(ping_pong), Box::new(git_pull)];
+    let mut all_step_defs: Vec<Box<dyn StepDef>> = vec![Box::new(ping_pong), Box::new(git_pull)];
     all_step_defs.extend(step_defs);
 
     // Convert configs to Steps, then attach on_failure from exception_mapping

@@ -84,8 +84,7 @@ impl CallbackCommandRegistry {
             CallbackCommandDef {
                 action: CallbackCommandAction::Retry,
                 description:
-                    "Ping-pong communication test. LLM prints 'pong' and retries the step."
-                        .into(),
+                    "Ping-pong communication test. LLM prints 'pong' and retries the step.".into(),
             },
         );
         registry

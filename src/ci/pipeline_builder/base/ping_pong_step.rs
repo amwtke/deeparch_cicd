@@ -35,6 +35,7 @@ impl StepDef for PingPongStep {
             name: "ping-pong".into(),
             local: true,
             commands: vec![script],
+            active: false,
             ..Default::default()
         }
     }
@@ -127,6 +128,13 @@ mod tests {
     }
 
     #[test]
+    fn test_config_inactive_by_default() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        assert!(!cfg.active, "ping-pong should be inactive by default");
+    }
+
+    #[test]
     fn test_config_default_workdir() {
         let step = PingPongStep::new();
         let cfg = step.config();
@@ -173,9 +181,7 @@ mod tests {
         let match_fn = |exit_code: i64, stdout: &str, stderr: &str| -> Option<String> {
             step.match_exception(exit_code, stdout, stderr)
         };
-        let resolved =
-            step.exception_mapping()
-                .resolve(1, "", "", Some(&match_fn));
+        let resolved = step.exception_mapping().resolve(1, "", "", Some(&match_fn));
         assert!(resolved.context_paths.is_empty());
     }
 
@@ -193,10 +199,19 @@ mod tests {
     #[test]
     fn test_match_exception_always_returns_ping() {
         let step = PingPongStep::new();
-        assert_eq!(step.match_exception(1, "ping (round 1/10)", ""), Some("ping".into()));
-        assert_eq!(step.match_exception(1, "", "some error"), Some("ping".into()));
+        assert_eq!(
+            step.match_exception(1, "ping (round 1/10)", ""),
+            Some("ping".into())
+        );
+        assert_eq!(
+            step.match_exception(1, "", "some error"),
+            Some("ping".into())
+        );
         assert_eq!(step.match_exception(0, "", ""), Some("ping".into()));
-        assert_eq!(step.match_exception(127, "garbage", "noise"), Some("ping".into()));
+        assert_eq!(
+            step.match_exception(127, "garbage", "noise"),
+            Some("ping".into())
+        );
     }
 
     // ── registry ────────────────────────────────────────────────
