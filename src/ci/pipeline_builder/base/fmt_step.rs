@@ -1,5 +1,6 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct FmtStep {
@@ -24,13 +25,25 @@ impl StepDef for FmtStep {
             name: "fmt-check".into(),
             image: self.image.clone(),
             commands: self.fmt_cmd.clone(),
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::AutoFix,
-                max_retries: 1,
-                context_paths: self.source_paths.clone(),
-            }),
+            on_failure: None,
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::AutoFix)
+            .add(
+                "fmt_error",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoFix,
+                    max_retries: 1,
+                    context_paths: self.source_paths.clone(),
+                },
+            )
+    }
+
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
+        Some("fmt_error".into())
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -84,9 +97,22 @@ mod tests {
         let step = FmtStep::new(&info).unwrap();
         let cfg = step.config();
         assert_eq!(cfg.name, "fmt-check");
-        let of = cfg.on_failure.unwrap();
-        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
-        assert_eq!(of.max_retries, 1);
+        assert!(cfg.on_failure.is_none());
+    }
+
+    #[test]
+    fn test_exception_mapping() {
+        use crate::ci::callback::command::CallbackCommand;
+        let mut info = make_info();
+        info.fmt_cmd = Some(vec!["cargo fmt -- --check".into()]);
+        let step = FmtStep::new(&info).unwrap();
+        let mapping = step.exception_mapping();
+        let resolved = mapping.resolve(1, "", "fmt error output", Some(&|ec, out, err| {
+            step.match_exception(ec, out, err)
+        }));
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.max_retries, 1);
+        assert_eq!(resolved.context_paths, vec!["src/"]);
     }
 
     #[test]

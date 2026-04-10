@@ -1,4 +1,5 @@
-use crate::ci::parser::{CallbackCommand, OnFailure};
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct GitPullStep;
@@ -22,13 +23,13 @@ impl StepDef for GitPullStep {
                 "git pull --rebase || { if $STASHED; then git stash pop; fi; echo 'ERROR: git pull --rebase failed — possible merge conflict'; exit 1; }".into(),
                 "if $STASHED; then echo 'Restoring stashed changes...'; git stash pop || { echo 'ERROR: stash pop conflict — run git stash pop manually'; exit 1; }; fi".into(),
             ],
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::Abort,
-                max_retries: 0,
-                context_paths: vec![],
-            }),
+            on_failure: None,
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::Abort)
     }
 
     fn output_report_str(&self, _success: bool, stdout: &str, stderr: &str) -> String {
@@ -59,7 +60,7 @@ impl StepDef for GitPullStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ci::parser::CallbackCommand;
+    use crate::ci::callback::command::CallbackCommand;
 
     #[test]
     fn test_config() {
@@ -70,9 +71,15 @@ mod tests {
         assert!(cfg.image.is_empty());
         assert!(cfg.depends_on.is_empty());
         assert!(cfg.volumes.is_empty());
-        let on_failure = cfg.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.callback_command, CallbackCommand::Abort);
-        assert_eq!(on_failure.max_retries, 0);
+        assert!(cfg.on_failure.is_none());
+    }
+
+    #[test]
+    fn test_exception_mapping() {
+        let step = GitPullStep::new();
+        let resolved = step.exception_mapping().resolve(1, "", "some error", None);
+        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.max_retries, 0);
     }
 
     #[test]
