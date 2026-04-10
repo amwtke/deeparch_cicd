@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::ci::callback::action::CallbackCommandAction;
+use crate::ci::callback::command::CallbackCommand;
 use crate::ci::pipeline_builder::test_parser::TestSummary;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,7 +34,9 @@ pub struct ErrorContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnFailureState {
-    pub callback_command: String,
+    pub exception_key: String,
+    pub command: CallbackCommand,
+    pub action: CallbackCommandAction,
     pub max_retries: u32,
     pub retries_remaining: u32,
     pub context_paths: Vec<String>,
@@ -148,6 +152,8 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ci::callback::action::CallbackCommandAction;
+    use crate::ci::callback::command::CallbackCommand;
 
     #[test]
     fn test_create_and_save_run_state() {
@@ -201,7 +207,9 @@ mod tests {
             stderr: Some("error".into()),
             error_context: None,
             on_failure: Some(OnFailureState {
-                callback_command: "auto_fix".into(),
+                exception_key: "compile_error".into(),
+                command: CallbackCommand::AutoFix,
+                action: CallbackCommandAction::Retry,
                 max_retries: 3,
                 retries_remaining: 3,
                 context_paths: vec!["src/".into()],
@@ -259,7 +267,9 @@ mod tests {
                 error_type: "test_failure".into(),
             }),
             on_failure: Some(OnFailureState {
-                callback_command: "auto_fix".into(),
+                exception_key: "compile_error".into(),
+                command: CallbackCommand::AutoFix,
+                action: CallbackCommandAction::Retry,
                 max_retries: 3,
                 retries_remaining: 2,
                 context_paths: vec!["src/".into()],
@@ -306,7 +316,9 @@ mod tests {
             stderr: None,
             error_context: None,
             on_failure: Some(OnFailureState {
-                callback_command: "auto_fix".into(),
+                exception_key: "compile_error".into(),
+                command: CallbackCommand::AutoFix,
+                action: CallbackCommandAction::Retry,
                 max_retries: 1,
                 retries_remaining: 1,
                 context_paths: vec![],

@@ -1,11 +1,14 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct BuildStep {
     pub image: String,
     pub build_cmd: Vec<String>,
+    #[allow(dead_code)]
     pub source_paths: Vec<String>,
+    #[allow(dead_code)]
     pub config_files: Vec<String>,
 }
 
@@ -26,13 +29,24 @@ impl StepDef for BuildStep {
             name: "build".into(),
             image: self.image.clone(),
             commands: self.build_cmd.clone(),
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::AutoFix,
-                max_retries: 3,
-                context_paths: [&self.source_paths[..], &self.config_files[..]].concat(),
-            }),
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::AutoFix)
+            .add(
+                "compile_error",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoFix,
+                    max_retries: 3,
+                    context_paths: [&self.source_paths[..], &self.config_files[..]].concat(),
+                },
+            )
+    }
+
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
+        Some("compile_error".into())
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -86,11 +100,20 @@ mod tests {
         assert_eq!(cfg.image, "rust:latest");
         assert_eq!(cfg.commands, vec!["cargo build"]);
         assert!(cfg.depends_on.is_empty());
-        let on_failure = cfg.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.callback_command, CallbackCommand::AutoFix);
-        assert_eq!(on_failure.max_retries, 3);
-        assert!(on_failure.context_paths.contains(&"src/".to_string()));
-        assert!(on_failure.context_paths.contains(&"Cargo.toml".to_string()));
+    }
+
+    #[test]
+    fn test_exception_mapping() {
+        use crate::ci::callback::command::CallbackCommand;
+        let step = BuildStep::new(&make_info());
+        let mapping = step.exception_mapping();
+        let resolved = mapping.resolve(1, "", "some compile error", Some(&|ec, out, err| {
+            step.match_exception(ec, out, err)
+        }));
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.max_retries, 3);
+        assert!(resolved.context_paths.contains(&"src/".to_string()));
+        assert!(resolved.context_paths.contains(&"Cargo.toml".to_string()));
     }
 
     #[test]

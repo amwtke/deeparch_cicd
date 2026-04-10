@@ -1,9 +1,11 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct CheckstyleStep {
     image: String,
+    #[allow(dead_code)]
     config_files: Vec<String>,
     subdir: Option<String>,
 }
@@ -29,13 +31,21 @@ impl StepDef for CheckstyleStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::AutoFix,
-                max_retries: 2,
-                context_paths: self.config_files.clone(),
-            }),
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::AutoFix)
+            .add("checkstyle_error", ExceptionEntry {
+                command: CallbackCommand::AutoFix,
+                max_retries: 2,
+                context_paths: self.config_files.clone(),
+            })
+    }
+
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
+        Some("checkstyle_error".into())
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {

@@ -1,3 +1,4 @@
+pub mod callback;
 pub mod detector;
 pub mod executor;
 pub mod output;

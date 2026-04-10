@@ -184,7 +184,9 @@ fn json_status_failed_pipeline_structure() {
                     "error_type": "compilation_error"
                 },
                 "on_failure": {
-                    "callback_command": "auto_fix",
+                    "exception_key": "compile_error",
+                    "command": "auto_fix",
+                    "action": "retry",
                     "max_retries": 3,
                     "retries_remaining": 2,
                     "context_paths": ["src/"]
@@ -233,7 +235,9 @@ fn json_status_failed_pipeline_structure() {
 
     // on_failure structure
     let of = &build["on_failure"];
-    assert_eq!(of["callback_command"].as_str().unwrap(), "auto_fix");
+    assert_eq!(of["exception_key"].as_str().unwrap(), "compile_error");
+    assert_eq!(of["command"].as_str().unwrap(), "auto_fix");
+    assert_eq!(of["action"].as_str().unwrap(), "retry");
     assert_eq!(of["max_retries"].as_u64().unwrap(), 3);
     assert_eq!(of["retries_remaining"].as_u64().unwrap(), 2);
     assert_eq!(of["context_paths"][0].as_str().unwrap(), "src/");
@@ -267,7 +271,9 @@ fn json_status_retryable_pipeline() {
                 "stderr": "warning turned error",
                 "error_context": null,
                 "on_failure": {
-                    "callback_command": "auto_fix",
+                    "exception_key": "lint_error",
+                    "command": "auto_fix",
+                    "action": "retry",
                     "max_retries": 2,
                     "retries_remaining": 2,
                     "context_paths": ["src/"]

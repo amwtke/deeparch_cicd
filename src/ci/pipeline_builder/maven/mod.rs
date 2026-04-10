@@ -268,18 +268,13 @@ mod tests {
 
     #[test]
     fn test_pmd_step_uses_auto_gen_strategy() {
-        use crate::ci::parser::CallbackCommand;
+        use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
-        let strategy = MavenStrategy;
-        let steps = strategy.steps(&info);
-        let pmd_cfg = steps
-            .iter()
-            .find(|s| s.config().name == "pmd")
-            .unwrap()
-            .config();
-        let of = pmd_cfg.on_failure.unwrap();
-        assert_eq!(of.callback_command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(of.max_retries, 2);
+        let step = pmd_step::PmdStep::new(&info);
+        let mapping = step.exception_mapping();
+        let resolved = mapping.resolve(1, "", "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset", Some(&|ec, out, err| step.match_exception(ec, out, err)));
+        assert_eq!(resolved.command, CallbackCommand::AutoGenPmdRuleset);
+        assert_eq!(resolved.max_retries, 2);
     }
 
     #[test]
@@ -342,53 +337,29 @@ mod tests {
 
     #[test]
     fn test_spotbugs_step_uses_autofix() {
-        use crate::ci::parser::CallbackCommand;
+        use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
-        let strategy = MavenStrategy;
-        let steps = strategy.steps(&info);
-        let cfg = steps
-            .iter()
-            .find(|s| s.config().name == "spotbugs")
-            .unwrap()
-            .config();
-        assert_eq!(
-            cfg.on_failure.unwrap().callback_command,
-            CallbackCommand::AutoFix
-        );
+        let step = spotbugs_step::SpotbugsStep::new(&info);
+        let resolved = step.exception_mapping().resolve(1, "", "some spotbugs error", Some(&|ec, out, err| step.match_exception(ec, out, err)));
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
     }
 
     #[test]
     fn test_checkstyle_step_uses_autofix() {
-        use crate::ci::parser::CallbackCommand;
+        use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
-        let strategy = MavenStrategy;
-        let steps = strategy.steps(&info);
-        let cfg = steps
-            .iter()
-            .find(|s| s.config().name == "checkstyle")
-            .unwrap()
-            .config();
-        assert_eq!(
-            cfg.on_failure.unwrap().callback_command,
-            CallbackCommand::AutoFix
-        );
+        let step = checkstyle_step::CheckstyleStep::new(&info);
+        let resolved = step.exception_mapping().resolve(1, "", "some checkstyle error", Some(&|ec, out, err| step.match_exception(ec, out, err)));
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
     }
 
     #[test]
     fn test_package_step_uses_abort() {
-        use crate::ci::parser::CallbackCommand;
+        use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
-        let strategy = MavenStrategy;
-        let steps = strategy.steps(&info);
-        let cfg = steps
-            .iter()
-            .find(|s| s.config().name == "package")
-            .unwrap()
-            .config();
-        assert_eq!(
-            cfg.on_failure.unwrap().callback_command,
-            CallbackCommand::Abort
-        );
+        let step = package_step::PackageStep::new(&info);
+        let resolved = step.exception_mapping().resolve(1, "", "some package error", None);
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
     }
 
     #[test]

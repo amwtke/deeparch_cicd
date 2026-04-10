@@ -1,5 +1,6 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct TestStep {
@@ -30,13 +31,12 @@ impl StepDef for TestStep {
             image: self.image.clone(),
             commands: self.test_cmd.clone(),
             depends_on: vec!["build".into()],
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::Notify,
-                max_retries: 0,
-                context_paths: vec![],
-            }),
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::Abort)
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -57,8 +57,8 @@ impl StepDef for TestStep {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ci::callback::command::CallbackCommand;
     use crate::ci::detector::{ProjectInfo, ProjectType};
-    use crate::ci::parser::CallbackCommand;
 
     fn make_info() -> ProjectInfo {
         ProjectInfo {
@@ -84,9 +84,14 @@ mod tests {
         let cfg = step.config();
         assert_eq!(cfg.name, "test");
         assert_eq!(cfg.depends_on, vec!["build"]);
-        let on_failure = cfg.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.callback_command, CallbackCommand::Notify);
-        assert_eq!(on_failure.max_retries, 0);
+    }
+
+    #[test]
+    fn test_exception_mapping() {
+        let step = TestStep::new(&make_info());
+        let resolved = step.exception_mapping().resolve(1, "", "some test failure", None);
+        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.max_retries, 0);
     }
 
     #[test]

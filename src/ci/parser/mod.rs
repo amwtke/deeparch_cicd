@@ -89,14 +89,8 @@ fn is_false(b: &bool) -> bool {
     !b
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CallbackCommand {
-    Abort,
-    AutoFix,
-    AutoGenPmdRuleset,
-    Notify,
-}
+// Re-export the canonical CallbackCommand from callback module
+pub use crate::ci::callback::command::CallbackCommand;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnFailure {
@@ -111,7 +105,7 @@ pub struct OnFailure {
 }
 
 fn default_callback_command() -> CallbackCommand {
-    CallbackCommand::Abort
+    CallbackCommand::RuntimeError
 }
 
 impl Pipeline {
@@ -235,12 +229,12 @@ steps:
     commands:
       - cargo test
     on_failure:
-      callback_command: notify
+      callback_command: abort
 "#;
         let pipeline = Pipeline::from_str(yaml).unwrap();
         let step = &pipeline.steps[0];
         let on_failure = step.on_failure.as_ref().unwrap();
-        assert_eq!(on_failure.callback_command, CallbackCommand::Notify);
+        assert_eq!(on_failure.callback_command, CallbackCommand::Abort);
         assert_eq!(on_failure.max_retries, 0);
         assert!(on_failure.context_paths.is_empty());
     }
@@ -375,11 +369,11 @@ steps:
     image: rust:1.78
     commands: [echo hi]
     on_failure:
-      callback_command: abort
+      callback_command: runtime_error
 "#;
         let pipeline = Pipeline::from_str(yaml).unwrap();
         let of = pipeline.steps[0].on_failure.as_ref().unwrap();
-        assert_eq!(of.callback_command, CallbackCommand::Abort);
+        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
     }
 
     #[test]
@@ -405,10 +399,10 @@ steps:
     #[test]
     fn test_strategy_serde_roundtrip_all_variants() {
         for (yaml_val, expected) in [
-            ("abort", CallbackCommand::Abort),
+            ("runtime_error", CallbackCommand::RuntimeError),
             ("auto_fix", CallbackCommand::AutoFix),
             ("auto_gen_pmd_ruleset", CallbackCommand::AutoGenPmdRuleset),
-            ("notify", CallbackCommand::Notify),
+            ("abort", CallbackCommand::Abort),
         ] {
             let yaml = format!(
                 r#"

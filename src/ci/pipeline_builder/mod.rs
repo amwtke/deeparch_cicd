@@ -10,8 +10,10 @@ pub mod test_parser;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::detector::{ProjectInfo, ProjectType};
-use crate::ci::parser::{OnFailure, Pipeline, Step};
+use crate::ci::parser::{Pipeline, Step};
 
 /// Data carrier for a single pipeline step (renamed from old StepDef struct).
 #[derive(Debug, Clone)]
@@ -21,7 +23,6 @@ pub struct StepConfig {
     pub commands: Vec<String>,
     pub depends_on: Vec<String>,
     pub workdir: String,
-    pub on_failure: Option<OnFailure>,
     pub allow_failure: bool,
     pub volumes: Vec<String>,
     pub local: bool,
@@ -35,7 +36,6 @@ impl Default for StepConfig {
             commands: vec![],
             depends_on: vec![],
             workdir: "/workspace".into(),
-            on_failure: None,
             allow_failure: false,
             volumes: vec![],
             local: false,
@@ -51,7 +51,7 @@ impl From<StepConfig> for Step {
             commands: sc.commands,
             depends_on: sc.depends_on,
             workdir: sc.workdir,
-            on_failure: sc.on_failure,
+            on_failure: None,
             allow_failure: sc.allow_failure,
             volumes: sc.volumes,
             local: sc.local,
@@ -77,6 +77,21 @@ pub trait StepDef: Send + Sync {
     fn output_report_path(&self, misc_dir: &Path, stdout: &str, stderr: &str) -> PathBuf {
         let cfg = self.config();
         write_step_report(misc_dir, &cfg.name, stdout, stderr)
+    }
+
+    /// Return the exception-to-command mapping for this step.
+    /// Default: empty mapping with Abort fallback (all failures are fatal).
+    #[allow(dead_code)]
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
+    }
+
+    /// Analyze execution output to identify the exception key.
+    /// Called as priority 2 in resolve chain (after stderr marker).
+    /// Default: None (no Rust-side analysis).
+    #[allow(dead_code)]
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
+        None
     }
 }
 

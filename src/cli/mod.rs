@@ -6,7 +6,9 @@ use crate::ci::executor::DockerExecutor;
 use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::ci::output::{json, plain};
 use crate::ci::output::{resolve_output_mode, OutputMode};
-use crate::ci::parser::{CallbackCommand, Pipeline};
+use crate::ci::callback::action::CallbackCommandAction;
+use crate::ci::callback::command::CallbackCommandRegistry;
+use crate::ci::parser::Pipeline;
 use crate::ci::scheduler::Scheduler;
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 
@@ -198,6 +200,7 @@ async fn cmd_run(
         .to_path_buf();
 
     let scheduler = Scheduler::new(&pipeline)?;
+    let registry = CallbackCommandRegistry::new();
 
     if dry_run {
         if mode == OutputMode::Tty {
@@ -407,17 +410,16 @@ async fn cmd_run(
             let on_failure_state =
                 pipeline_step
                     .and_then(|s| s.on_failure.as_ref())
-                    .map(|of| OnFailureState {
-                        callback_command: match of.callback_command {
-                            CallbackCommand::Abort => "abort",
-                            CallbackCommand::AutoFix => "auto_fix",
-                            CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
-                            CallbackCommand::Notify => "notify",
+                    .map(|of| {
+                        let action = registry.action_for(&of.callback_command);
+                        OnFailureState {
+                            exception_key: "yaml_configured".into(),
+                            command: of.callback_command.clone(),
+                            action,
+                            max_retries: of.max_retries,
+                            retries_remaining: of.max_retries,
+                            context_paths: of.context_paths.clone(),
                         }
-                        .to_string(),
-                        max_retries: of.max_retries,
-                        retries_remaining: of.max_retries,
-                        context_paths: of.context_paths.clone(),
                     });
 
             // Parse test output for backward-compat test_summary field
@@ -458,7 +460,7 @@ async fn cmd_run(
                     Some(stderr)
                 },
                 error_context: None,
-                on_failure: on_failure_state,
+                on_failure: on_failure_state.clone(),
                 test_summary: step_test_summary,
                 report_summary: Some(report_summary),
                 report_path: Some(report_path_str),
@@ -467,20 +469,20 @@ async fn cmd_run(
             // Handle failure
             let allow_failure = pipeline_step.map(|s| s.allow_failure).unwrap_or(false);
             if !result.success && !allow_failure {
-                let callback_cmd = pipeline_step
-                    .and_then(|s| s.on_failure.as_ref())
-                    .map(|of| &of.callback_command)
-                    .unwrap_or(&CallbackCommand::Abort);
-
-                match callback_cmd {
-                    CallbackCommand::AutoFix | CallbackCommand::AutoGenPmdRuleset => {
-                        has_retryable_failure = true;
-                        break 'outer;
+                if let Some(ref ofs) = on_failure_state {
+                    match ofs.action {
+                        CallbackCommandAction::Retry if ofs.max_retries > 0 => {
+                            has_retryable_failure = true;
+                            break 'outer;
+                        }
+                        _ => {
+                            has_final_failure = true;
+                            break 'outer;
+                        }
                     }
-                    CallbackCommand::Abort | CallbackCommand::Notify => {
-                        has_final_failure = true;
-                        break 'outer;
-                    }
+                } else {
+                    has_final_failure = true;
+                    break 'outer;
                 }
             }
         }
@@ -779,11 +781,7 @@ async fn cmd_retry(
         s.status == StepStatus::Failed
             && s.on_failure
                 .as_ref()
-                .map(|of| {
-                    (of.callback_command == "auto_fix"
-                        || of.callback_command == "auto_gen_pmd_ruleset")
-                        && of.retries_remaining > 0
-                })
+                .map(|of| of.action == CallbackCommandAction::Retry && of.retries_remaining > 0)
                 .unwrap_or(false)
     });
 
@@ -1078,30 +1076,6 @@ mod tests {
         let path = write_step_report(dir.path(), "lint", "", "");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.is_empty());
-    }
-
-    #[test]
-    fn test_strategy_to_string_all_variants() {
-        use crate::ci::parser::CallbackCommand;
-        let cases = [
-            (CallbackCommand::Abort, "abort"),
-            (CallbackCommand::AutoFix, "auto_fix"),
-            (CallbackCommand::AutoGenPmdRuleset, "auto_gen_pmd_ruleset"),
-            (CallbackCommand::Notify, "notify"),
-        ];
-        for (variant, expected) in &cases {
-            let result = match variant {
-                CallbackCommand::Abort => "abort",
-                CallbackCommand::AutoFix => "auto_fix",
-                CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
-                CallbackCommand::Notify => "notify",
-            };
-            assert_eq!(
-                result, *expected,
-                "CallbackCommand::{:?} should serialize to '{}'",
-                variant, expected
-            );
-        }
     }
 
     #[test]
