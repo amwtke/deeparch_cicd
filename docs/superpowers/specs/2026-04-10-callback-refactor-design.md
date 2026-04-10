@@ -10,19 +10,19 @@ Current callback architecture has three issues:
 
 1. **Action semantics hardcoded in CLI**: `cli/mod.rs:475` matches `CallbackCommand` variants to determine retry vs abort — this logic belongs to the command itself, not the dispatcher.
 2. **Static one-to-one binding**: Each step can only declare one `callback_command` at build time via `config()`. In reality, a step can fail for different reasons requiring different responses (e.g., PMD: download failed → abort; ruleset missing → auto_gen).
-3. **Compile-time enum**: `CallbackCommand` is a Rust enum with 4 fixed variants. Future plugin-based steps cannot register new commands without modifying the enum.
+3. **No separation of concerns**: `CallbackCommand` conflates what the command is with what action to take. The action (retry/abort/notify) should be a property of the command definition, not external match logic.
 
 ## Domain Terms
 
 | Term | Rust Type | Role |
 |------|-----------|------|
 | **CallbackCommandAction** | `enum { Retry, Abort, Notify }` | LLM interaction protocol — behavior part. Compile-time fixed; the scheduler's three fundamental responses. |
-| **CallbackCommand** | `String` key in `CallbackCommandRegistry` | LLM interaction protocol — command part. Runtime-registered; LLM uses this to decide which reasoning strategy to apply. |
+| **CallbackCommand** | `enum { Abort, Notify, AutoFix, AutoGenPmdRuleset }` | LLM interaction protocol — command part. Compile-time enum; LLM uses this to decide which reasoning strategy to apply. New commands added by extending the enum. |
 | **CallbackCommandDef** | `struct` | Definition of a CallbackCommand: its action + description for LLM. |
-| **CallbackCommandRegistry** | `struct` wrapping `HashMap<String, CallbackCommandDef>` | Global registry of all known commands. Built-in commands registered at startup; plugins can add more at runtime. |
-| **ExceptionMapping** | `struct` per step | Maps exception keys to CallbackCommand + retry policy. Each step defines its own. |
-| **ExceptionEntry** | `struct` | One mapping entry: `exception_key → { command, max_retries, context_paths }`. |
-| **ResolvedFailure** | `struct` | Result of exception resolution: the matched exception key, command, and retry policy. |
+| **CallbackCommandRegistry** | `struct` wrapping `HashMap<CallbackCommand, CallbackCommandDef>` | Global registry mapping each command variant to its definition. Built-in commands registered at startup. |
+| **ExceptionMapping** | `struct` per step | Maps exception keys to `CallbackCommand` + retry policy. Each step defines its own. |
+| **ExceptionEntry** | `struct` | One mapping entry: `exception_key → { command: CallbackCommand, max_retries, context_paths }`. |
+| **ResolvedFailure** | `struct` | Result of exception resolution: the matched exception key, command (`CallbackCommand`), and retry policy. |
 
 ## Architecture
 
@@ -87,11 +87,22 @@ pub enum CallbackCommandAction {
 
 Compile-time fixed. Plugins cannot and should not extend this — these are the scheduler's three fundamental behavioral responses.
 
-### 2. CallbackCommandDef + CallbackCommandRegistry (`command.rs`)
+### 2. CallbackCommand + CallbackCommandDef + CallbackCommandRegistry (`command.rs`)
 
 ```rust
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use super::action::CallbackCommandAction;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallbackCommand {
+    Abort,
+    Notify,
+    AutoFix,
+    AutoGenPmdRuleset,
+    // Future commands added here as new variants
+}
 
 pub struct CallbackCommandDef {
     pub action: CallbackCommandAction,
@@ -99,46 +110,46 @@ pub struct CallbackCommandDef {
 }
 
 pub struct CallbackCommandRegistry {
-    commands: HashMap<String, CallbackCommandDef>,
+    commands: HashMap<CallbackCommand, CallbackCommandDef>,
 }
 
 impl CallbackCommandRegistry {
     /// Create registry with built-in commands
     pub fn new() -> Self {
         let mut registry = Self { commands: HashMap::new() };
-        registry.register("abort".into(), CallbackCommandDef {
+        registry.register(CallbackCommand::Abort, CallbackCommandDef {
             action: CallbackCommandAction::Abort,
             description: "Unrecoverable error. Pipeline terminates.".into(),
         });
-        registry.register("notify".into(), CallbackCommandDef {
+        registry.register(CallbackCommand::Notify, CallbackCommandDef {
             action: CallbackCommandAction::Notify,
             description: "Notify user of results (e.g., test summary). Pipeline terminates.".into(),
         });
-        registry.register("auto_fix".into(), CallbackCommandDef {
+        registry.register(CallbackCommand::AutoFix, CallbackCommandDef {
             action: CallbackCommandAction::Retry,
             description: "LLM reads stderr + context_paths, fixes source code, then retries.".into(),
         });
-        registry.register("auto_gen_pmd_ruleset".into(), CallbackCommandDef {
+        registry.register(CallbackCommand::AutoGenPmdRuleset, CallbackCommandDef {
             action: CallbackCommandAction::Retry,
             description: "LLM searches project for existing PMD ruleset or coding guidelines, generates pmd-ruleset.xml, then retries.".into(),
         });
         registry
     }
 
-    /// Register a new command (used by plugins)
-    pub fn register(&mut self, name: String, def: CallbackCommandDef) {
-        self.commands.insert(name, def);
+    /// Register a command definition
+    pub fn register(&mut self, command: CallbackCommand, def: CallbackCommandDef) {
+        self.commands.insert(command, def);
     }
 
     /// Look up a command definition
-    pub fn get(&self, name: &str) -> Option<&CallbackCommandDef> {
-        self.commands.get(name)
+    pub fn get(&self, command: &CallbackCommand) -> Option<&CallbackCommandDef> {
+        self.commands.get(command)
     }
 
-    /// Get the action for a command. Unknown commands → Abort (fail-safe).
-    pub fn action_for(&self, name: &str) -> CallbackCommandAction {
+    /// Get the action for a command.
+    pub fn action_for(&self, command: &CallbackCommand) -> CallbackCommandAction {
         self.commands
-            .get(name)
+            .get(command)
             .map(|def| def.action.clone())
             .unwrap_or(CallbackCommandAction::Abort)
     }
@@ -149,30 +160,31 @@ impl CallbackCommandRegistry {
 
 ```rust
 use std::collections::HashMap;
+use super::command::CallbackCommand;
 
 pub struct ExceptionEntry {
-    pub command: String,           // Key into CallbackCommandRegistry
+    pub command: CallbackCommand,     // Enum variant, not String
     pub max_retries: u32,
     pub context_paths: Vec<String>,
 }
 
 pub struct ExceptionMapping {
-    entries: HashMap<String, ExceptionEntry>,
-    default_command: String,  // Fallback command when no exception matches, default "abort"
+    entries: HashMap<String, ExceptionEntry>,       // exception_key (String) → entry
+    default_command: CallbackCommand,               // Fallback when no exception matches
 }
 
 pub struct ResolvedFailure {
     pub exception_key: String,
-    pub command: String,
+    pub command: CallbackCommand,
     pub max_retries: u32,
     pub context_paths: Vec<String>,
 }
 
 impl ExceptionMapping {
-    pub fn new(default_command: &str) -> Self {
+    pub fn new(default_command: CallbackCommand) -> Self {
         Self {
             entries: HashMap::new(),
-            default_command: default_command.into(),
+            default_command,
         }
     }
 
@@ -221,7 +233,7 @@ impl ExceptionMapping {
     }
 
     fn parse_stderr_marker(stderr: &str) -> Option<String> {
-        // Look for PIPELIGHT_EXCEPTION:<key> pattern
+        // Look for PIPELIGHT_EXCEPTION:<key> pattern in stderr
         for line in stderr.lines() {
             if let Some(rest) = line.strip_prefix("PIPELIGHT_EXCEPTION:") {
                 let key = rest.split_whitespace().next().unwrap_or(rest).trim();
@@ -235,6 +247,8 @@ impl ExceptionMapping {
 }
 ```
 
+Note: exception keys remain `String` because they are step-internal identifiers parsed from stderr markers — they are not part of the LLM protocol and don't benefit from enum enforcement.
+
 ### 4. StepDef Trait Changes (`pipeline_builder/mod.rs`)
 
 ```rust
@@ -245,9 +259,9 @@ pub trait StepDef: Send + Sync {
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String;
 
     /// Return the exception-to-command mapping for this step.
-    /// Default: empty mapping with "abort" fallback (all failures are fatal).
+    /// Default: empty mapping with Abort fallback (all failures are fatal).
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new("abort")
+        ExceptionMapping::new(CallbackCommand::Abort)
     }
 
     /// Analyze execution output to identify the exception key.
@@ -303,7 +317,7 @@ let resolved = step_def.exception_mapping().resolve(
     &stderr,
     Some(&|ec, out, err| step_def.match_exception(ec, out, err)),
 );
-let action = signal_registry.action_for(&resolved.command);
+let action = registry.action_for(&resolved.command);
 match action {
     CallbackCommandAction::Retry => { has_retryable_failure = true; }
     CallbackCommandAction::Abort => { has_final_failure = true; }
@@ -318,15 +332,20 @@ The CLI only knows `CallbackCommandAction` — fully decoupled from specific com
 JSON output becomes richer — LLM sees all three layers:
 
 ```rust
+use crate::ci::callback::action::CallbackCommandAction;
+use crate::ci::callback::command::CallbackCommand;
+
 pub struct OnFailureState {
-    pub exception_key: String,        // What went wrong
-    pub command: String,              // What CallbackCommand was resolved
-    pub action: String,               // "retry" / "abort" / "notify"
+    pub exception_key: String,                // What went wrong (step-internal key)
+    pub command: CallbackCommand,             // Enum: which CallbackCommand was resolved
+    pub action: CallbackCommandAction,        // Enum: Retry / Abort / Notify
     pub max_retries: u32,
     pub retries_remaining: u32,
     pub context_paths: Vec<String>,
 }
 ```
+
+Both `command` and `action` are enums with `#[serde(rename_all = "snake_case")]`, so JSON serialization produces clean strings automatically:
 
 Example JSON output:
 
@@ -347,25 +366,22 @@ Example JSON output:
 
 The `CallbackCommand` enum and `OnFailure` struct in `parser/` are preserved for user-written `pipeline.yml` files. When converting to internal representation, map to the new system:
 
+The `CallbackCommand` enum in `parser/mod.rs` is **replaced** by the new `callback::command::CallbackCommand` enum (same variants, same serde behavior). The parser directly deserializes into the new enum. No conversion layer needed — one canonical type throughout the codebase.
+
+The old `parser::CallbackCommand` enum is deleted. `parser::OnFailure` now references `callback::command::CallbackCommand`:
+
 ```rust
-// Convert parser::OnFailure → ExceptionEntry
-impl From<&parser::OnFailure> for ExceptionEntry {
-    fn from(of: &parser::OnFailure) -> Self {
-        ExceptionEntry {
-            command: match of.callback_command {
-                parser::CallbackCommand::Abort => "abort",
-                parser::CallbackCommand::AutoFix => "auto_fix",
-                parser::CallbackCommand::AutoGenPmdRuleset => "auto_gen_pmd_ruleset",
-                parser::CallbackCommand::Notify => "notify",
-            }.into(),
-            max_retries: of.max_retries,
-            context_paths: of.context_paths.clone(),
-        }
-    }
+// parser/mod.rs
+use crate::ci::callback::command::CallbackCommand;
+
+pub struct OnFailure {
+    pub callback_command: CallbackCommand,  // Uses the canonical enum
+    pub max_retries: u32,
+    pub context_paths: Vec<String>,
 }
 ```
 
-This preserves backward compatibility for hand-written YAML pipelines.
+This preserves backward compatibility for hand-written YAML pipelines while eliminating type duplication.
 
 ### 9. PMD Step Example (Refactored)
 
@@ -384,14 +400,14 @@ impl StepDef for PmdStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new("abort")  // fallback: fatal
+        ExceptionMapping::new(CallbackCommand::Abort)  // fallback: fatal
             .add("ruleset_not_found", ExceptionEntry {
-                command: "auto_gen_pmd_ruleset".into(),
+                command: CallbackCommand::AutoGenPmdRuleset,
                 max_retries: 2,
                 context_paths: self.source_paths.clone(),
             })
             .add("ruleset_invalid", ExceptionEntry {
-                command: "auto_gen_pmd_ruleset".into(),
+                command: CallbackCommand::AutoGenPmdRuleset,
                 max_retries: 2,
                 context_paths: self.source_paths.clone(),
             })
