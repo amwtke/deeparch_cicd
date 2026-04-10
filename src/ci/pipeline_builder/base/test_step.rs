@@ -36,7 +36,7 @@ impl StepDef for TestStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(CallbackCommand::Notify)
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -90,7 +90,7 @@ mod tests {
     fn test_exception_mapping() {
         let step = TestStep::new(&make_info());
         let resolved = step.exception_mapping().resolve(1, "", "some test failure", None);
-        assert_eq!(resolved.command, CallbackCommand::Abort);
+        assert_eq!(resolved.command, CallbackCommand::Notify);
         assert_eq!(resolved.max_retries, 0);
     }
 

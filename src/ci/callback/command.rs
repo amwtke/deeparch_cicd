@@ -30,15 +30,15 @@ impl CallbackCommandRegistry {
         registry.register(
             CallbackCommand::Abort,
             CallbackCommandDef {
-                action: CallbackCommandAction::Abort,
-                description: "Unrecoverable error. Pipeline terminates.".into(),
+                action: CallbackCommandAction::RuntimeError,
+                description: "Runtime error in tool itself. Pipeline terminates.".into(),
             },
         );
         registry.register(
             CallbackCommand::Notify,
             CallbackCommandDef {
-                action: CallbackCommandAction::Notify,
-                description: "Notify user of results. Pipeline terminates.".into(),
+                action: CallbackCommandAction::Abort,
+                description: "Tool detected serious code problem. Pipeline terminates.".into(),
             },
         );
         registry.register(
@@ -74,7 +74,7 @@ impl CallbackCommandRegistry {
         self.commands
             .get(command)
             .map(|def| def.action.clone())
-            .unwrap_or(CallbackCommandAction::Abort)
+            .unwrap_or(CallbackCommandAction::RuntimeError)
     }
 }
 
@@ -102,11 +102,11 @@ mod tests {
         let registry = CallbackCommandRegistry::new();
         assert_eq!(
             registry.action_for(&CallbackCommand::Abort),
-            CallbackCommandAction::Abort
+            CallbackCommandAction::RuntimeError
         );
         assert_eq!(
             registry.action_for(&CallbackCommand::Notify),
-            CallbackCommandAction::Notify
+            CallbackCommandAction::Abort
         );
         assert_eq!(
             registry.action_for(&CallbackCommand::AutoFix),

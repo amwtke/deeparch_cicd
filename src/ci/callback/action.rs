@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum CallbackCommandAction {
     Retry,
+    RuntimeError,
     Abort,
-    Notify,
 }
 
 #[cfg(test)]
@@ -16,8 +16,8 @@ mod tests {
     fn test_serde_roundtrip() {
         for (variant, expected_str) in [
             (CallbackCommandAction::Retry, "\"retry\""),
+            (CallbackCommandAction::RuntimeError, "\"runtime_error\""),
             (CallbackCommandAction::Abort, "\"abort\""),
-            (CallbackCommandAction::Notify, "\"notify\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
