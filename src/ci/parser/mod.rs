@@ -89,14 +89,8 @@ fn is_false(b: &bool) -> bool {
     !b
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CallbackCommand {
-    Abort,
-    AutoFix,
-    AutoGenPmdRuleset,
-    Notify,
-}
+// Re-export the canonical CallbackCommand from callback module
+pub use crate::ci::callback::command::CallbackCommand;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnFailure {
