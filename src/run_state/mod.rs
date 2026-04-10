@@ -147,6 +147,42 @@ impl RunState {
             .join(".pipelight")
             .join("runs")
     }
+
+    /// Mark all unexecuted steps from `schedule[batch_index..]` as Skipped.
+    /// Steps already present in state are skipped (they were executed before the failure).
+    /// `step_info_fn` provides (image, command) for each step name.
+    pub fn mark_unexecuted_as_skipped<F>(
+        &mut self,
+        schedule: &[Vec<String>],
+        batch_index: usize,
+        step_info_fn: F,
+    ) where
+        F: Fn(&str) -> (String, String),
+    {
+        for batch in &schedule[batch_index..] {
+            for step_name in batch {
+                if self.get_step(step_name).is_some() {
+                    continue;
+                }
+                let (image, command) = step_info_fn(step_name);
+                self.add_step(StepState {
+                    name: step_name.clone(),
+                    status: StepStatus::Skipped,
+                    exit_code: None,
+                    duration_ms: None,
+                    image,
+                    command,
+                    stdout: None,
+                    stderr: None,
+                    error_context: None,
+                    on_failure: None,
+                    test_summary: None,
+                    report_summary: None,
+                    report_path: None,
+                });
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -535,5 +571,183 @@ mod tests {
         state2.status = PipelineStatus::Retryable;
         let json2 = serde_json::to_string(&state2).unwrap();
         assert!(json2.contains("\"retryable\""));
+    }
+
+    // --- mark_unexecuted_as_skipped tests ---
+
+    fn info_fn(name: &str) -> (String, String) {
+        (format!("img-{name}"), format!("cmd-{name}"))
+    }
+
+    #[test]
+    fn test_mark_unexecuted_skips_steps_already_in_state() {
+        // Simulate: batch 0 = [git-pull], batch 1 = [fmt-check, build]
+        // fmt-check executed and failed, build was NOT executed.
+        let mut state = RunState::new("run-1", "p");
+        state.add_step(StepState {
+            name: "git-pull".into(),
+            status: StepStatus::Success,
+            exit_code: Some(0),
+            duration_ms: Some(100),
+            image: "".into(),
+            command: "git pull".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+        state.add_step(StepState {
+            name: "fmt-check".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: Some(200),
+            image: "rust:latest".into(),
+            command: "cargo fmt -- --check".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        let schedule = vec![
+            vec!["git-pull".into()],
+            vec!["fmt-check".into(), "build".into()],
+            vec!["test".into(), "clippy".into()],
+        ];
+
+        // batch_index=1 means we start from the batch where failure occurred
+        state.mark_unexecuted_as_skipped(&schedule, 1, info_fn);
+
+        // git-pull: already in state, should NOT be duplicated
+        assert_eq!(state.steps.iter().filter(|s| s.name == "git-pull").count(), 1);
+        // fmt-check: already in state as Failed, should NOT be overwritten
+        assert_eq!(state.get_step("fmt-check").unwrap().status, StepStatus::Failed);
+        // build: was NOT in state, should now be Skipped
+        let build = state.get_step("build").unwrap();
+        assert_eq!(build.status, StepStatus::Skipped);
+        assert_eq!(build.image, "img-build");
+        assert_eq!(build.command, "cmd-build");
+        // test & clippy: next batch, should be Skipped
+        assert_eq!(state.get_step("test").unwrap().status, StepStatus::Skipped);
+        assert_eq!(state.get_step("clippy").unwrap().status, StepStatus::Skipped);
+        // Total steps: git-pull + fmt-check + build + test + clippy = 5
+        assert_eq!(state.steps.len(), 5);
+    }
+
+    #[test]
+    fn test_mark_unexecuted_all_in_state_no_duplicates() {
+        // All steps already executed before failure in same batch
+        let mut state = RunState::new("run-2", "p");
+        state.add_step(StepState {
+            name: "a".into(),
+            status: StepStatus::Success,
+            exit_code: Some(0),
+            duration_ms: None,
+            image: "".into(),
+            command: "".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+        state.add_step(StepState {
+            name: "b".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "".into(),
+            command: "".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        let schedule = vec![vec!["a".into(), "b".into()]];
+        state.mark_unexecuted_as_skipped(&schedule, 0, info_fn);
+
+        // No new steps should be added
+        assert_eq!(state.steps.len(), 2);
+    }
+
+    #[test]
+    fn test_mark_unexecuted_empty_schedule_after_index() {
+        let mut state = RunState::new("run-3", "p");
+        state.add_step(StepState {
+            name: "only".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "".into(),
+            command: "".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        // Single batch, failure at last step — nothing more to mark
+        let schedule = vec![vec!["only".into()]];
+        state.mark_unexecuted_as_skipped(&schedule, 0, info_fn);
+        assert_eq!(state.steps.len(), 1);
+    }
+
+    #[test]
+    fn test_mark_unexecuted_multi_batch_first_step_fails() {
+        // Simulate: batch 0 has 4 parallel steps (like Go/Node/Python),
+        // first step fails retryable, remaining 3 unexecuted.
+        let mut state = RunState::new("run-4", "p");
+        state.add_step(StepState {
+            name: "vet".into(),
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            image: "go:latest".into(),
+            command: "go vet".into(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        });
+
+        let schedule = vec![
+            vec![
+                "vet".into(),
+                "lint".into(),
+                "test".into(),
+                "fmt-check".into(),
+            ],
+            vec!["package".into()],
+        ];
+
+        state.mark_unexecuted_as_skipped(&schedule, 0, info_fn);
+
+        // vet: already Failed, untouched
+        assert_eq!(state.get_step("vet").unwrap().status, StepStatus::Failed);
+        // lint, test, fmt-check: now Skipped
+        assert_eq!(state.get_step("lint").unwrap().status, StepStatus::Skipped);
+        assert_eq!(state.get_step("test").unwrap().status, StepStatus::Skipped);
+        assert_eq!(state.get_step("fmt-check").unwrap().status, StepStatus::Skipped);
+        // package: next batch, also Skipped
+        assert_eq!(state.get_step("package").unwrap().status, StepStatus::Skipped);
+        assert_eq!(state.steps.len(), 5);
     }
 }

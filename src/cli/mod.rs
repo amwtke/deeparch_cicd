@@ -544,32 +544,20 @@ async fn cmd_run(
     }
 
     // Mark remaining unexecuted steps as Skipped
+    // Use current_batch_index (not +1) to include unexecuted steps
+    // in the same batch as the failed step (parallel batch bug fix).
     if has_final_failure || has_retryable_failure {
-        for remaining_batch in &schedule[current_batch_index + 1..] {
-            for step_name in remaining_batch {
-                state.add_step(StepState {
-                    name: step_name.clone(),
-                    status: StepStatus::Skipped,
-                    exit_code: None,
-                    duration_ms: None,
-                    image: pipeline
-                        .get_step(step_name)
-                        .map(|s| s.image.clone())
-                        .unwrap_or_default(),
-                    command: pipeline
-                        .get_step(step_name)
-                        .map(|s| s.commands.join(" && "))
-                        .unwrap_or_default(),
-                    stdout: None,
-                    stderr: None,
-                    error_context: None,
-                    on_failure: None,
-                    test_summary: None,
-                    report_summary: None,
-                    report_path: None,
-                });
-            }
-        }
+        state.mark_unexecuted_as_skipped(&schedule, current_batch_index, |name| {
+            let image = pipeline
+                .get_step(name)
+                .map(|s| s.image.clone())
+                .unwrap_or_default();
+            let command = pipeline
+                .get_step(name)
+                .map(|s| s.commands.join(" && "))
+                .unwrap_or_default();
+            (image, command)
+        });
     }
 
     // Set final pipeline status
