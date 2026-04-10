@@ -89,7 +89,9 @@ mod tests {
     #[test]
     fn test_exception_mapping() {
         let step = TestStep::new(&make_info());
-        let resolved = step.exception_mapping().resolve(1, "", "some test failure", None);
+        let resolved = step
+            .exception_mapping()
+            .resolve(1, "", "some test failure", None);
         assert_eq!(resolved.command, CallbackCommand::Abort);
         assert_eq!(resolved.max_retries, 0);
     }

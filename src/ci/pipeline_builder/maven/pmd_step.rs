@@ -93,20 +93,28 @@ impl StepDef for PmdStep {
 
     fn exception_mapping(&self) -> ExceptionMapping {
         ExceptionMapping::new(CallbackCommand::RuntimeError)
-            .add("ruleset_not_found", ExceptionEntry {
-                command: CallbackCommand::AutoGenPmdRuleset,
-                max_retries: 2,
-                context_paths: self.source_paths.clone(),
-            })
-            .add("ruleset_invalid", ExceptionEntry {
-                command: CallbackCommand::AutoGenPmdRuleset,
-                max_retries: 2,
-                context_paths: self.source_paths.clone(),
-            })
+            .add(
+                "ruleset_not_found",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoGenPmdRuleset,
+                    max_retries: 2,
+                    context_paths: self.source_paths.clone(),
+                },
+            )
+            .add(
+                "ruleset_invalid",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoGenPmdRuleset,
+                    max_retries: 2,
+                    context_paths: self.source_paths.clone(),
+                },
+            )
     }
 
     fn match_exception(&self, _exit_code: i64, _stdout: &str, stderr: &str) -> Option<String> {
-        if stderr.contains("Cannot load ruleset") || stderr.contains("Unable to find referenced rule") {
+        if stderr.contains("Cannot load ruleset")
+            || stderr.contains("Unable to find referenced rule")
+        {
             Some("ruleset_invalid".into())
         } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             Some("ruleset_not_found".into())

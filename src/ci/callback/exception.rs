@@ -38,7 +38,12 @@ impl ExceptionMapping {
     /// - max_retries = max of all entries' max_retries (0 if no entries)
     /// - context_paths = deduplicated union of all entries' context_paths
     pub fn to_on_failure(&self) -> crate::ci::parser::OnFailure {
-        let max_retries = self.entries.values().map(|e| e.max_retries).max().unwrap_or(0);
+        let max_retries = self
+            .entries
+            .values()
+            .map(|e| e.max_retries)
+            .max()
+            .unwrap_or(0);
 
         let mut paths: Vec<String> = self
             .entries
@@ -163,9 +168,8 @@ mod tests {
     #[test]
     fn test_resolve_stderr_marker_beats_match_fn() {
         let mapping = test_mapping();
-        let match_fn = |_ec: i64, _out: &str, _err: &str| -> Option<String> {
-            Some("compile_error".into())
-        };
+        let match_fn =
+            |_ec: i64, _out: &str, _err: &str| -> Option<String> { Some("compile_error".into()) };
         let resolved = mapping.resolve(
             1,
             "",
@@ -189,12 +193,7 @@ mod tests {
     #[test]
     fn test_resolve_unmapped_exception_key() {
         let mapping = test_mapping();
-        let resolved = mapping.resolve(
-            1,
-            "",
-            "PIPELIGHT_EXCEPTION:totally_unknown_key\n",
-            None,
-        );
+        let resolved = mapping.resolve(1, "", "PIPELIGHT_EXCEPTION:totally_unknown_key\n", None);
         assert_eq!(resolved.exception_key, "totally_unknown_key");
         assert_eq!(resolved.command, CallbackCommand::RuntimeError);
         assert_eq!(resolved.max_retries, 0);

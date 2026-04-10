@@ -88,7 +88,10 @@ mod tests {
             (CallbackCommand::RuntimeError, "\"runtime_error\""),
             (CallbackCommand::Abort, "\"abort\""),
             (CallbackCommand::AutoFix, "\"auto_fix\""),
-            (CallbackCommand::AutoGenPmdRuleset, "\"auto_gen_pmd_ruleset\""),
+            (
+                CallbackCommand::AutoGenPmdRuleset,
+                "\"auto_gen_pmd_ruleset\"",
+            ),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);

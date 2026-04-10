@@ -34,15 +34,14 @@ impl StepDef for BuildStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::AutoFix)
-            .add(
-                "compile_error",
-                ExceptionEntry {
-                    command: CallbackCommand::AutoFix,
-                    max_retries: 3,
-                    context_paths: [&self.source_paths[..], &self.config_files[..]].concat(),
-                },
-            )
+        ExceptionMapping::new(CallbackCommand::AutoFix).add(
+            "compile_error",
+            ExceptionEntry {
+                command: CallbackCommand::AutoFix,
+                max_retries: 3,
+                context_paths: [&self.source_paths[..], &self.config_files[..]].concat(),
+            },
+        )
     }
 
     fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
@@ -107,9 +106,12 @@ mod tests {
         use crate::ci::callback::command::CallbackCommand;
         let step = BuildStep::new(&make_info());
         let mapping = step.exception_mapping();
-        let resolved = mapping.resolve(1, "", "some compile error", Some(&|ec, out, err| {
-            step.match_exception(ec, out, err)
-        }));
+        let resolved = mapping.resolve(
+            1,
+            "",
+            "some compile error",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
         assert_eq!(resolved.command, CallbackCommand::AutoFix);
         assert_eq!(resolved.max_retries, 3);
         assert!(resolved.context_paths.contains(&"src/".to_string()));

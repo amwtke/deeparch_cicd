@@ -199,9 +199,7 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
             .get_step("clippy")
             .or_else(|| pipeline.get_step("lint"))
             .map(|s| s.commands.clone()),
-        fmt_cmd: pipeline
-            .get_step("fmt-check")
-            .map(|s| s.commands.clone()),
+        fmt_cmd: pipeline.get_step("fmt-check").map(|s| s.commands.clone()),
         source_paths,
         config_files: match pipeline.name.as_str() {
             n if n.starts_with("rust") => vec!["Cargo.toml".into()],
@@ -363,13 +361,19 @@ mod tests {
 
         // git-pull: RuntimeError, no retries
         let git_pull = pipeline.get_step("git-pull").unwrap();
-        let of = git_pull.on_failure.as_ref().expect("git-pull should have on_failure");
+        let of = git_pull
+            .on_failure
+            .as_ref()
+            .expect("git-pull should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
         assert_eq!(of.max_retries, 0);
 
         // build: AutoFix, 3 retries
         let build = pipeline.get_step("build").unwrap();
-        let of = build.on_failure.as_ref().expect("build should have on_failure");
+        let of = build
+            .on_failure
+            .as_ref()
+            .expect("build should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::AutoFix);
         assert_eq!(of.max_retries, 3);
         assert!(of.context_paths.contains(&"src/".to_string()));
@@ -377,20 +381,29 @@ mod tests {
 
         // test: Abort, no retries
         let test = pipeline.get_step("test").unwrap();
-        let of = test.on_failure.as_ref().expect("test should have on_failure");
+        let of = test
+            .on_failure
+            .as_ref()
+            .expect("test should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::Abort);
         assert_eq!(of.max_retries, 0);
 
         // fmt-check: AutoFix, 1 retry
         let fmt = pipeline.get_step("fmt-check").unwrap();
-        let of = fmt.on_failure.as_ref().expect("fmt-check should have on_failure");
+        let of = fmt
+            .on_failure
+            .as_ref()
+            .expect("fmt-check should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::AutoFix);
         assert_eq!(of.max_retries, 1);
         assert!(of.context_paths.contains(&"src/".into()));
 
         // clippy: AutoFix, 2 retries
         let clippy = pipeline.get_step("clippy").unwrap();
-        let of = clippy.on_failure.as_ref().expect("clippy should have on_failure");
+        let of = clippy
+            .on_failure
+            .as_ref()
+            .expect("clippy should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::AutoFix);
         assert_eq!(of.max_retries, 2);
     }

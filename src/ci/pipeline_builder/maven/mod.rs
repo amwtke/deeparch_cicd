@@ -272,7 +272,12 @@ mod tests {
         let info = make_maven_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
         let mapping = step.exception_mapping();
-        let resolved = mapping.resolve(1, "", "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset", Some(&|ec, out, err| step.match_exception(ec, out, err)));
+        let resolved = mapping.resolve(
+            1,
+            "",
+            "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
         assert_eq!(resolved.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(resolved.max_retries, 2);
     }
@@ -340,7 +345,12 @@ mod tests {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = spotbugs_step::SpotbugsStep::new(&info);
-        let resolved = step.exception_mapping().resolve(1, "", "some spotbugs error", Some(&|ec, out, err| step.match_exception(ec, out, err)));
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "",
+            "some spotbugs error",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
         assert_eq!(resolved.command, CallbackCommand::AutoFix);
     }
 
@@ -349,7 +359,12 @@ mod tests {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = checkstyle_step::CheckstyleStep::new(&info);
-        let resolved = step.exception_mapping().resolve(1, "", "some checkstyle error", Some(&|ec, out, err| step.match_exception(ec, out, err)));
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "",
+            "some checkstyle error",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
         assert_eq!(resolved.command, CallbackCommand::AutoFix);
     }
 
@@ -358,7 +373,9 @@ mod tests {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = package_step::PackageStep::new(&info);
-        let resolved = step.exception_mapping().resolve(1, "", "some package error", None);
+        let resolved = step
+            .exception_mapping()
+            .resolve(1, "", "some package error", None);
         assert_eq!(resolved.command, CallbackCommand::RuntimeError);
     }
 

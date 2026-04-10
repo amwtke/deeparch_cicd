@@ -31,15 +31,14 @@ impl StepDef for LintStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::AutoFix)
-            .add(
-                "lint_error",
-                ExceptionEntry {
-                    command: CallbackCommand::AutoFix,
-                    max_retries: 2,
-                    context_paths: self.source_paths.clone(),
-                },
-            )
+        ExceptionMapping::new(CallbackCommand::AutoFix).add(
+            "lint_error",
+            ExceptionEntry {
+                command: CallbackCommand::AutoFix,
+                max_retries: 2,
+                context_paths: self.source_paths.clone(),
+            },
+        )
     }
 
     fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
@@ -112,9 +111,12 @@ mod tests {
         info.lint_cmd = Some(vec!["cargo clippy".into()]);
         let step = LintStep::new(&info).unwrap();
         let mapping = step.exception_mapping();
-        let resolved = mapping.resolve(1, "", "lint error output", Some(&|ec, out, err| {
-            step.match_exception(ec, out, err)
-        }));
+        let resolved = mapping.resolve(
+            1,
+            "",
+            "lint error output",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
         assert_eq!(resolved.command, CallbackCommand::AutoFix);
         assert_eq!(resolved.max_retries, 2);
         assert_eq!(resolved.context_paths, vec!["src/"]);

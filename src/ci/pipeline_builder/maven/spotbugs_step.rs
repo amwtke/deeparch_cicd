@@ -116,12 +116,14 @@ impl StepDef for SpotbugsStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::AutoFix)
-            .add("spotbugs_found", ExceptionEntry {
+        ExceptionMapping::new(CallbackCommand::AutoFix).add(
+            "spotbugs_found",
+            ExceptionEntry {
                 command: CallbackCommand::AutoFix,
                 max_retries: 2,
                 context_paths: self.source_paths.clone(),
-            })
+            },
+        )
     }
 
     fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {

@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::ci::callback::action::CallbackCommandAction;
+use crate::ci::callback::command::CallbackCommandRegistry;
 use crate::ci::executor::DockerExecutor;
 use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::ci::output::{json, plain};
 use crate::ci::output::{resolve_output_mode, OutputMode};
-use crate::ci::callback::action::CallbackCommandAction;
-use crate::ci::callback::command::CallbackCommandRegistry;
 use crate::ci::parser::Pipeline;
 use crate::ci::scheduler::Scheduler;
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
@@ -417,7 +417,7 @@ async fn cmd_run(
                             sd.match_exception(ec, out, err)
                         };
                         let resolved = mapping.resolve(
-                            result.exit_code as i64,
+                            result.exit_code,
                             &stdout,
                             &stderr,
                             Some(&match_fn),
