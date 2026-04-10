@@ -195,6 +195,14 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
     let mut all_step_defs: Vec<Box<dyn StepDef>> = vec![Box::new(git_pull)];
     all_step_defs.extend(step_defs);
 
+    // Convert configs to Steps, then attach on_failure from exception_mapping
+    let mut steps: Vec<Step> = all_configs.into_iter().map(|sc| sc.into()).collect();
+
+    // Attach on_failure from each StepDef's exception_mapping
+    for (step, sd) in steps.iter_mut().zip(all_step_defs.iter()) {
+        step.on_failure = Some(sd.exception_mapping().to_on_failure());
+    }
+
     let pipeline = Pipeline {
         name,
         git_credentials: Some(crate::ci::parser::GitCredentials {
@@ -202,7 +210,7 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
             password: "your_token_or_password".to_string(),
         }),
         env: HashMap::new(),
-        steps: all_configs.into_iter().map(|sc| sc.into()).collect(),
+        steps,
     };
 
     (pipeline, all_step_defs)
@@ -243,4 +251,72 @@ pub fn count_pattern(output: &str, patterns: &[&str]) -> usize {
         .lines()
         .filter(|line| patterns.iter().any(|p| line.contains(p)))
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ci::callback::command::CallbackCommand;
+    use crate::ci::detector::{ProjectInfo, ProjectType};
+
+    fn make_rust_info() -> ProjectInfo {
+        ProjectInfo {
+            project_type: ProjectType::Rust,
+            language_version: Some("2021".into()),
+            framework: None,
+            image: "rust:latest".into(),
+            build_cmd: vec!["cargo build".into()],
+            test_cmd: vec!["cargo test".into()],
+            lint_cmd: Some(vec![
+                "rustup component add clippy 2>/dev/null; cargo clippy -- -D warnings".into(),
+            ]),
+            fmt_cmd: Some(vec![
+                "rustup component add rustfmt 2>/dev/null; cargo fmt -- --check".into(),
+            ]),
+            source_paths: vec!["src/".into()],
+            config_files: vec!["Cargo.toml".into()],
+            warnings: vec![],
+            quality_plugins: vec![],
+            subdir: None,
+        }
+    }
+
+    #[test]
+    fn test_generate_pipeline_has_on_failure() {
+        let info = make_rust_info();
+        let (pipeline, _step_defs) = generate_pipeline(&info);
+
+        // git-pull: RuntimeError, no retries
+        let git_pull = pipeline.get_step("git-pull").unwrap();
+        let of = git_pull.on_failure.as_ref().expect("git-pull should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert_eq!(of.max_retries, 0);
+
+        // build: AutoFix, 3 retries
+        let build = pipeline.get_step("build").unwrap();
+        let of = build.on_failure.as_ref().expect("build should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
+        assert_eq!(of.max_retries, 3);
+        assert!(of.context_paths.contains(&"src/".to_string()));
+        assert!(of.context_paths.contains(&"Cargo.toml".to_string()));
+
+        // test: Abort, no retries
+        let test = pipeline.get_step("test").unwrap();
+        let of = test.on_failure.as_ref().expect("test should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::Abort);
+        assert_eq!(of.max_retries, 0);
+
+        // fmt-check: AutoFix, 1 retry
+        let fmt = pipeline.get_step("fmt-check").unwrap();
+        let of = fmt.on_failure.as_ref().expect("fmt-check should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
+        assert_eq!(of.max_retries, 1);
+        assert!(of.context_paths.contains(&"src/".into()));
+
+        // clippy: AutoFix, 2 retries
+        let clippy = pipeline.get_step("clippy").unwrap();
+        let of = clippy.on_failure.as_ref().expect("clippy should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
+        assert_eq!(of.max_retries, 2);
+    }
 }
