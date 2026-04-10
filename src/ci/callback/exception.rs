@@ -9,7 +9,6 @@ pub struct ExceptionEntry {
     pub context_paths: Vec<String>,
 }
 
-#[allow(dead_code)]
 pub struct ExceptionMapping {
     entries: HashMap<String, ExceptionEntry>,
     default_command: CallbackCommand,
@@ -24,7 +23,6 @@ pub struct ResolvedFailure {
 }
 
 impl ExceptionMapping {
-    #[allow(dead_code)]
     pub fn new(default_command: CallbackCommand) -> Self {
         Self {
             entries: HashMap::new(),
@@ -32,10 +30,31 @@ impl ExceptionMapping {
         }
     }
 
-    #[allow(dead_code)]
     pub fn add(mut self, key: &str, entry: ExceptionEntry) -> Self {
         self.entries.insert(key.into(), entry);
         self
+    }
+
+    /// Convert this mapping's aggregate info into an OnFailure for YAML serialization.
+    /// - callback_command = default_command
+    /// - max_retries = max of all entries' max_retries (0 if no entries)
+    /// - context_paths = deduplicated union of all entries' context_paths
+    pub fn to_on_failure(&self) -> crate::ci::parser::OnFailure {
+        let max_retries = self.entries.values().map(|e| e.max_retries).max().unwrap_or(0);
+
+        let mut paths: Vec<String> = self
+            .entries
+            .values()
+            .flat_map(|e| e.context_paths.iter().cloned())
+            .collect();
+        paths.sort();
+        paths.dedup();
+
+        crate::ci::parser::OnFailure {
+            callback_command: self.default_command.clone(),
+            max_retries,
+            context_paths: paths,
+        }
     }
 
     /// Resolution chain:
@@ -202,5 +221,25 @@ mod tests {
     fn test_parse_stderr_marker_none_when_absent() {
         let key = ExceptionMapping::parse_stderr_marker("just some error output\n");
         assert!(key.is_none());
+    }
+
+    #[test]
+    fn test_to_on_failure_with_entries() {
+        let mapping = test_mapping(); // default=RuntimeError, entries: ruleset_not_found(retries=2, paths=["src/"]), compile_error(retries=3, paths=["src/","Cargo.toml"])
+        let of = mapping.to_on_failure();
+        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert_eq!(of.max_retries, 3); // max of 2 and 3
+        assert!(of.context_paths.contains(&"src/".to_string()));
+        assert!(of.context_paths.contains(&"Cargo.toml".to_string()));
+        assert_eq!(of.context_paths.len(), 2); // deduplicated: "src/" appears in both entries
+    }
+
+    #[test]
+    fn test_to_on_failure_empty_entries() {
+        let mapping = ExceptionMapping::new(CallbackCommand::Abort);
+        let of = mapping.to_on_failure();
+        assert_eq!(of.callback_command, CallbackCommand::Abort);
+        assert_eq!(of.max_retries, 0);
+        assert!(of.context_paths.is_empty());
     }
 }
