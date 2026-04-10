@@ -247,7 +247,7 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 - 支持 PDF/MD 格式，任何语言
 - 找到 → 读取内容，生成 `pipelight-misc/pmd-ruleset.xml`（使用 PMD 7.x 规则名） → retry
 
-**都找不到** → skip PMD：`pipelight retry --run-id <id> --step pmd --skip pmd -f pipeline.yml --output json`
+**两轮都找不到** → 立即 skip PMD：新起 pipeline `pipelight run -f pipeline.yml --output json --run-id <new-id> --skip pmd`。**禁止 LLM 在没有找到任何已有配置或编码规范文档的情况下凭空生成 ruleset 文件。**
 
 **注意：`pipelight-misc/` 必须位于目标项目根目录下**（即 `pipeline.yml` 所在目录），而非 pipelight 工具自身的目录。
 
