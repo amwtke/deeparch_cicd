@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use super::command::CallbackCommand;
 
-#[allow(dead_code)]
 pub struct ExceptionEntry {
     pub command: CallbackCommand,
     pub max_retries: u32,
@@ -14,7 +13,6 @@ pub struct ExceptionMapping {
     default_command: CallbackCommand,
 }
 
-#[allow(dead_code)]
 pub struct ResolvedFailure {
     pub exception_key: String,
     pub command: CallbackCommand,
@@ -61,7 +59,7 @@ impl ExceptionMapping {
     /// 1. Parse stderr for PIPELIGHT_EXCEPTION:<key> marker
     /// 2. Call match_fn (StepDef::match_exception) for Rust-side analysis
     /// 3. Fallback to default_command
-    #[allow(dead_code, clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     pub fn resolve(
         &self,
         exit_code: i64,
@@ -94,7 +92,6 @@ impl ExceptionMapping {
         }
     }
 
-    #[allow(dead_code)]
     fn parse_stderr_marker(stderr: &str) -> Option<String> {
         for line in stderr.lines() {
             if let Some(rest) = line.strip_prefix("PIPELIGHT_EXCEPTION:") {

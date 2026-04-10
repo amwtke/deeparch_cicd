@@ -201,6 +201,7 @@ async fn cmd_run(
 
     let scheduler = Scheduler::new(&pipeline)?;
     let registry = CallbackCommandRegistry::new();
+    let step_def_map = crate::ci::pipeline_builder::step_defs_for_pipeline(&pipeline);
 
     if dry_run {
         if mode == OutputMode::Tty {
@@ -406,11 +407,47 @@ async fn cmd_run(
                 );
             }
 
-            // Build on_failure state from pipeline config
-            let on_failure_state =
-                pipeline_step
-                    .and_then(|s| s.on_failure.as_ref())
-                    .map(|of| {
+            // Build on_failure state: prefer runtime exception resolve, fall back to YAML config
+            let on_failure_state = if !result.success {
+                // Try runtime resolve via StepDef exception_mapping
+                if let Some(ref defs) = step_def_map {
+                    if let Some(sd) = defs.get(step_name) {
+                        let mapping = sd.exception_mapping();
+                        let match_fn = |ec: i64, out: &str, err: &str| -> Option<String> {
+                            sd.match_exception(ec, out, err)
+                        };
+                        let resolved = mapping.resolve(
+                            result.exit_code as i64,
+                            &stdout,
+                            &stderr,
+                            Some(&match_fn),
+                        );
+                        let action = registry.action_for(&resolved.command);
+                        Some(OnFailureState {
+                            exception_key: resolved.exception_key,
+                            command: resolved.command,
+                            action,
+                            max_retries: resolved.max_retries,
+                            retries_remaining: resolved.max_retries,
+                            context_paths: resolved.context_paths,
+                        })
+                    } else {
+                        // No StepDef for this step, fall back to YAML
+                        pipeline_step.and_then(|s| s.on_failure.as_ref()).map(|of| {
+                            let action = registry.action_for(&of.callback_command);
+                            OnFailureState {
+                                exception_key: "yaml_configured".into(),
+                                command: of.callback_command.clone(),
+                                action,
+                                max_retries: of.max_retries,
+                                retries_remaining: of.max_retries,
+                                context_paths: of.context_paths.clone(),
+                            }
+                        })
+                    }
+                } else {
+                    // No strategy found, fall back to YAML
+                    pipeline_step.and_then(|s| s.on_failure.as_ref()).map(|of| {
                         let action = registry.action_for(&of.callback_command);
                         OnFailureState {
                             exception_key: "yaml_configured".into(),
@@ -420,7 +457,22 @@ async fn cmd_run(
                             retries_remaining: of.max_retries,
                             context_paths: of.context_paths.clone(),
                         }
-                    });
+                    })
+                }
+            } else {
+                // Step succeeded — still attach on_failure for JSON output completeness
+                pipeline_step.and_then(|s| s.on_failure.as_ref()).map(|of| {
+                    let action = registry.action_for(&of.callback_command);
+                    OnFailureState {
+                        exception_key: "yaml_configured".into(),
+                        command: of.callback_command.clone(),
+                        action,
+                        max_retries: of.max_retries,
+                        retries_remaining: of.max_retries,
+                        context_paths: of.context_paths.clone(),
+                    }
+                })
+            };
 
             // Parse test output for backward-compat test_summary field
             let step_test_summary = if step_name == "test" {
