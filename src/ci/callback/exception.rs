@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::command::CallbackCommand;
+use crate::ci::parser::OnFailureException;
 
 pub struct ExceptionEntry {
     pub command: CallbackCommand,
@@ -34,9 +35,10 @@ impl ExceptionMapping {
     }
 
     /// Convert this mapping's aggregate info into an OnFailure for YAML serialization.
-    /// - callback_command = default_command
+    /// - callback_command = default_command (fallback when no exception matches)
     /// - max_retries = max of all entries' max_retries (0 if no entries)
     /// - context_paths = deduplicated union of all entries' context_paths
+    /// - exceptions = per-exception overrides (command, retries, paths)
     pub fn to_on_failure(&self) -> crate::ci::parser::OnFailure {
         let max_retries = self
             .entries
@@ -53,10 +55,26 @@ impl ExceptionMapping {
         paths.sort();
         paths.dedup();
 
+        let exceptions: HashMap<String, OnFailureException> = self
+            .entries
+            .iter()
+            .map(|(key, entry)| {
+                (
+                    key.clone(),
+                    OnFailureException {
+                        command: entry.command.clone(),
+                        max_retries: entry.max_retries,
+                        context_paths: entry.context_paths.clone(),
+                    },
+                )
+            })
+            .collect();
+
         crate::ci::parser::OnFailure {
             callback_command: self.default_command.clone(),
             max_retries,
             context_paths: paths,
+            exceptions,
         }
     }
 

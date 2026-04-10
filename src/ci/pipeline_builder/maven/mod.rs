@@ -72,6 +72,14 @@ impl StepDef for MavenCachedStep {
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
         self.inner.output_report_str(success, stdout, stderr)
     }
+
+    fn exception_mapping(&self) -> crate::ci::callback::exception::ExceptionMapping {
+        self.inner.exception_mapping()
+    }
+
+    fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
+        self.inner.match_exception(exit_code, stdout, stderr)
+    }
 }
 
 impl PipelineStrategy for MavenStrategy {

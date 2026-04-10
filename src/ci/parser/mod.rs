@@ -102,6 +102,21 @@ pub struct OnFailure {
 
     #[serde(default)]
     pub context_paths: Vec<String>,
+
+    /// Exception-specific overrides keyed by exception name.
+    /// At runtime, the resolver matches stderr/output to an exception key
+    /// and uses the corresponding entry instead of the default above.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub exceptions: HashMap<String, OnFailureException>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnFailureException {
+    pub command: CallbackCommand,
+    #[serde(default)]
+    pub max_retries: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_paths: Vec<String>,
 }
 
 fn default_callback_command() -> CallbackCommand {
