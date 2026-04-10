@@ -416,12 +416,8 @@ async fn cmd_run(
                         let match_fn = |ec: i64, out: &str, err: &str| -> Option<String> {
                             sd.match_exception(ec, out, err)
                         };
-                        let resolved = mapping.resolve(
-                            result.exit_code,
-                            &stdout,
-                            &stderr,
-                            Some(&match_fn),
-                        );
+                        let resolved =
+                            mapping.resolve(result.exit_code, &stdout, &stderr, Some(&match_fn));
                         let action = registry.action_for(&resolved.command);
                         Some(OnFailureState {
                             exception_key: resolved.exception_key,
