@@ -3,6 +3,19 @@ git_credentials:
   username: your_username
   password: your_token_or_password
 steps:
+- name: ping-pong
+  commands:
+  - COUNTER_FILE=pipelight-misc/ping-pong-counter; mkdir -p pipelight-misc; COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0); COUNT=$((COUNT + 1)); echo "$COUNT" > "$COUNTER_FILE"; echo "ping (round $COUNT/10)"; if [ "$COUNT" -ge 10 ]; then rm -f "$COUNTER_FILE"; exit 0; fi; exit 1
+  on_failure:
+    callback_command: ping
+    max_retries: 9
+    context_paths: []
+    exceptions:
+      ping:
+        command: ping
+        max_retries: 9
+  local: true
+  active: false
 - name: git-pull
   commands:
   - if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi
@@ -11,6 +24,8 @@ steps:
   - STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash && STASHED=true; fi
   - 'git pull --rebase || { if $STASHED; then git stash pop; fi; echo ''ERROR: git pull --rebase failed — possible merge conflict''; exit 1; }'
   - 'if $STASHED; then echo ''Restoring stashed changes...''; git stash pop || { echo ''ERROR: stash pop conflict — run git stash pop manually''; exit 1; }; fi'
+  depends_on:
+  - ping-pong
   on_failure:
     callback_command: git_fail
     max_retries: 0

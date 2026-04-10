@@ -201,13 +201,24 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 
 Ping-pong 通信测试，验证 pipelight 与 LLM 的回调交互是否正常。
 
+**重要：每一轮 ping-pong 都必须独立展示，禁止压缩或合并多轮显示。** 每轮必须包含：
+1. 轮次标题（`### Round N`）
+2. 完整的 JSON 输出（或关键字段摘要）
+3. LLM 的 `pong` 响应
+4. retry 命令
+
+逐轮流程：
+
 1. 读取失败 step 的 `stdout`，确认包含 `ping (round N/10)`
-2. **在终端打印 `pong`**（直接输出文本 "pong" 给用户看）
-3. 执行 `pipelight retry --run-id <id> --step ping-pong -f pipeline.yml --output json`
-4. 解析 JSON，如果 step 再次失败且 `on_failure.command` 仍为 `ping`，重复步骤 1-3
-5. 第 10 轮时 step 会自动 exit 0（成功），pipeline 继续执行下一个 step
+2. 打印轮次标题：`### Round N: ping (round N/10)`
+3. 打印该轮的 JSON 输出（至少包含 step name、status、stdout、retries_remaining）
+4. **在终端打印 `pong`**（直接输出文本 "pong" 给用户看）
+5. 执行 `pipelight retry --run-id <id> --step ping-pong -f pipeline.yml --output json`（每轮一次独立的 Bash 调用，不要用 for 循环批量执行）
+6. 解析 JSON，如果 step 再次失败且 `on_failure.command` 仍为 `ping`，重复步骤 1-5
+7. 第 10 轮时 step 会自动 exit 0（成功），pipeline 继续执行下一个 step
 
 > **注意**：ping 回调不需要读取任何文件或修改代码，仅打印 pong 并 retry。
+> **禁止**：用 for/while 循环批量执行多轮 retry，或将多轮合并为一条输出。每轮都是一次独立的 LLM ↔ pipelight 交互，必须逐轮展示。
 
 #### `auto_fix` 详细流程
 
