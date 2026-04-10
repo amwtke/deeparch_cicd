@@ -238,6 +238,23 @@ Example:
 
 If no auto-fix occurred (pipeline passed on first run), omit this section entirely.
 
+## Guardrails
+
+### Never Execute Pipeline Commands Directly
+
+When a step fails, you must ONLY:
+1. Read stderr and context_paths to understand the error
+2. Fix the source code (edit files)
+3. Retry via `pipelight retry`
+
+**NEVER** execute pipeline step commands directly on the host (e.g., `cargo fmt`, `cargo build`, `mvn compile`, `npm run build`). All step commands must run through the pipelight pipeline inside Docker containers.
+
+**Why:** Direct execution bypasses Docker isolation, skips the pipeline's reporting/retry mechanism, and produces results that differ from the pipeline environment. It also creates local file modifications that the user didn't ask for.
+
+**What to do instead:**
+- If `status: "retryable"` → enter fix-retry loop (edit code, then `pipelight retry`)
+- If `status: "failed"` (non-retryable) → report the error, do NOT attempt to fix
+
 ## Exit Code Reference
 
 | Exit Code | Meaning |
@@ -256,3 +273,4 @@ If no auto-fix occurred (pipeline passed on first run), omit this section entire
 | Retry when `retries_remaining == 0` | Check before retrying, report failure instead |
 | Fix code without reading `context_paths` | Always read context files first for full understanding |
 | Retry `failed` (non-retryable) pipeline | Only retry when status is `retryable` |
+| Execute step commands directly (e.g., `cargo fmt`) | Only fix source code and retry via `pipelight retry`. Never run step commands outside the pipeline |
