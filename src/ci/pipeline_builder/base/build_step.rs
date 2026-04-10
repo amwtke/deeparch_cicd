@@ -6,7 +6,9 @@ use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 pub struct BuildStep {
     pub image: String,
     pub build_cmd: Vec<String>,
+    #[allow(dead_code)]
     pub source_paths: Vec<String>,
+    #[allow(dead_code)]
     pub config_files: Vec<String>,
 }
 

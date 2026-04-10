@@ -5,6 +5,7 @@ use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct CheckstyleStep {
     image: String,
+    #[allow(dead_code)]
     config_files: Vec<String>,
     subdir: Option<String>,
 }

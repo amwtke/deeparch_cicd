@@ -6,6 +6,7 @@ use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 pub struct LintStep {
     pub image: String,
     pub lint_cmd: Vec<String>,
+    #[allow(dead_code)]
     pub source_paths: Vec<String>,
 }
 

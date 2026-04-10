@@ -6,6 +6,7 @@ use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 pub struct FmtStep {
     pub image: String,
     pub fmt_cmd: Vec<String>,
+    #[allow(dead_code)]
     pub source_paths: Vec<String>,
 }
 

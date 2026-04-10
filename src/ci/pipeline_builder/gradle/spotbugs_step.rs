@@ -5,6 +5,7 @@ use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct SpotbugsStep {
     image: String,
+    #[allow(dead_code)]
     source_paths: Vec<String>,
     subdir: Option<String>,
 }

@@ -14,6 +14,7 @@ pub enum CallbackCommand {
 
 pub struct CallbackCommandDef {
     pub action: CallbackCommandAction,
+    #[allow(dead_code)]
     pub description: String,
 }
 
@@ -64,6 +65,7 @@ impl CallbackCommandRegistry {
         self.commands.insert(command, def);
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, command: &CallbackCommand) -> Option<&CallbackCommandDef> {
         self.commands.get(command)
     }

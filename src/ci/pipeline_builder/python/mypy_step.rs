@@ -5,6 +5,7 @@ use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct MypyStep {
     image: String,
+    #[allow(dead_code)]
     source_paths: Vec<String>,
 }
 

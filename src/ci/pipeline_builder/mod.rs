@@ -81,6 +81,7 @@ pub trait StepDef: Send + Sync {
 
     /// Return the exception-to-command mapping for this step.
     /// Default: empty mapping with Abort fallback (all failures are fatal).
+    #[allow(dead_code)]
     fn exception_mapping(&self) -> ExceptionMapping {
         ExceptionMapping::new(CallbackCommand::Abort)
     }
@@ -88,6 +89,7 @@ pub trait StepDef: Send + Sync {
     /// Analyze execution output to identify the exception key.
     /// Called as priority 2 in resolve chain (after stderr marker).
     /// Default: None (no Rust-side analysis).
+    #[allow(dead_code)]
     fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
         None
     }

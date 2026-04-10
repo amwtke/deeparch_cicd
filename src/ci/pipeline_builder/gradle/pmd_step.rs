@@ -8,6 +8,7 @@ const PMD_CLI_VERSION: &str = "7.9.0";
 
 pub struct PmdStep {
     image: String,
+    #[allow(dead_code)]
     source_paths: Vec<String>,
     subdir: Option<String>,
 }
