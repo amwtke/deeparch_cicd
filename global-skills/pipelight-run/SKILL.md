@@ -115,6 +115,8 @@ pipelight run -f pipeline.yml --output json --run-id <short-id>
 
 ## Step 3: Parse JSON Result
 
+**IMPORTANT: 每次收到 pipelight 的 JSON 输出（包括首次运行和每次 retry），都必须将完整 JSON 原文打印给用户。** 使用 JSON code block 展示，让用户能看到 LLM 与 pipelight 之间的每一次完整交互。如果 JSON 输出过大被截断，则从工具结果文件中提取关键字段（run_id, status, 每个 step 的 name/status/report_summary/stderr）并以 JSON 格式打印。
+
 JSON structure:
 
 ```json
