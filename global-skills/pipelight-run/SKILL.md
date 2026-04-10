@@ -137,7 +137,9 @@ JSON structure:
       "stderr": "...",
       "error_context": { "files": [...], "lines": [...], "error_type": "..." },
       "on_failure": {
-        "strategy": "autofix | abort | notify",
+        "exception_key": "compile_error | ruleset_not_found | ruleset_invalid | unrecognized",
+        "command": "auto_fix | auto_gen_pmd_ruleset | git_fail | fail_and_skip | runtime_error | abort",
+        "action": "retry | skip | runtime_error | abort",
         "max_retries": 3,
         "retries_remaining": 3,
         "context_paths": ["src/", "Cargo.toml"]
@@ -177,23 +179,39 @@ Pipeline failed with no auto-fix strategy. Report the error:
 
 ### `status: "retryable"`
 
-Pipeline failed but auto-fix is configured. Enter fix-retry loop. **Each round of the loop MUST be printed to the user** so they can see the full discovery → fix → retry process.
+Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 LLM 操作，再进入 fix-retry loop。**
 
-#### Fix-Retry Loop
+#### 回调命令处理表 (Callback Command Dispatch)
 
-1. Find the failed step (the one with `status: "failed"`)
-2. **Print diagnosis** — show what failed and why:
+当 step 失败且 `status: "retryable"` 时，读取失败 step 的 `on_failure.command` 字段，按下表分发 LLM 操作：
+
+| `command` | action | LLM 操作 | 成功后 | 失败后 |
+|-----------|--------|---------|--------|--------|
+| `auto_fix` | retry | 见下方 **`auto_fix` 详细流程** | `pipelight retry` 重试该 step | retries 耗尽则报告失败 |
+| `auto_gen_pmd_ruleset` | retry | 见下方 **`auto_gen_pmd_ruleset` 详细流程** | `pipelight retry` 重试该 step | skip PMD: `pipelight retry --skip pmd` |
+| `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
+| `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
+| `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
+| `abort` | abort | 报告错误，不重试 | — | — |
+
+#### `auto_fix` 详细流程
+
+**每轮 fix-retry 循环都必须打印给用户**，让用户看到完整的诊断 → 修复 → 重试过程。
+
+1. 找到失败的 step（`status: "failed"` 的那个）
+2. **打印诊断信息**：
 
 ```
-### <step-name> failed (retryable, N retries remaining)
+### <step-name> failed (command: auto_fix, N retries remaining)
 
 **Error:** <one-line error summary from stderr>
 **File:** <file:line if available from error_context or stderr>
 ```
 
-3. Read `stderr` to understand the error
-4. Read files listed in `on_failure.context_paths` to understand context
-5. **Print what you're fixing** — show the cause and the fix:
+3. 读 `stderr` 理解错误原因
+4. 读 `on_failure.context_paths` 中列出的文件，理解上下文
+5. 定位源码，修复 bug
+6. **打印修复内容**：
 
 ```
 **Cause:** <root cause explanation>
@@ -202,25 +220,36 @@ Pipeline failed but auto-fix is configured. Enter fix-retry loop. **Each round o
 - `path/to/file.java` — <brief description of change>
 ```
 
-6. Fix the code
-7. Check `retries_remaining > 0` before retrying
-8. **Print retry action:**
-
-```
-### Retrying <step-name>...
-```
-
-9. Run retry:
+7. 检查 `retries_remaining > 0`，为 0 则报告失败，不再重试
+8. 重试：
 
 ```bash
 pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml --output json
 ```
 
-10. Parse the new JSON result and repeat from Step 4
+9. 解析新的 JSON 结果，回到 Step 4 的状态判断（success/failed/retryable）
+10. 如果多轮重试，每轮编号：`### Round 1`、`### Round 2`...
 
-#### Multiple Rounds
+#### `auto_gen_pmd_ruleset` 详细流程
 
-If multiple retry rounds occur, print each round sequentially so the user sees the full history. Number them: `### Round 1`, `### Round 2`, etc.
+搜索分两轮，优先复用项目已有配置，找不到才从编码规范文档生成：
+
+**第一轮：搜索项目中已有的 PMD 配置文件**（直接复制到 `<项目根>/pipelight-misc/pmd-ruleset.xml` 使用）
+- 搜索 `**/pmd-ruleset.xml`、`**/pmd.xml`、`**/config/pmd/*.xml`
+- 检查 `pom.xml` 中 `maven-pmd-plugin` 引用的 ruleset 路径
+- 检查 `build.gradle` 中 `pmd { ruleSetFiles = ... }` 引用的文件
+- **禁止**使用 `target/` 或 `build/` 目录下的文件（构建产物，不可靠）
+- 找到 → 复制到 `pipelight-misc/pmd-ruleset.xml` → retry
+
+**第二轮：搜索编码规范文档**（读取内容后生成 PMD ruleset XML）
+- 不要假设特定规范（如阿里巴巴、Google 等），根据实际文档内容生成
+- 搜索路径优先级：`doc/` → `docs/` → 项目根目录下的 `*规范*`、`*guideline*`、`*coding*` 文件
+- 支持 PDF/MD 格式，任何语言
+- 找到 → 读取内容，生成 `pipelight-misc/pmd-ruleset.xml`（使用 PMD 7.x 规则名） → retry
+
+**都找不到** → skip PMD：`pipelight retry --run-id <id> --step pmd --skip pmd -f pipeline.yml --output json`
+
+**注意：`pipelight-misc/` 必须位于目标项目根目录下**（即 `pipeline.yml` 所在目录），而非 pipelight 工具自身的目录。
 
 ### Success Report (after retries)
 

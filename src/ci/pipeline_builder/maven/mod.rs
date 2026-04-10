@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pmd_step_ruleset_not_found_skips() {
+    fn test_pmd_step_ruleset_not_found_triggers_auto_gen() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
@@ -286,29 +286,29 @@ mod tests {
             "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset",
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
-        assert_eq!(resolved.command, CallbackCommand::FailAndSkip);
-        assert_eq!(resolved.max_retries, 0);
+        assert_eq!(resolved.command, CallbackCommand::AutoGenPmdRuleset);
+        assert_eq!(resolved.max_retries, 2);
+        assert!(!resolved.context_paths.is_empty());
     }
 
     #[test]
-    fn test_pmd_step_ruleset_not_found_vs_invalid_differ() {
+    fn test_pmd_step_ruleset_not_found_and_invalid_both_auto_gen() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
         let mapping = step.exception_mapping();
 
-        // ruleset_not_found → FailAndSkip (skip, no retry)
+        // ruleset_not_found → AutoGenPmdRuleset (LLM searches for guidelines)
         let not_found = mapping.resolve(
             1,
             "",
             "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset",
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
-        assert_eq!(not_found.command, CallbackCommand::FailAndSkip);
-        assert_eq!(not_found.max_retries, 0);
-        assert!(not_found.context_paths.is_empty());
+        assert_eq!(not_found.command, CallbackCommand::AutoGenPmdRuleset);
+        assert_eq!(not_found.max_retries, 2);
 
-        // ruleset_invalid → AutoGenPmdRuleset (retry)
+        // ruleset_invalid → AutoGenPmdRuleset (LLM regenerates with correct rule names)
         let invalid = mapping.resolve(
             1,
             "",
@@ -325,14 +325,12 @@ mod tests {
         let info = make_maven_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
         let of = step.exception_mapping().to_on_failure();
-        // default command is RuntimeError
         assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
-        // has both exception entries
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
         let rnf = &of.exceptions["ruleset_not_found"];
-        assert_eq!(rnf.command, CallbackCommand::FailAndSkip);
-        assert_eq!(rnf.max_retries, 0);
+        assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
+        assert_eq!(rnf.max_retries, 2);
         let ri = &of.exceptions["ruleset_invalid"];
         assert_eq!(ri.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(ri.max_retries, 2);
