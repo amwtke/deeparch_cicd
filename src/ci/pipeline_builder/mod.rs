@@ -10,6 +10,8 @@ pub mod test_parser;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::detector::{ProjectInfo, ProjectType};
 use crate::ci::parser::{OnFailure, Pipeline, Step};
 
@@ -77,6 +79,19 @@ pub trait StepDef: Send + Sync {
     fn output_report_path(&self, misc_dir: &Path, stdout: &str, stderr: &str) -> PathBuf {
         let cfg = self.config();
         write_step_report(misc_dir, &cfg.name, stdout, stderr)
+    }
+
+    /// Return the exception-to-command mapping for this step.
+    /// Default: empty mapping with Abort fallback (all failures are fatal).
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::Abort)
+    }
+
+    /// Analyze execution output to identify the exception key.
+    /// Called as priority 2 in resolve chain (after stderr marker).
+    /// Default: None (no Rust-side analysis).
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
+        None
     }
 }
 
