@@ -19,7 +19,8 @@ impl StepDef for PingPongStep {
         // Round 10: print "ping" and exit 0 (step succeeds, pipeline continues).
         let script = format!(
             concat!(
-                "COUNTER_FILE=/tmp/pipelight-ping-pong-$$PPID; ",
+                "COUNTER_FILE=pipelight-misc/ping-pong-counter; ",
+                "mkdir -p pipelight-misc; ",
                 "COUNT=$(cat \"$COUNTER_FILE\" 2>/dev/null || echo 0); ",
                 "COUNT=$((COUNT + 1)); ",
                 "echo \"$COUNT\" > \"$COUNTER_FILE\"; ",
@@ -74,8 +75,10 @@ mod tests {
     use crate::ci::callback::action::CallbackCommandAction;
     use crate::ci::callback::command::CallbackCommandRegistry;
 
+    // ── config ──────────────────────────────────────────────────
+
     #[test]
-    fn test_config() {
+    fn test_config_basic() {
         let step = PingPongStep::new();
         let cfg = step.config();
         assert_eq!(cfg.name, "ping-pong");
@@ -83,8 +86,61 @@ mod tests {
         assert!(cfg.image.is_empty());
         assert!(cfg.depends_on.is_empty());
         assert_eq!(cfg.commands.len(), 1);
-        assert!(cfg.commands[0].contains("ping"));
     }
+
+    #[test]
+    fn test_config_counter_in_pipelight_misc() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        assert!(
+            cfg.commands[0].contains("pipelight-misc/ping-pong-counter"),
+            "counter file should be in pipelight-misc/"
+        );
+    }
+
+    #[test]
+    fn test_config_creates_misc_dir() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        assert!(
+            cfg.commands[0].contains("mkdir -p pipelight-misc"),
+            "should create pipelight-misc/ before writing counter"
+        );
+    }
+
+    #[test]
+    fn test_config_total_rounds_in_script() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        let expected = format!("ping (round $COUNT/{})", TOTAL_ROUNDS);
+        assert!(
+            cfg.commands[0].contains(&expected),
+            "script should reference TOTAL_ROUNDS constant"
+        );
+    }
+
+    #[test]
+    fn test_config_not_allow_failure() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        assert!(!cfg.allow_failure);
+    }
+
+    #[test]
+    fn test_config_default_workdir() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        assert_eq!(cfg.workdir, "/workspace");
+    }
+
+    #[test]
+    fn test_config_no_volumes() {
+        let step = PingPongStep::new();
+        let cfg = step.config();
+        assert!(cfg.volumes.is_empty());
+    }
+
+    // ── exception mapping ───────────────────────────────────────
 
     #[test]
     fn test_exception_mapping_resolves_to_ping() {
@@ -101,6 +157,51 @@ mod tests {
     }
 
     #[test]
+    fn test_exception_mapping_default_without_match_fn() {
+        // Without match_fn, should fall back to default command (also Ping)
+        let step = PingPongStep::new();
+        let resolved = step
+            .exception_mapping()
+            .resolve(1, "ping (round 5/10)\n", "", None);
+        assert_eq!(resolved.command, CallbackCommand::Ping);
+        assert_eq!(resolved.exception_key, "unrecognized");
+    }
+
+    #[test]
+    fn test_exception_mapping_context_paths_empty() {
+        let step = PingPongStep::new();
+        let match_fn = |exit_code: i64, stdout: &str, stderr: &str| -> Option<String> {
+            step.match_exception(exit_code, stdout, stderr)
+        };
+        let resolved =
+            step.exception_mapping()
+                .resolve(1, "", "", Some(&match_fn));
+        assert!(resolved.context_paths.is_empty());
+    }
+
+    #[test]
+    fn test_exception_mapping_to_on_failure() {
+        let step = PingPongStep::new();
+        let of = step.exception_mapping().to_on_failure();
+        assert_eq!(of.callback_command, CallbackCommand::Ping);
+        assert_eq!(of.max_retries, TOTAL_ROUNDS - 1);
+        assert!(of.context_paths.is_empty());
+    }
+
+    // ── match_exception ─────────────────────────────────────────
+
+    #[test]
+    fn test_match_exception_always_returns_ping() {
+        let step = PingPongStep::new();
+        assert_eq!(step.match_exception(1, "ping (round 1/10)", ""), Some("ping".into()));
+        assert_eq!(step.match_exception(1, "", "some error"), Some("ping".into()));
+        assert_eq!(step.match_exception(0, "", ""), Some("ping".into()));
+        assert_eq!(step.match_exception(127, "garbage", "noise"), Some("ping".into()));
+    }
+
+    // ── registry ────────────────────────────────────────────────
+
+    #[test]
     fn test_ping_action_is_retry() {
         let registry = CallbackCommandRegistry::new();
         assert_eq!(
@@ -108,6 +209,8 @@ mod tests {
             CallbackCommandAction::Retry
         );
     }
+
+    // ── output_report_str ───────────────────────────────────────
 
     #[test]
     fn test_report_success() {
@@ -120,10 +223,42 @@ mod tests {
     }
 
     #[test]
-    fn test_report_in_progress() {
+    fn test_report_success_ignores_stderr() {
         let step = PingPongStep::new();
-        let report = step.output_report_str(false, "ping (round 3/10)\n", "");
-        assert_eq!(report, "ping (round 3/10)");
+        let report = step.output_report_str(true, "ping (round 10/10)\n", "some warning\n");
+        assert_eq!(
+            report,
+            format!("Ping-pong completed ({} rounds)", TOTAL_ROUNDS)
+        );
+    }
+
+    #[test]
+    fn test_report_in_progress_first_round() {
+        let step = PingPongStep::new();
+        let report = step.output_report_str(false, "ping (round 1/10)\n", "");
+        assert_eq!(report, "ping (round 1/10)");
+    }
+
+    #[test]
+    fn test_report_in_progress_mid_round() {
+        let step = PingPongStep::new();
+        let report = step.output_report_str(false, "ping (round 5/10)\n", "");
+        assert_eq!(report, "ping (round 5/10)");
+    }
+
+    #[test]
+    fn test_report_in_progress_last_retry() {
+        let step = PingPongStep::new();
+        let report = step.output_report_str(false, "ping (round 9/10)\n", "");
+        assert_eq!(report, "ping (round 9/10)");
+    }
+
+    #[test]
+    fn test_report_multiline_stdout() {
+        let step = PingPongStep::new();
+        let stdout = "5\nping (round 5/10)\n";
+        let report = step.output_report_str(false, stdout, "");
+        assert_eq!(report, "ping (round 5/10)");
     }
 
     #[test]
@@ -134,11 +269,9 @@ mod tests {
     }
 
     #[test]
-    fn test_exception_mapping_to_on_failure() {
+    fn test_report_no_ping_line_in_output() {
         let step = PingPongStep::new();
-        let of = step.exception_mapping().to_on_failure();
-        assert_eq!(of.callback_command, CallbackCommand::Ping);
-        assert_eq!(of.max_retries, TOTAL_ROUNDS - 1);
-        assert!(of.context_paths.is_empty());
+        let report = step.output_report_str(false, "unexpected output\n", "");
+        assert_eq!(report, "ping");
     }
 }

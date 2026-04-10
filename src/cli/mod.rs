@@ -224,8 +224,11 @@ async fn cmd_run(
                 let path = entry.path();
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
-                // Remove log files and report directories; keep everything else (rulesets, exclude filters)
-                if name_str.ends_with(".log") || name_str.ends_with("-report") {
+                // Remove log files, report directories, and counter files; keep everything else (rulesets, exclude filters)
+                if name_str.ends_with(".log")
+                    || name_str.ends_with("-report")
+                    || name_str.ends_with("-counter")
+                {
                     if path.is_dir() {
                         let _ = std::fs::remove_dir_all(&path);
                     } else {
