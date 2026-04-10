@@ -1,5 +1,6 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct PmdStep {
@@ -85,12 +86,32 @@ impl StepDef for PmdStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::AutoGenPmdRuleset,
+            on_failure: None,
+            ..Default::default()
+        }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::Abort)
+            .add("ruleset_not_found", ExceptionEntry {
+                command: CallbackCommand::AutoGenPmdRuleset,
                 max_retries: 2,
                 context_paths: self.source_paths.clone(),
-            }),
-            ..Default::default()
+            })
+            .add("ruleset_invalid", ExceptionEntry {
+                command: CallbackCommand::AutoGenPmdRuleset,
+                max_retries: 2,
+                context_paths: self.source_paths.clone(),
+            })
+    }
+
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, stderr: &str) -> Option<String> {
+        if stderr.contains("Cannot load ruleset") || stderr.contains("Unable to find referenced rule") {
+            Some("ruleset_invalid".into())
+        } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
+            Some("ruleset_not_found".into())
+        } else {
+            None
         }
     }
 

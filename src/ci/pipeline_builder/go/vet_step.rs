@@ -1,5 +1,6 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
 pub struct VetStep {
@@ -23,13 +24,22 @@ impl StepDef for VetStep {
             image: self.image.clone(),
             commands: vec!["go vet ./...".into()],
             depends_on: vec!["build".into()],
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::AutoFix,
-                max_retries: 2,
-                context_paths: self.source_paths.clone(),
-            }),
+            on_failure: None,
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::AutoFix)
+            .add("vet_error", ExceptionEntry {
+                command: CallbackCommand::AutoFix,
+                max_retries: 2,
+                context_paths: self.source_paths.clone(),
+            })
+    }
+
+    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
+        Some("vet_error".into())
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {

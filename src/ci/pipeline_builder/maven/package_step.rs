@@ -1,5 +1,6 @@
+use crate::ci::callback::command::CallbackCommand;
+use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::detector::ProjectInfo;
-use crate::ci::parser::{CallbackCommand, OnFailure};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 pub struct PackageStep {
@@ -27,13 +28,13 @@ impl StepDef for PackageStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["test".into()],
-            on_failure: Some(OnFailure {
-                callback_command: CallbackCommand::Abort,
-                max_retries: 0,
-                context_paths: vec![],
-            }),
+            on_failure: None,
             ..Default::default()
         }
+    }
+
+    fn exception_mapping(&self) -> ExceptionMapping {
+        ExceptionMapping::new(CallbackCommand::Abort)
     }
 
     fn output_report_str(&self, success: bool, _stdout: &str, _stderr: &str) -> String {
