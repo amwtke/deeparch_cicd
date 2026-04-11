@@ -36,14 +36,25 @@ fn parse_maven_test(output: &str) -> Option<String> {
     ))
 }
 
-/// Wrapper that adds Maven cache volume to any step
+/// Wrapper that adds Maven cache volume to any step and optionally overrides
+/// the step's `depends_on` so strategies can compose steps into a serial chain.
 struct MavenCachedStep {
     inner: Box<dyn StepDef>,
+    depends_on_override: Option<Vec<String>>,
 }
 
 impl MavenCachedStep {
     fn wrap(inner: Box<dyn StepDef>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            depends_on_override: None,
+        }
+    }
+    fn wrap_with_deps(inner: Box<dyn StepDef>, deps: Vec<String>) -> Self {
+        Self {
+            inner,
+            depends_on_override: Some(deps),
+        }
     }
 }
 
@@ -54,6 +65,9 @@ impl StepDef for MavenCachedStep {
             "~/.m2:/workspace/.m2".to_string(),
             "~/.pipelight/cache:/workspace/.pipelight/cache".to_string(),
         ];
+        if let Some(ref deps) = self.depends_on_override {
+            cfg.depends_on = deps.clone();
+        }
         cfg
     }
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -118,32 +132,41 @@ impl PipelineStrategy for MavenStrategy {
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<Box<dyn StepDef>> {
+        // Serial chain: build → (checkstyle →)? spotbugs → pmd → test → package
         let mut steps: Vec<Box<dyn StepDef>> = vec![];
+        let mut prev: String = "build".into();
 
-        // Build
         steps.push(Box::new(MavenCachedStep::wrap(Box::new(BuildStep::new(
             info,
         )))));
 
-        // Quality checks — all depend only on build, run in parallel with test
         if info.lint_cmd.is_some() {
-            steps.push(Box::new(MavenCachedStep::wrap(Box::new(
-                checkstyle_step::CheckstyleStep::new(info),
-            ))));
+            steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+                Box::new(checkstyle_step::CheckstyleStep::new(info)),
+                vec![prev.clone()],
+            )));
+            prev = "checkstyle".into();
         }
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(
-            spotbugs_step::SpotbugsStep::new(info),
-        ))));
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(
-            pmd_step::PmdStep::new(info),
-        ))));
 
-        // Test depends only on build — quality steps (checkstyle/spotbugs/pmd) must not
-        // block test verification.
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(spotbugs_step::SpotbugsStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "spotbugs".into();
+
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(pmd_step::PmdStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "pmd".into();
+
         let test_step = TestStep::new(info).with_parser(parse_maven_test);
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(test_step))));
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(test_step),
+            vec![prev],
+        )));
 
-        // Package
+        // Package still declared via PackageStep (depends_on defaults to ["test"]).
         steps.push(Box::new(MavenCachedStep::wrap(Box::new(
             package_step::PackageStep::new(info),
         ))));
@@ -199,14 +222,23 @@ mod tests {
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
-        // build, checkstyle, spotbugs, pmd, test, package
         assert_eq!(
             names,
             vec!["build", "checkstyle", "spotbugs", "pmd", "test", "package"]
         );
-        // test only depends on build — quality steps run in parallel and don't block test
-        let test_cfg = steps[4].config();
-        assert_eq!(test_cfg.depends_on, vec!["build"]);
+        // Serial chain: each quality step chains onto the previous one.
+        let by_name: std::collections::HashMap<String, Vec<String>> = steps
+            .iter()
+            .map(|s| {
+                let c = s.config();
+                (c.name, c.depends_on)
+            })
+            .collect();
+        assert_eq!(by_name["checkstyle"], vec!["build".to_string()]);
+        assert_eq!(by_name["spotbugs"], vec!["checkstyle".to_string()]);
+        assert_eq!(by_name["pmd"], vec!["spotbugs".to_string()]);
+        assert_eq!(by_name["test"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["package"], vec!["test".to_string()]);
     }
 
     #[test]
@@ -216,43 +248,18 @@ mod tests {
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
         assert_eq!(names, vec!["build", "spotbugs", "pmd", "test", "package"]);
-        let test_cfg = steps[3].config();
-        assert_eq!(test_cfg.depends_on, vec!["build"]);
-    }
-
-    #[test]
-    fn test_maven_quality_steps_parallel_with_test() {
-        // Regression: pmd/spotbugs/checkstyle must not block test.
-        // All quality steps and test should be siblings depending only on "build",
-        // so a pmd failure cannot cause test to be skipped.
-        let info = make_maven_info_with_lint();
-        let steps = MavenStrategy.steps(&info);
-        for name in ["checkstyle", "spotbugs", "pmd", "test"] {
-            let cfg = steps
-                .iter()
-                .find(|s| s.config().name == name)
-                .unwrap_or_else(|| panic!("step {} missing", name))
-                .config();
-            assert_eq!(
-                cfg.depends_on,
-                vec!["build".to_string()],
-                "step '{}' must depend only on build so pmd failure doesn't block test",
-                name
-            );
-        }
-    }
-
-    #[test]
-    fn test_maven_package_still_depends_on_test() {
-        // package should still run after test (not after quality steps)
-        let info = make_maven_info_with_lint();
-        let steps = MavenStrategy.steps(&info);
-        let package_cfg = steps
+        // Chain collapses cleanly: spotbugs → pmd → test → package, on top of build.
+        let by_name: std::collections::HashMap<String, Vec<String>> = steps
             .iter()
-            .find(|s| s.config().name == "package")
-            .unwrap()
-            .config();
-        assert_eq!(package_cfg.depends_on, vec!["test".to_string()]);
+            .map(|s| {
+                let c = s.config();
+                (c.name, c.depends_on)
+            })
+            .collect();
+        assert_eq!(by_name["spotbugs"], vec!["build".to_string()]);
+        assert_eq!(by_name["pmd"], vec!["spotbugs".to_string()]);
+        assert_eq!(by_name["test"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["package"], vec!["test".to_string()]);
     }
 
     #[test]
