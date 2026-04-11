@@ -29,21 +29,11 @@ fn parse_gradle_test(output: &str) -> Option<String> {
 /// Wrapper that adds Gradle cache volume to any step
 struct GradleCachedStep {
     inner: Box<dyn StepDef>,
-    depends_on_override: Option<Vec<String>>,
 }
 
 impl GradleCachedStep {
     fn wrap(inner: Box<dyn StepDef>) -> Self {
-        Self {
-            inner,
-            depends_on_override: None,
-        }
-    }
-    fn wrap_with_deps(inner: Box<dyn StepDef>, deps: Vec<String>) -> Self {
-        Self {
-            inner,
-            depends_on_override: Some(deps),
-        }
+        Self { inner }
     }
 }
 
@@ -54,9 +44,6 @@ impl StepDef for GradleCachedStep {
             "~/.gradle:/workspace/.gradle".to_string(),
             "~/.pipelight/cache:/workspace/.pipelight/cache".to_string(),
         ];
-        if let Some(ref deps) = self.depends_on_override {
-            cfg.depends_on = deps.clone();
-        }
         cfg
     }
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -79,7 +66,6 @@ impl PipelineStrategy for GradleStrategy {
 
     fn steps(&self, info: &ProjectInfo) -> Vec<Box<dyn StepDef>> {
         let mut steps: Vec<Box<dyn StepDef>> = vec![];
-        let mut quality_step_names: Vec<String> = vec![];
 
         // Build
         steps.push(Box::new(GradleCachedStep::wrap(Box::new(BuildStep::new(
@@ -91,7 +77,6 @@ impl PipelineStrategy for GradleStrategy {
             steps.push(Box::new(GradleCachedStep::wrap(Box::new(
                 checkstyle_step::CheckstyleStep::new(info),
             ))));
-            quality_step_names.push("checkstyle".into());
         }
 
         // Spotbugs (if quality_plugins contains "spotbugs")
@@ -99,25 +84,18 @@ impl PipelineStrategy for GradleStrategy {
             steps.push(Box::new(GradleCachedStep::wrap(Box::new(
                 spotbugs_step::SpotbugsStep::new(info),
             ))));
-            quality_step_names.push("spotbugs".into());
         }
 
         // PMD (always — uses init script to inject plugin if not configured in build.gradle)
         steps.push(Box::new(GradleCachedStep::wrap(Box::new(
             pmd_step::PmdStep::new(info),
         ))));
-        quality_step_names.push("pmd".into());
 
-        // Test depends on quality steps
+        // Test depends only on build — quality steps (checkstyle/spotbugs/pmd) run in parallel
+        // with test and must not block it, since code-quality failures are independent of
+        // test verification.
         let test_step = TestStep::new(info).with_parser(parse_gradle_test);
-        if quality_step_names.is_empty() {
-            steps.push(Box::new(GradleCachedStep::wrap(Box::new(test_step))));
-        } else {
-            steps.push(Box::new(GradleCachedStep::wrap_with_deps(
-                Box::new(test_step),
-                quality_step_names,
-            )));
-        }
+        steps.push(Box::new(GradleCachedStep::wrap(Box::new(test_step))));
 
         steps
     }
@@ -178,9 +156,9 @@ mod tests {
             names,
             vec!["build", "checkstyle", "spotbugs", "pmd", "test"]
         );
-        // test depends on quality steps
+        // test only depends on build — quality steps don't block test
         let test_cfg = steps[4].config();
-        assert_eq!(test_cfg.depends_on, vec!["checkstyle", "spotbugs", "pmd"]);
+        assert_eq!(test_cfg.depends_on, vec!["build"]);
     }
 
     #[test]
@@ -192,7 +170,48 @@ mod tests {
         // PMD is always present even without lint plugins
         assert_eq!(names, vec!["build", "pmd", "test"]);
         let test_cfg = steps[2].config();
-        assert_eq!(test_cfg.depends_on, vec!["pmd"]);
+        assert_eq!(test_cfg.depends_on, vec!["build"]);
+    }
+
+    #[test]
+    fn test_gradle_quality_steps_parallel_with_test() {
+        // Regression: pmd/spotbugs/checkstyle must not block test.
+        // All quality steps and test should be siblings depending only on "build",
+        // so a pmd failure cannot cause test to be skipped.
+        let info = make_gradle_info_with_lint();
+        let steps = GradleStrategy.steps(&info);
+        for name in ["checkstyle", "spotbugs", "pmd", "test"] {
+            let cfg = steps
+                .iter()
+                .find(|s| s.config().name == name)
+                .unwrap_or_else(|| panic!("step {} missing", name))
+                .config();
+            assert_eq!(
+                cfg.depends_on,
+                vec!["build".to_string()],
+                "step '{}' must depend only on build so pmd failure doesn't block test",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_gradle_pmd_and_test_are_siblings_without_lint() {
+        // Without checkstyle/spotbugs, pmd and test still must run in parallel.
+        let info = make_gradle_info_without_lint();
+        let steps = GradleStrategy.steps(&info);
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
+        let test_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        assert_eq!(pmd_cfg.depends_on, vec!["build".to_string()]);
+        assert_eq!(test_cfg.depends_on, vec!["build".to_string()]);
     }
 
     #[test]
