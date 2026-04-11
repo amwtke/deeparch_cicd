@@ -669,15 +669,14 @@ fn generate_step_report(
     stdout: &str,
     stderr: &str,
 ) -> (String, String) {
-    let report_summary = if let Some(strategy) =
-        crate::ci::pipeline_builder::strategy_for_pipeline(pipeline)
-    {
-        strategy.output_report_str(step_name, success, stdout, stderr)
-    } else {
-        crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
-            step_name, success, stdout, stderr,
-        )
-    };
+    let report_summary =
+        if let Some(strategy) = crate::ci::pipeline_builder::strategy_for_pipeline(pipeline) {
+            strategy.output_report_str(step_name, success, stdout, stderr)
+        } else {
+            crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
+                step_name, success, stdout, stderr,
+            )
+        };
 
     let report_log_path =
         crate::ci::pipeline_builder::write_step_report(misc_dir, step_name, stdout, stderr);
@@ -805,8 +804,7 @@ async fn cmd_retry(
             &stdout,
             &stderr,
         );
-        let step_test_summary =
-            parse_step_test_summary(&pipeline, &step_name, &stdout, &stderr);
+        let step_test_summary = parse_step_test_summary(&pipeline, &step_name, &stdout, &stderr);
 
         let ss = state
             .get_step_mut(&step_name)
@@ -1508,15 +1506,8 @@ mod tests {
         // non-empty summary via the BaseStrategy fallback.
         let dir = tempfile::tempdir().unwrap();
         let pipeline = make_pipeline("custom-unknown");
-        let (summary, _path) = generate_step_report(
-            &pipeline,
-            dir.path(),
-            dir.path(),
-            "package",
-            true,
-            "",
-            "",
-        );
+        let (summary, _path) =
+            generate_step_report(&pipeline, dir.path(), dir.path(), "package", true, "", "");
         assert_eq!(summary, "Package created");
     }
 
