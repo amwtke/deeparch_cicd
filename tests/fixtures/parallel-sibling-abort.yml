@@ -1,0 +1,23 @@
+name: test-parallel-sibling-abort
+steps:
+  - name: build
+    image: alpine:latest
+    commands:
+      - echo build-ok
+  - name: failing-sibling
+    image: alpine:latest
+    depends_on: [build]
+    commands:
+      - exit 1
+    on_failure:
+      callback_command: abort
+  - name: passing-sibling
+    image: alpine:latest
+    depends_on: [build]
+    commands:
+      - echo sibling-ok
+  - name: downstream
+    image: alpine:latest
+    depends_on: [failing-sibling, passing-sibling]
+    commands:
+      - echo downstream

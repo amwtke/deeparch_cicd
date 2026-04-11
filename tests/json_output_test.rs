@@ -589,6 +589,45 @@ fn json_real_execution_multi_step_with_skip() {
 
 #[test]
 #[ignore = "requires Docker daemon"]
+fn json_real_execution_sibling_not_aborted_by_failing_peer() {
+    // Regression: a failing step with `abort` callback must not terminate its
+    // same-batch siblings. Only downstream batches should be marked skipped.
+    let f = fixture("parallel-sibling-abort.yml");
+
+    let out = Command::new("cargo")
+        .args(["run", "--quiet", "--", "run", "-f", &f, "--output", "json"])
+        .output()
+        .unwrap();
+
+    let json = parse_json(&out);
+    assert_eq!(json["status"].as_str().unwrap(), "failed");
+
+    let steps = json["steps"].as_array().unwrap();
+    let by_name: std::collections::HashMap<&str, &Value> = steps
+        .iter()
+        .map(|s| (s["name"].as_str().unwrap(), s))
+        .collect();
+
+    assert_eq!(by_name["build"]["status"].as_str().unwrap(), "success");
+    assert_eq!(
+        by_name["failing-sibling"]["status"].as_str().unwrap(),
+        "failed"
+    );
+    // Sibling must have executed to completion, not been orphaned by the abort.
+    assert_eq!(
+        by_name["passing-sibling"]["status"].as_str().unwrap(),
+        "success",
+        "passing-sibling should run to completion even though failing-sibling aborted"
+    );
+    // Downstream depending on both siblings still gets skipped (pipeline aborted).
+    assert_eq!(
+        by_name["downstream"]["status"].as_str().unwrap(),
+        "skipped"
+    );
+}
+
+#[test]
+#[ignore = "requires Docker daemon"]
 fn json_real_execution_retryable() {
     let f = fixture("retryable.yml");
 

@@ -285,6 +285,11 @@ async fn cmd_run(
 
     'outer: for (batch_idx, batch) in schedule.iter().enumerate() {
         current_batch_index = batch_idx;
+        // Track whether this batch should terminate the pipeline after all siblings finish.
+        // A failing step must not interrupt sibling steps running at the same DAG level —
+        // we collect failures across the batch and break only at the batch boundary.
+        let mut batch_abort = false;
+        let mut batch_retryable = false;
 
         for step_name in batch {
             // Skip inactive steps or steps specified by --skip
@@ -540,7 +545,8 @@ async fn cmd_run(
                 report_path: Some(report_path_str),
             });
 
-            // Handle failure
+            // Handle failure — record intent but let remaining sibling steps in this
+            // batch continue running. Only break out at the batch boundary.
             let allow_failure = pipeline_step.map(|s| s.allow_failure).unwrap_or(false);
             if !result.success && !allow_failure {
                 if let Some(ref mut ofs) = on_failure_state {
@@ -553,25 +559,34 @@ async fn cmd_run(
                             continue;
                         }
                         CallbackCommandAction::Retry if ofs.max_retries > 0 => {
-                            has_retryable_failure = true;
-                            break 'outer;
+                            batch_retryable = true;
                         }
                         _ => {
-                            has_final_failure = true;
-                            break 'outer;
+                            batch_abort = true;
                         }
                     }
                 } else {
-                    has_final_failure = true;
-                    break 'outer;
+                    batch_abort = true;
                 }
             }
         }
+
+        // All sibling steps in this batch have finished. Now decide whether to
+        // terminate the pipeline before moving on to the next batch.
+        if batch_abort {
+            has_final_failure = true;
+            break 'outer;
+        }
+        if batch_retryable {
+            has_retryable_failure = true;
+            break 'outer;
+        }
     }
 
-    // Mark remaining unexecuted steps as Skipped
-    // Use current_batch_index (not +1) to include unexecuted steps
-    // in the same batch as the failed step (parallel batch bug fix).
+    // Mark remaining unexecuted steps as Skipped. All steps in the current batch
+    // have already run to completion (sibling failures don't abort mid-batch), so
+    // `mark_unexecuted_as_skipped` will only touch downstream batches via the
+    // "already in state ⇒ continue" guard.
     if has_final_failure || has_retryable_failure {
         state.mark_unexecuted_as_skipped(&schedule, current_batch_index, |name| {
             let image = pipeline
