@@ -384,18 +384,15 @@ async fn cmd_run(
             let stderr = result.stderr_string();
 
             // Generate report: summary string + write log file
-            let report_summary = if let Some(strategy) =
-                crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline)
-            {
-                strategy.output_report_str(step_name, result.success, &stdout, &stderr)
-            } else {
-                crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
-                    step_name,
-                    result.success,
-                    &stdout,
-                    &stderr,
-                )
-            };
+            let (report_summary, report_path_str) = generate_step_report(
+                &pipeline,
+                &project_dir,
+                &misc_dir,
+                step_name,
+                result.success,
+                &stdout,
+                &stderr,
+            );
             // Record step result for stats
             step_results.push((
                 step_name.clone(),
@@ -403,15 +400,6 @@ async fn cmd_run(
                 result.success,
                 report_summary.clone(),
             ));
-
-            let report_log_path = crate::ci::pipeline_builder::write_step_report(
-                &misc_dir, step_name, &stdout, &stderr,
-            );
-            let report_path_str = report_log_path
-                .strip_prefix(&project_dir)
-                .unwrap_or(&report_log_path)
-                .to_string_lossy()
-                .to_string();
 
             // Finish progress for this step with report info
             if let Some(ref progress) = progress {
@@ -497,22 +485,10 @@ async fn cmd_run(
             };
 
             // Parse test output for backward-compat test_summary field
-            let step_test_summary = if step_name == "test" {
-                let full_output = format!("{}{}", &stdout, &stderr);
-                if let Some(strategy) =
-                    crate::ci::pipeline_builder::strategy_for_pipeline(&pipeline)
-                {
-                    let parsed = strategy.parse_test_output(&full_output);
-                    if parsed.is_some() {
-                        test_summary = parsed.clone();
-                    }
-                    parsed
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let step_test_summary = parse_step_test_summary(&pipeline, step_name, &stdout, &stderr);
+            if step_test_summary.is_some() {
+                test_summary = step_test_summary.clone();
+            }
 
             state.add_step(StepState {
                 name: result.step_name.clone(),
@@ -679,6 +655,58 @@ fn is_cascadable_skipped(step_state: &StepState, pipeline_step: Option<&Step>) -
     true
 }
 
+/// Compute `report_summary` and persist the step log file, returning the
+/// summary string and the project-relative report path.
+///
+/// Used by both `cmd_run` and `cmd_retry` so retry paths populate the same
+/// JSON fields (`report_summary`, `report_path`) that the initial run does.
+fn generate_step_report(
+    pipeline: &Pipeline,
+    project_dir: &std::path::Path,
+    misc_dir: &std::path::Path,
+    step_name: &str,
+    success: bool,
+    stdout: &str,
+    stderr: &str,
+) -> (String, String) {
+    let report_summary = if let Some(strategy) =
+        crate::ci::pipeline_builder::strategy_for_pipeline(pipeline)
+    {
+        strategy.output_report_str(step_name, success, stdout, stderr)
+    } else {
+        crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
+            step_name, success, stdout, stderr,
+        )
+    };
+
+    let report_log_path =
+        crate::ci::pipeline_builder::write_step_report(misc_dir, step_name, stdout, stderr);
+    let report_path_str = report_log_path
+        .strip_prefix(project_dir)
+        .unwrap_or(&report_log_path)
+        .to_string_lossy()
+        .to_string();
+
+    (report_summary, report_path_str)
+}
+
+/// Parse `test_summary` from a step's combined output when the step is the
+/// `test` step and a pipeline strategy is available. Returns `None` for any
+/// other step name or when the strategy cannot extract a summary.
+fn parse_step_test_summary(
+    pipeline: &Pipeline,
+    step_name: &str,
+    stdout: &str,
+    stderr: &str,
+) -> Option<crate::ci::pipeline_builder::test_parser::TestSummary> {
+    if step_name != "test" {
+        return None;
+    }
+    let strategy = crate::ci::pipeline_builder::strategy_for_pipeline(pipeline)?;
+    let full_output = format!("{}{}", stdout, stderr);
+    strategy.parse_test_output(&full_output)
+}
+
 async fn cmd_retry(
     run_id: String,
     step: Option<String>,
@@ -759,8 +787,27 @@ async fn cmd_retry(
             .await?
     };
 
+    // Ensure misc dir exists for log persistence (retry may run before any
+    // prior cmd_run on this machine, e.g. manual retry against a loaded state).
+    let misc_dir = project_dir.join("pipelight-misc");
+    let _ = std::fs::create_dir_all(&misc_dir);
+
     // Update step state
     {
+        let stdout = result.stdout_string();
+        let stderr = result.stderr_string();
+        let (report_summary, report_path_str) = generate_step_report(
+            &pipeline,
+            &project_dir,
+            &misc_dir,
+            &step_name,
+            result.success,
+            &stdout,
+            &stderr,
+        );
+        let step_test_summary =
+            parse_step_test_summary(&pipeline, &step_name, &stdout, &stderr);
+
         let ss = state
             .get_step_mut(&step_name)
             .expect("step must exist in state");
@@ -771,8 +818,6 @@ async fn cmd_retry(
         };
         ss.exit_code = Some(result.exit_code);
         ss.duration_ms = Some(result.duration.as_millis() as u64);
-        let stdout = result.stdout_string();
-        let stderr = result.stderr_string();
         ss.stdout = if stdout.is_empty() {
             None
         } else {
@@ -783,6 +828,11 @@ async fn cmd_retry(
         } else {
             Some(stderr)
         };
+        ss.report_summary = Some(report_summary);
+        ss.report_path = Some(report_path_str);
+        if step_test_summary.is_some() {
+            ss.test_summary = step_test_summary;
+        }
     }
 
     // If retried step succeeded, run downstream Skipped steps.
@@ -844,6 +894,20 @@ async fn cmd_retry(
 
             // Update state
             {
+                let stdout = sr.stdout_string();
+                let stderr = sr.stderr_string();
+                let (report_summary, report_path_str) = generate_step_report(
+                    &pipeline,
+                    &project_dir,
+                    &misc_dir,
+                    skipped_name,
+                    sr.success,
+                    &stdout,
+                    &stderr,
+                );
+                let step_test_summary =
+                    parse_step_test_summary(&pipeline, skipped_name, &stdout, &stderr);
+
                 let ss = state
                     .get_step_mut(skipped_name)
                     .expect("step must exist in state");
@@ -854,8 +918,6 @@ async fn cmd_retry(
                 };
                 ss.exit_code = Some(sr.exit_code);
                 ss.duration_ms = Some(sr.duration.as_millis() as u64);
-                let stdout = sr.stdout_string();
-                let stderr = sr.stderr_string();
                 ss.stdout = if stdout.is_empty() {
                     None
                 } else {
@@ -866,6 +928,11 @@ async fn cmd_retry(
                 } else {
                     Some(stderr)
                 };
+                ss.report_summary = Some(report_summary);
+                ss.report_path = Some(report_path_str);
+                if step_test_summary.is_some() {
+                    ss.test_summary = step_test_summary;
+                }
             }
 
             // If this step failed, stop based on its strategy
@@ -1359,5 +1426,162 @@ mod tests {
         assert!(filename.starts_with("fmt-check-"));
         assert!(filename.ends_with(".log"));
         assert!(filename.len() > "fmt-check-.log".len()); // has timestamp
+    }
+
+    // ── generate_step_report / parse_step_test_summary ───────────
+    //
+    // These helpers are called by both cmd_run and cmd_retry to populate
+    // `report_summary`, `report_path` and `test_summary` on a StepState.
+    // Before the retry paths used them, `pipelight retry --step pmd` would
+    // leave test/package with `report_summary: null` in the JSON output
+    // (observed in the rc/wyproject-master retry cascade). These tests lock
+    // in that retry now produces identical report fields as initial runs.
+
+    fn make_pipeline(name: &str) -> Pipeline {
+        Pipeline {
+            name: name.into(),
+            git_credentials: None,
+            env: Default::default(),
+            steps: vec![],
+        }
+    }
+
+    #[test]
+    fn test_generate_step_report_maven_package_success() {
+        // Maven strategy delegates package summary to BaseStrategy, which
+        // returns "Package created" on success regardless of output. Regression
+        // guard for the retry cascade bug where package step had empty summary.
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("maven-java-ci");
+        let (summary, path) =
+            generate_step_report(&pipeline, dir.path(), dir.path(), "package", true, "", "");
+        assert_eq!(summary, "Package created");
+        // report_path should be relative (strip_prefix against project_dir)
+        assert!(path.starts_with("package-"));
+        assert!(path.ends_with(".log"));
+        // Log file was actually written under misc_dir
+        assert!(dir.path().join(&path).exists());
+    }
+
+    #[test]
+    fn test_generate_step_report_maven_test_with_parsed_summary() {
+        // Maven strategy parses `Tests run: N, Failures: X, ...` into a
+        // human-readable summary via MavenStrategy::output_report_str.
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("maven-java-ci");
+        let stdout = "\
+[INFO] Results:
+[INFO] Tests run: 42, Failures: 0, Errors: 0, Skipped: 1
+[INFO] BUILD SUCCESS
+";
+        let (summary, _path) =
+            generate_step_report(&pipeline, dir.path(), dir.path(), "test", true, stdout, "");
+        assert!(
+            summary.contains("Tests:") && summary.contains("41"),
+            "expected parsed Tests summary, got: {summary}"
+        );
+    }
+
+    #[test]
+    fn test_generate_step_report_maven_test_falls_back_when_no_surefire_output() {
+        // When `mvn test` produces no `Tests run:` line (e.g. no test classes),
+        // MavenStrategy falls through to BaseStrategy which returns
+        // "Tests passed" / "Tests failed". The prior retry code path left
+        // this field as None entirely.
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("maven-java-ci");
+        let (summary, _path) = generate_step_report(
+            &pipeline,
+            dir.path(),
+            dir.path(),
+            "test",
+            true,
+            "[INFO] BUILD SUCCESS (no tests)",
+            "",
+        );
+        assert_eq!(summary, "Tests passed");
+    }
+
+    #[test]
+    fn test_generate_step_report_unknown_pipeline_uses_base_strategy() {
+        // Pipelines whose name doesn't match any strategy prefix still get a
+        // non-empty summary via the BaseStrategy fallback.
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("custom-unknown");
+        let (summary, _path) = generate_step_report(
+            &pipeline,
+            dir.path(),
+            dir.path(),
+            "package",
+            true,
+            "",
+            "",
+        );
+        assert_eq!(summary, "Package created");
+    }
+
+    #[test]
+    fn test_generate_step_report_relative_path_when_misc_outside_project() {
+        // When misc_dir is NOT under project_dir (edge case: tests pass the
+        // same tempdir for both), the returned path should still be usable.
+        let project = tempfile::tempdir().unwrap();
+        let misc = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("maven-java-ci");
+        let (_summary, path) = generate_step_report(
+            &pipeline,
+            project.path(),
+            misc.path(),
+            "build",
+            true,
+            "",
+            "",
+        );
+        // strip_prefix fails → returns absolute path from misc_dir
+        assert!(std::path::Path::new(&path).is_absolute() || path.contains("build-"));
+    }
+
+    #[test]
+    fn test_parse_step_test_summary_maven_matches_surefire_format() {
+        let pipeline = make_pipeline("maven-java-ci");
+        let stdout = "\
+[INFO] Tests run: 10, Failures: 1, Errors: 2, Skipped: 3
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+";
+        let summary = parse_step_test_summary(&pipeline, "test", stdout, "").unwrap();
+        // Totals: run=15, failures=1, errors=2, skipped=3, passed=9
+        assert_eq!(summary.passed, 9);
+        assert_eq!(summary.failed, 3);
+        assert_eq!(summary.skipped, 3);
+    }
+
+    #[test]
+    fn test_parse_step_test_summary_non_test_step_returns_none() {
+        let pipeline = make_pipeline("maven-java-ci");
+        assert!(parse_step_test_summary(
+            &pipeline,
+            "package",
+            "Tests run: 10, Failures: 0, Errors: 0, Skipped: 0",
+            ""
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_parse_step_test_summary_unknown_pipeline_returns_none() {
+        // Without a strategy there's no parser → None.
+        let pipeline = make_pipeline("custom-unknown");
+        assert!(parse_step_test_summary(
+            &pipeline,
+            "test",
+            "Tests run: 10, Failures: 0, Errors: 0, Skipped: 0",
+            ""
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_parse_step_test_summary_no_surefire_pattern_returns_none() {
+        let pipeline = make_pipeline("maven-java-ci");
+        assert!(parse_step_test_summary(&pipeline, "test", "BUILD SUCCESS", "").is_none());
     }
 }
