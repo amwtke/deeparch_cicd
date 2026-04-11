@@ -154,7 +154,10 @@ impl ProjectDetector for GradleDetector {
             language_version: Some(jdk_version),
             framework,
             image,
-            build_cmd: vec!["./gradlew build -x test".to_string()],
+            build_cmd: vec![
+                "./gradlew assemble --max-workers=2 --build-cache --configuration-cache"
+                    .to_string(),
+            ],
             test_cmd: vec!["./gradlew test".to_string()],
             lint_cmd,
             fmt_cmd: None,
@@ -281,6 +284,24 @@ sourceCompatibility = '17'
         let info = GradleDetector.analyze(dir.path()).unwrap();
         assert_eq!(info.language_version, Some("21".into()));
         assert_eq!(info.image, "gradle:8-jdk21");
+    }
+
+    #[test]
+    fn test_analyze_build_cmd_uses_assemble_with_caches() {
+        // The build step must not run check/test (those are separate steps), and
+        // must enable Gradle's build cache + configuration cache to avoid redoing
+        // work across runs. max-workers is capped to keep memory under control for
+        // large multi-module projects (e.g. 100+ Spring Boot modules).
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("build.gradle"), "apply plugin: 'java'").unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert_eq!(
+            info.build_cmd,
+            vec![
+                "./gradlew assemble --max-workers=2 --build-cache --configuration-cache"
+                    .to_string()
+            ]
+        );
     }
 
     #[test]

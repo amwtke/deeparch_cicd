@@ -134,7 +134,9 @@ mod tests {
             language_version: Some("17".into()),
             framework: Some("spring-boot 3.2.0".into()),
             image: "gradle:8-jdk17".into(),
-            build_cmd: vec!["./gradlew build -x test".into()],
+            build_cmd: vec![
+                "./gradlew assemble --max-workers=2 --build-cache --configuration-cache".into(),
+            ],
             test_cmd: vec!["./gradlew test".into()],
             lint_cmd: Some(vec!["./gradlew check -x test".into()]),
             fmt_cmd: None,
@@ -152,7 +154,9 @@ mod tests {
             language_version: Some("17".into()),
             framework: None,
             image: "gradle:8-jdk17".into(),
-            build_cmd: vec!["./gradlew build -x test".into()],
+            build_cmd: vec![
+                "./gradlew assemble --max-workers=2 --build-cache --configuration-cache".into(),
+            ],
             test_cmd: vec!["./gradlew test".into()],
             lint_cmd: None,
             fmt_cmd: None,
