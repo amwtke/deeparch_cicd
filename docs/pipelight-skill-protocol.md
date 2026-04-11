@@ -655,6 +655,161 @@ fn match_exception(&self, _exit_code: i64, _stdout: &str, stderr: &str) -> Optio
 
 ---
 
+## 互动流程状态机
+
+前面几章分别讲了"谁是谁"（角色）、"谁调谁"（控制链路）、"怎么重试"（回调命令）。
+这里把整个 pipelight ↔ LLM 协作过程**压缩成一张状态机**，作为全局视角的快速索引。
+
+### 状态节点
+
+| 状态 | 归属方 | 含义 |
+|------|--------|------|
+| `StepPending` | pipelight | step 已排入 DAG，等待前置依赖完成 |
+| `StepRunning` | pipelight | 容器已启动，命令执行中 |
+| `StepExited` | pipelight | 容器退出，`exit_code` 捕获完毕 |
+| `StepSuccess` | pipelight | `exit_code == 0`，无需回调 |
+| `StepFailed` | pipelight | `exit_code != 0`，进入回调解析 |
+| `Resolved` | pipelight | `ExceptionMapping::resolve` 产出 `(command, action, retries_remaining)` |
+| `AwaitingLLM` | pipelight | JSON 已输出含 `on_failure`，进程退出或等待 `retry` 调用 |
+| `LLMActing` | Claude Code + skill | skill 按 `command` 执行对应 LLM 操作（读 context_paths / 改源码 / 生成配置） |
+| `LLMRetry` | Claude Code | LLM 调用 `pipelight retry --step <name>`，`retries_remaining -= 1` |
+| `StepSkipped` | pipelight | `action == Skip` 或 `FailAndSkip` / `GitFail` 触发，自动跳过 |
+| `PipelineAbort` | pipelight | `action == Abort` 或 `RuntimeError`，整条流水线终止 |
+| `RetriesExhausted` | pipelight | `retries_remaining == 0` 且仍失败，fail-close 为 `PipelineAbort` |
+| `PipelineDone` | pipelight | 所有 step 处于 `StepSuccess` 或 `StepSkipped`，流水线结束 |
+
+### 状态转移图
+
+```
+                     ┌──────────────┐
+                     │ StepPending  │
+                     └──────┬───────┘
+                            │ 依赖就绪
+                            ▼
+                     ┌──────────────┐
+                     │ StepRunning  │
+                     └──────┬───────┘
+                            │ 容器退出
+                            ▼
+                     ┌──────────────┐
+                     │  StepExited  │
+                     └──┬────────┬──┘
+                 exit==0│        │exit!=0
+                        ▼        ▼
+               ┌────────────┐  ┌────────────┐
+               │ StepSuccess│  │ StepFailed │
+               └──────┬─────┘  └──────┬─────┘
+                      │               │ ExceptionMapping::resolve
+                      │               ▼
+                      │        ┌────────────┐
+                      │        │  Resolved  │
+                      │        └──────┬─────┘
+                      │   ┌───────────┼───────────┬──────────────┐
+                      │   │action=    │action=    │action=       │action=
+                      │   │Retry      │Skip       │Abort         │RuntimeError
+                      │   ▼           ▼           ▼              ▼
+                      │ ┌─────────┐ ┌─────────┐ ┌──────────────┐
+                      │ │Awaiting │ │  Step   │ │PipelineAbort │
+                      │ │  LLM    │ │ Skipped │ └──────────────┘
+                      │ └────┬────┘ └────┬────┘
+                      │      │ skill 解析 on_failure.command
+                      │      ▼
+                      │ ┌──────────┐
+                      │ │LLMActing │  (按 command 执行修复/生成/跳过判断)
+                      │ └────┬─────┘
+                      │      │ pipelight retry --step <name>
+                      │      ▼
+                      │ ┌──────────┐     retries_remaining>0
+                      │ │ LLMRetry ├────────────────┐
+                      │ └────┬─────┘                │
+                      │      │ retries_remaining==0 │
+                      │      ▼                      │
+                      │ ┌──────────────┐            │
+                      │ │RetriesExhaust│            │
+                      │ └──────┬───────┘            │
+                      │        │                    │
+                      │        ▼                    │
+                      │ ┌──────────────┐            │
+                      │ │PipelineAbort │            │
+                      │ └──────────────┘            │
+                      │                             ▼
+                      │                      (回到 StepRunning，重跑该 step)
+                      │                             │
+                      └─────────┬───────────────────┘
+                                │ DAG 所有 step 终态
+                                ▼
+                        ┌──────────────┐
+                        │ PipelineDone │
+                        └──────────────┘
+```
+
+### 关键转移的代码位点
+
+| 转移 | 触发代码 |
+|------|----------|
+| `StepExited → StepSuccess / StepFailed` | `src/cli/mod.rs` 判断 `result.success` |
+| `StepFailed → Resolved` | `ExceptionMapping::resolve` (`src/ci/callback/exception.rs`) |
+| `Resolved → (Retry/Skip/Abort/RuntimeError)` | `CallbackCommandRegistry::action_for` (`src/ci/callback/command.rs` + `action.rs`) |
+| `Resolved → AwaitingLLM` | 输出 JSON 含 `on_failure`，pipelight 进程退出 |
+| `AwaitingLLM → LLMActing` | `pipelight-run` skill 读取 JSON，按"回调命令处理表"分派 |
+| `LLMActing → LLMRetry` | skill 末尾执行 `pipelight retry --step <name>` |
+| `LLMRetry → StepRunning` | `retry` 子命令重入执行器，`retries_remaining -= 1` |
+| `LLMRetry → RetriesExhausted` | `retries_remaining == 0` 时 fail-close |
+
+### 三条不可违反的硬约束
+
+状态机能闭环，依赖这三条硬约束，任何一条被打破都会导致"LLM 看似被挂了回调，但实际不生效"：
+
+1. **一级信号先行**：只有 `StepExited` 转移到 `StepFailed`（即容器非 0 退出）时，`ExceptionMapping::resolve` 才会被调用。`exit 0` 直接短路到 `StepSuccess`，无视所有 `exception_mapping` / `match_exception` 配置。
+2. **预算即熔断**：`retries_remaining` 单调递减，LLM 无法自行续命。配额耗尽必然进入 `PipelineAbort`，不存在"LLM 判断要不要再试一次"这种反模式。
+3. **单向控制流**：LLM 只能通过 `pipelight retry` 回到 `StepRunning`，不能直接跳到 `PipelineDone`、`StepSkipped` 或修改 `retries_remaining`。harness 状态永远由 pipelight 持有。
+
+---
+
+## Q&A
+
+### Q: 我把某个 step 的 `exception_mapping` 配成了 `AutoFix`，为什么 LLM 没有自动修改代码？
+
+**先检查这一步是不是真的"失败"了。**
+
+这是一个高频踩坑点：`on_failure_state`（也就是回调链路的入口）**只在 `result.success == false` 时才构建**，见 `src/cli/mod.rs`：
+
+```rust
+let mut on_failure_state = if !result.success {
+    // 这里才会调用 exception_mapping + match_exception + registry.action_for
+    ...
+};
+```
+
+也就是说，只要容器退出码是 0，pipelight 就把这一步判定为成功：
+- 不调用 `match_exception`
+- 不 resolve `ExceptionMapping`
+- 不下发任何 `CallbackCommand`
+- JSON 输出里 `on_failure` 字段直接为空
+
+此时哪怕你在 `exception_mapping()` 里把 default 写成 `AutoFix`、`match_exception()` 里无条件返回 `Some("xxx")`，**都是死代码**，LLM 端完全看不到任何回调信号，skill 自然不会执行自动修复。
+
+**真实案例**：早期的 `maven/spotbugs_step.rs` 为了"只出报告不阻断"，shell 脚本末尾写了 `exit 0`。结果 SpotBugs 扫出 800+ 个 bug，pipelight 仍然把它标成 ✓ 成功，`AutoFix` 永远不触发。对比 `maven/pmd_step.rs`，它在发现违规时显式 `exit 1`，所以 PMD 的 `AutoFix` 才能正常工作。
+
+**判定准则（写 step 时务必遵守）**：
+
+> **一个 step 想要触发任何 `CallbackCommand` 回调（`AutoFix` / `AutoGenPmdRuleset` / `FailAndSkip` / `GitFail` / …），它的容器命令就必须在目标情况下以非 0 退出码结束。`exit 0` 等于告诉 pipelight"这一步完全成功、无需任何后续动作"，和挂一个回调的意图是互相矛盾的。**
+
+换句话说：**退出码是 harness 的一级信号，`exception_mapping` 只是二级解析**。一级信号没响，二级永远不会被读取。
+
+如果你确实想要"出报告但不阻断 pipeline"，那就不要挂 `AutoFix`，而应该：
+- 要么让该 step 真的 `exit 0` 并且 `exception_mapping` 里不配任何会驱动 LLM 的 command，
+- 要么让它 `exit 1` 并把 default command 设为 `FailAndSkip`（pipelight 会自动 skip 并继续后续 step，不打扰 LLM）。
+
+**排查 checklist**（从现象倒查到根因，按顺序走）：
+
+1. pipelight JSON 输出里这一步的 `success` 字段是 `true` 还是 `false`？`true` → 根因就是 exit 0，改 shell 脚本。
+2. `on_failure` 字段为空？确认 1 之后就能解释。
+3. `on_failure.command` 出现了但不是你期望的值？去看 `match_exception` 返回的 key 是否落在 `exception_mapping` 的 entries 里，没命中会 fallback 到 default。
+4. command 正确但 LLM 端没反应？去 `global-skills/pipelight-run/SKILL.md` 的"回调命令处理表"确认该 command 的 action，以及 skill 是否加载。
+
+---
+
 ## 相关代码位置速查
 
 | 关注点 | 文件 |
