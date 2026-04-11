@@ -8,7 +8,7 @@ use crate::ci::executor::DockerExecutor;
 use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::ci::output::{json, plain};
 use crate::ci::output::{resolve_output_mode, OutputMode};
-use crate::ci::parser::Pipeline;
+use crate::ci::parser::{Pipeline, Step};
 use crate::ci::scheduler::Scheduler;
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 
@@ -646,6 +646,39 @@ async fn cmd_list(file: PathBuf) -> Result<i32> {
     Ok(0)
 }
 
+/// Decide whether a Skipped step should be re-executed by the retry cascade.
+///
+/// Three distinct situations end up with `StepStatus::Skipped` in run state:
+/// 1. Pipeline config has `active: false` (e.g. ping-pong) — never meant to run
+///    without an explicit opt-in, must stay skipped.
+/// 2. Step actually ran, failed, and its `on_failure` action was `Skip`
+///    (e.g. git-pull with `git_fail`) — the skip was a deliberate outcome,
+///    re-running would just reproduce the same failure.
+/// 3. Step never ran because an upstream step was failing/retryable — this
+///    is the ONLY case the cascade exists for: now that the upstream has
+///    been fixed, the step deserves a chance.
+///
+/// Case 2 is distinguishable by `exit_code.is_some()` (the step actually
+/// executed and produced an exit code), case 1 by the pipeline config's
+/// `active` flag, and case 3 by the absence of both signals.
+fn is_cascadable_skipped(step_state: &StepState, pipeline_step: Option<&Step>) -> bool {
+    if step_state.status != StepStatus::Skipped {
+        return false;
+    }
+    // Case 1: inactive in pipeline config
+    if let Some(ps) = pipeline_step {
+        if !ps.active {
+            return false;
+        }
+    }
+    // Case 2: step actually executed and was skipped by failure policy
+    if step_state.exit_code.is_some() {
+        return false;
+    }
+    // Case 3: genuinely held back by upstream — cascade eligible
+    true
+}
+
 async fn cmd_retry(
     run_id: String,
     step: Option<String>,
@@ -752,13 +785,16 @@ async fn cmd_retry(
         };
     }
 
-    // If retried step succeeded, run downstream Skipped steps
+    // If retried step succeeded, run downstream Skipped steps.
+    // Only cascade to steps that are truly "held back by upstream" — exclude
+    // inactive steps (e.g. ping-pong) and steps that already ran and were
+    // skipped by their on_failure Skip policy (e.g. git-pull on git_fail).
+    // See `is_cascadable_skipped` for details.
     if result.success {
-        // Collect skipped step names in order
         let skipped_names: Vec<String> = state
             .steps
             .iter()
-            .filter(|s| s.status == StepStatus::Skipped)
+            .filter(|s| is_cascadable_skipped(s, pipeline.get_step(&s.name)))
             .map(|s| s.name.clone())
             .collect();
 
@@ -1108,7 +1144,173 @@ async fn cmd_docker_prepare(file: PathBuf) -> Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::ci::callback::action::CallbackCommandAction;
+    use crate::ci::callback::command::CallbackCommand;
     use crate::ci::pipeline_builder::write_step_report;
+
+    // ── is_cascadable_skipped ────────────────────────────────────
+
+    fn make_step_state(name: &str, status: StepStatus) -> StepState {
+        StepState {
+            name: name.into(),
+            status,
+            exit_code: None,
+            duration_ms: None,
+            image: String::new(),
+            command: String::new(),
+            stdout: None,
+            stderr: None,
+            error_context: None,
+            on_failure: None,
+            test_summary: None,
+            report_summary: None,
+            report_path: None,
+        }
+    }
+
+    fn make_pipeline_step(name: &str, active: bool) -> Step {
+        Step {
+            name: name.into(),
+            image: String::new(),
+            commands: vec![],
+            depends_on: vec![],
+            env: Default::default(),
+            workdir: "/workspace".into(),
+            allow_failure: false,
+            condition: None,
+            on_failure: None,
+            volumes: vec![],
+            local: false,
+            active,
+        }
+    }
+
+    fn make_on_failure_state(
+        command: CallbackCommand,
+        action: CallbackCommandAction,
+        retries_remaining: u32,
+    ) -> OnFailureState {
+        OnFailureState {
+            exception_key: "unrecognized".into(),
+            command,
+            action,
+            max_retries: retries_remaining,
+            retries_remaining,
+            context_paths: vec![],
+        }
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_genuine_upstream_hold() {
+        // Case 3: step never ran because upstream was failing — should cascade
+        let ss = make_step_state("test", StepStatus::Skipped);
+        let ps = make_pipeline_step("test", true);
+        assert!(is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_genuine_upstream_hold_without_pipeline_step() {
+        // Missing pipeline step is treated as default-active; still cascade
+        let ss = make_step_state("test", StepStatus::Skipped);
+        assert!(is_cascadable_skipped(&ss, None));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_inactive_step_excluded() {
+        // Case 1: ping-pong with active: false — must stay skipped
+        let ss = make_step_state("ping-pong", StepStatus::Skipped);
+        let ps = make_pipeline_step("ping-pong", false);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_ran_and_skipped_by_policy_excluded() {
+        // Case 2: git-pull ran, failed, got skipped by git_fail policy
+        let mut ss = make_step_state("git-pull", StepStatus::Skipped);
+        ss.exit_code = Some(1);
+        ss.duration_ms = Some(5000);
+        ss.on_failure = Some(make_on_failure_state(
+            CallbackCommand::GitFail,
+            CallbackCommandAction::Skip,
+            0,
+        ));
+        let ps = make_pipeline_step("git-pull", true);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_success_excluded() {
+        let ss = make_step_state("build", StepStatus::Success);
+        let ps = make_pipeline_step("build", true);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_failed_excluded() {
+        let ss = make_step_state("pmd", StepStatus::Failed);
+        let ps = make_pipeline_step("pmd", true);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_pending_excluded() {
+        let ss = make_step_state("test", StepStatus::Pending);
+        let ps = make_pipeline_step("test", true);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_running_excluded() {
+        let ss = make_step_state("test", StepStatus::Running);
+        let ps = make_pipeline_step("test", true);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_inactive_beats_upstream_hold() {
+        // Even if pipeline step is inactive AND exit_code is None,
+        // inactive flag wins — ping-pong must never be cascaded into
+        let ss = make_step_state("ping-pong", StepStatus::Skipped);
+        let ps = make_pipeline_step("ping-pong", false);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_exit_code_zero_also_excluded() {
+        // Any exit_code (even 0) signals "step ran" — exclude from cascade
+        let mut ss = make_step_state("custom", StepStatus::Skipped);
+        ss.exit_code = Some(0);
+        let ps = make_pipeline_step("custom", true);
+        assert!(!is_cascadable_skipped(&ss, Some(&ps)));
+    }
+
+    #[test]
+    fn test_is_cascadable_skipped_rc_repro_scenario() {
+        // Reproduces the rc project state after build succeeded + pmd failed
+        // + retry --step pmd cascade should ONLY pick up `test`, not
+        // ping-pong (inactive) nor git-pull (skipped by git_fail)
+        let ping_pong = make_step_state("ping-pong", StepStatus::Skipped);
+        let ping_pong_ps = make_pipeline_step("ping-pong", false);
+
+        let mut git_pull = make_step_state("git-pull", StepStatus::Skipped);
+        git_pull.exit_code = Some(1);
+        git_pull.on_failure = Some(make_on_failure_state(
+            CallbackCommand::GitFail,
+            CallbackCommandAction::Skip,
+            0,
+        ));
+        let git_pull_ps = make_pipeline_step("git-pull", true);
+
+        let test_step = make_step_state("test", StepStatus::Skipped);
+        let test_ps = make_pipeline_step("test", true);
+
+        assert!(!is_cascadable_skipped(&ping_pong, Some(&ping_pong_ps)));
+        assert!(!is_cascadable_skipped(&git_pull, Some(&git_pull_ps)));
+        assert!(is_cascadable_skipped(&test_step, Some(&test_ps)));
+    }
+
+    // ── write_step_report (existing) ─────────────────────────────
 
     #[test]
     fn test_write_step_report_both_stdout_and_stderr() {
