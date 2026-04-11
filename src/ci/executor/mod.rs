@@ -53,6 +53,27 @@ impl StepResult {
     }
 }
 
+/// Build a minimal `/etc/passwd` content that includes a `pipelight` user entry
+/// for the given uid/gid with the given home directory.
+///
+/// Why: pipelight runs containers with `--user <host_uid>:<host_gid>` so bind-mounted
+/// files stay owned by the host user. On macOS the host uid (e.g. 501) does not exist
+/// in the image's /etc/passwd, so `getpwuid(uid)` fails. OpenJDK's fallback then sets
+/// `user.home = "?"`, which breaks Gradle's cache location (and any tool that relies on
+/// the home directory). By injecting a synthetic passwd entry we give the uid a real
+/// name and home, so `user.home` resolves to the workdir and the mounted cache is used.
+fn build_passwd_content(uid: u32, gid: u32, home: &str) -> String {
+    format!(
+        "root:x:0:0:root:/root:/bin/sh\npipelight:x:{}:{}::{}:/bin/sh\n",
+        uid, gid, home
+    )
+}
+
+/// Build a minimal `/etc/group` content containing a `pipelight` group for the given gid.
+fn build_group_content(gid: u32) -> String {
+    format!("root:x:0:\npipelight:x:{}:\n", gid)
+}
+
 /// Executes pipeline steps in Docker containers
 #[derive(Clone)]
 pub struct DockerExecutor {
@@ -194,16 +215,35 @@ impl DockerExecutor {
             binds.push(format!("{}:/usr/local/cargo/git", git_cache.display()));
         }
 
+        // Run container as current user to avoid root-owned files on bind mounts
+        let uid = unsafe { libc::getuid() };
+        let gid = unsafe { libc::getgid() };
+        let user_str = format!("{}:{}", uid, gid);
+
+        // Inject a synthetic /etc/passwd + /etc/group entry for the host uid, so tools
+        // that call getpwuid()/getgrgid() (notably OpenJDK's `user.home` lookup) find
+        // a valid user with home set to the workdir. Skip for root (uid 0 already exists).
+        let mut passwd_tempfiles: Vec<std::path::PathBuf> = Vec::new();
+        if uid != 0 {
+            let tmp_dir = std::env::temp_dir();
+            let stamp = &uuid::Uuid::new_v4().to_string()[..8];
+            let passwd_path = tmp_dir.join(format!("pipelight-passwd-{}", stamp));
+            let group_path = tmp_dir.join(format!("pipelight-group-{}", stamp));
+            std::fs::write(&passwd_path, build_passwd_content(uid, gid, &step.workdir))
+                .context("Failed to write temporary /etc/passwd")?;
+            std::fs::write(&group_path, build_group_content(gid))
+                .context("Failed to write temporary /etc/group")?;
+            binds.push(format!("{}:/etc/passwd:ro", passwd_path.display()));
+            binds.push(format!("{}:/etc/group:ro", group_path.display()));
+            passwd_tempfiles.push(passwd_path);
+            passwd_tempfiles.push(group_path);
+        }
+
         let host_config = HostConfig {
             binds: Some(binds),
             network_mode: Some("host".to_string()),
             ..Default::default()
         };
-
-        // Run container as current user to avoid root-owned files on bind mounts
-        let uid = unsafe { libc::getuid() };
-        let gid = unsafe { libc::getgid() };
-        let user_str = format!("{}:{}", uid, gid);
 
         // Create container
         let config = Config {
@@ -308,6 +348,11 @@ impl DockerExecutor {
                 }),
             )
             .await;
+
+        // Remove synthetic passwd/group temp files
+        for path in &passwd_tempfiles {
+            let _ = std::fs::remove_file(path);
+        }
 
         let duration = start.elapsed();
         let success = exit_code == 0 || step.allow_failure;
@@ -547,6 +592,31 @@ mod tests {
             success: false,
         };
         assert_eq!(result.stderr_string(), "error1\nerror2\n");
+    }
+
+    #[test]
+    fn test_build_passwd_content_injects_pipelight_user() {
+        let content = build_passwd_content(501, 20, "/workspace");
+        // Must keep root so tools that look up uid 0 still work
+        assert!(content.contains("root:x:0:0"));
+        // Must inject our user with the given uid, gid, and home
+        assert!(content.contains("pipelight:x:501:20::/workspace:/bin/sh"));
+        // Content must be newline-terminated so /etc/passwd parses correctly
+        assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_build_passwd_content_uses_given_workdir_as_home() {
+        let content = build_passwd_content(1000, 1000, "/build");
+        assert!(content.contains("pipelight:x:1000:1000::/build:/bin/sh"));
+    }
+
+    #[test]
+    fn test_build_group_content_injects_pipelight_group() {
+        let content = build_group_content(20);
+        assert!(content.contains("root:x:0:"));
+        assert!(content.contains("pipelight:x:20:"));
+        assert!(content.ends_with('\n'));
     }
 
     #[test]
