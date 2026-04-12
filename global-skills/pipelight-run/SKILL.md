@@ -277,6 +277,29 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 
 **注意：`pipelight-misc/` 必须位于目标项目根目录下**（即 `pipeline.yml` 所在目录），而非 pipelight 工具自身的目录。
 
+#### 生成 ruleset 的规则筛选原则
+
+无论从已有配置复制还是从编码规范文档生成，最终写入 `pmd-ruleset.xml` 的规则都必须遵循以下筛选原则：
+
+**只保留能被 auto_fix 有效修复的规则**。PMD violations 发现后会触发 `auto_fix` 回调让 LLM 自动修复源代码，因此规则数量必须可控（目标：全项目 violations < 500）。
+
+**保留（高价值 + 可自动修复）：**
+- 错误倾向：EmptyCatchBlock, CloseResource, PreserveStackTrace, ImplicitSwitchFallThrough, AssignmentInOperand, MissingOverride, EmptyControlStatement 等
+- 死代码：UnusedLocalVariable, UnusedPrivateMethod, UnusedPrivateField, UnusedFormalParameter
+- 空值防护：LiteralsFirstInComparisons, ReturnEmptyCollectionRatherThanNull
+- 资源管理：UseTryWithResources, SystemPrintln
+- 逻辑简化：SimplifyBooleanReturns, SimplifyBooleanExpressions, CollapsibleIfStatements, SimplifiedTernary
+- 线程安全：MutableStaticState, UnsynchronizedStaticFormatter
+- 性能 bug：BigIntegerInstantiation, UseDiamondOperator
+
+**排除（纯风格 / 命名 / 难以自动修复）：**
+- 命名规范：FieldNamingConventions, ClassNamingConventions, LocalVariableNamingConventions, PackageCase（重命名影响面大，不适合自动修复）
+- 纯风格：UnnecessaryAnnotationValueElement, UnnecessaryModifier, UnnecessaryImport, UnnecessaryFullyQualifiedName（IDE 可处理，不值得占 auto-fix 预算）
+- 设计/耦合：LooseCoupling, CouplingBetweenObjects, ExceptionAsFlowControl（架构级重构，无法逐文件自动修复）
+- 高噪音：UnusedAssignment（遗留代码中误报多）
+
+**使用显式规则引用**（`<rule ref="category/java/errorprone.xml/EmptyCatchBlock"/>`）而非整个 category + exclude，避免新版本 PMD 新增规则导致 violation 膨胀。
+
 ### Success Report (after retries)
 
 When the pipeline eventually succeeds after one or more fix-retry rounds, the final summary table MUST include an **Auto-fix History** section below the step table, listing all files that were modified during the fix-retry loop:

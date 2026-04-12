@@ -52,7 +52,7 @@ impl StepDef for PmdStep {
              if grep -q 'Cannot load ruleset\\|Unable to find referenced rule' /tmp/pmd-stderr.log 2>/dev/null; then \
                echo 'ERROR: PMD ruleset has invalid rules. Details:' >&2; \
                grep 'Unable to find referenced rule\\|Cannot load ruleset\\|XML validation error' /tmp/pmd-stderr.log >&2; \
-               echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - pmd-ruleset.xml contains invalid rule references for PMD 7.9.0. LLM must regenerate with correct PMD 7.x rule names.' >&2; \
+               echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - pmd-ruleset.xml contains invalid rule references for PMD 7.9.0. LLM must regenerate with correct PMD 7.x rule names. Only include rules that catch real bugs, resource leaks, thread-safety issues, and null-safety problems. Exclude pure style/naming/formatting rules.' >&2; \
                exit 1; \
              fi; \
              TOTAL=$(grep -c '<violation' /workspace/pipelight-misc/pmd-report/pmd-result.xml 2>/dev/null || echo 0); \
@@ -77,8 +77,12 @@ impl StepDef for PmdStep {
                grep -o 'name=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
                  | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              ) > $REPORT/pmd-summary.txt 2>/dev/null; \
+             if [ \"$TOTAL\" -gt 0 ] 2>/dev/null; then \
+               echo \"PIPELIGHT_CALLBACK:auto_fix - PMD found $TOTAL violations. LLM must read /workspace/pipelight-misc/pmd-report/pmd-result.xml for violation details (rule name, file, line, description) and fix all violations in the source code, then retry.\" >&2; \
+               exit 1; \
+             fi; \
              else \
-             echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD 7.9.0 rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
+             echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: (1) Use PMD 7.9.0 rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset. (2) Only include rules that catch real bugs, resource leaks, thread-safety issues, and null-safety problems. Exclude pure style/naming/formatting rules to keep violations manageable for auto-fix.' >&2 && exit 1; \
              fi",
             cd = cd_prefix
         );
@@ -92,7 +96,7 @@ impl StepDef for PmdStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::RuntimeError)
+        ExceptionMapping::new(CallbackCommand::AutoFix)
             .add(
                 "ruleset_not_found",
                 ExceptionEntry {
@@ -109,6 +113,14 @@ impl StepDef for PmdStep {
                     context_paths: self.source_paths.clone(),
                 },
             )
+            .add(
+                "violations_found",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoFix,
+                    max_retries: 3,
+                    context_paths: self.source_paths.clone(),
+                },
+            )
     }
 
     fn match_exception(&self, _exit_code: i64, _stdout: &str, stderr: &str) -> Option<String> {
@@ -118,6 +130,8 @@ impl StepDef for PmdStep {
             Some("ruleset_invalid".into())
         } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             Some("ruleset_not_found".into())
+        } else if stderr.contains("PIPELIGHT_CALLBACK:auto_fix") {
+            Some("violations_found".into())
         } else {
             None
         }
@@ -128,9 +142,14 @@ impl StepDef for PmdStep {
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
         }
+        if output.contains("PIPELIGHT_CALLBACK:auto_fix") {
+            if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
+                return format!("{} (auto-fix)", line.trim());
+            }
+            return "pmd: violations found (auto-fix)".into();
+        }
         let violations = count_pattern(&output, &["PMD Total:"]);
         if violations > 0 {
-            // Extract the "PMD Total: N violations" line from output
             if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
                 return line.trim().to_string();
             }
@@ -139,7 +158,7 @@ impl StepDef for PmdStep {
         if !success && violation_count == 0 {
             "pmd: failed".into()
         } else if violation_count > 0 {
-            format!("pmd: {} violations (report only)", violation_count)
+            format!("pmd: {} violations", violation_count)
         } else {
             "pmd: no violations".into()
         }

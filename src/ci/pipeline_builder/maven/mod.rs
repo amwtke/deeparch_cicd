@@ -348,15 +348,19 @@ mod tests {
         let info = make_maven_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
         let of = step.exception_mapping().to_on_failure();
-        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
+        assert!(of.exceptions.contains_key("violations_found"));
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(rnf.max_retries, 2);
         let ri = &of.exceptions["ruleset_invalid"];
         assert_eq!(ri.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(ri.max_retries, 2);
+        let vf = &of.exceptions["violations_found"];
+        assert_eq!(vf.command, CallbackCommand::AutoFix);
+        assert_eq!(vf.max_retries, 3);
     }
 
     #[test]
@@ -414,6 +418,40 @@ mod tests {
         assert!(
             cmd.contains("not PMD 6"),
             "callback should warn against PMD 6.x rule names"
+        );
+    }
+
+    #[test]
+    fn test_pmd_step_violations_found_triggers_auto_fix() {
+        use crate::ci::callback::command::CallbackCommand;
+        let info = make_maven_info_with_lint();
+        let step = pmd_step::PmdStep::new(&info);
+        let mapping = step.exception_mapping();
+        let resolved = mapping.resolve(
+            1,
+            "",
+            "PIPELIGHT_CALLBACK:auto_fix - PMD found 5 violations.",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.max_retries, 3);
+        assert!(!resolved.context_paths.is_empty());
+    }
+
+    #[test]
+    fn test_pmd_step_command_has_auto_fix_callback() {
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(
+            cmd.contains("PIPELIGHT_CALLBACK:auto_fix"),
+            "should emit auto_fix callback when violations found"
         );
     }
 
