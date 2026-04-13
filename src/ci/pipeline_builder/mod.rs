@@ -6,6 +6,7 @@ pub mod node;
 pub mod python;
 pub mod rust_lang;
 pub mod test_parser;
+pub mod vue;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -128,6 +129,7 @@ fn strategy_for(project_type: &ProjectType) -> Box<dyn PipelineStrategy> {
         ProjectType::Gradle => Box::new(gradle::GradleStrategy),
         ProjectType::Rust => Box::new(rust_lang::RustStrategy),
         ProjectType::Node => Box::new(node::NodeStrategy),
+        ProjectType::Vue => Box::new(vue::VueStrategy),
         ProjectType::Python => Box::new(python::PythonStrategy),
         ProjectType::Go => Box::new(go::GoStrategy),
     }
@@ -143,6 +145,8 @@ pub fn strategy_for_pipeline(pipeline: &Pipeline) -> Option<Box<dyn PipelineStra
         Some(Box::new(gradle::GradleStrategy))
     } else if name.starts_with("rust") {
         Some(Box::new(rust_lang::RustStrategy))
+    } else if name.starts_with("vue") {
+        Some(Box::new(vue::VueStrategy))
     } else if name.starts_with("node") {
         Some(Box::new(node::NodeStrategy))
     } else if name.starts_with("python") {
@@ -182,6 +186,7 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
             n if n.starts_with("maven") => crate::ci::detector::ProjectType::Maven,
             n if n.starts_with("gradle") => crate::ci::detector::ProjectType::Gradle,
             n if n.starts_with("rust") => crate::ci::detector::ProjectType::Rust,
+            n if n.starts_with("vue") => crate::ci::detector::ProjectType::Vue,
             n if n.starts_with("node") => crate::ci::detector::ProjectType::Node,
             n if n.starts_with("python") => crate::ci::detector::ProjectType::Python,
             n if n.starts_with("go") => crate::ci::detector::ProjectType::Go,
@@ -208,6 +213,11 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
             n if n.starts_with("rust") => vec!["Cargo.toml".into()],
             n if n.starts_with("maven") => vec!["pom.xml".into()],
             n if n.starts_with("gradle") => vec!["build.gradle".into()],
+            n if n.starts_with("vue") => vec![
+                "package.json".into(),
+                "package-lock.json".into(),
+                "vue.config.js".into(),
+            ],
             n if n.starts_with("node") => vec!["package.json".into()],
             n if n.starts_with("python") => vec!["pyproject.toml".into()],
             n if n.starts_with("go") => vec!["go.mod".into()],
@@ -218,7 +228,11 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
         subdir: None,
     };
 
-    let step_defs = strategy.steps(&info);
+    let step_defs = if pipeline.name.starts_with("vue") {
+        vue::step_defs_for_reconstructed_pipeline(&info, pipeline)
+    } else {
+        strategy.steps(&info)
+    };
     let git_pull = base::GitPullStep::new();
 
     let mut map: HashMap<String, Box<dyn StepDef>> = HashMap::new();

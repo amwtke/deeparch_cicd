@@ -40,6 +40,8 @@ pub enum ProjectType {
     Gradle,
     Rust,
     Node,
+    /// Vue CLI / vue.js SPA (package.json + vue heuristics)
+    Vue,
     Python,
     Go,
 }
@@ -51,6 +53,7 @@ impl std::fmt::Display for ProjectType {
             ProjectType::Gradle => write!(f, "Gradle/Java"),
             ProjectType::Rust => write!(f, "Rust"),
             ProjectType::Node => write!(f, "Node.js"),
+            ProjectType::Vue => write!(f, "Vue.js"),
             ProjectType::Python => write!(f, "Python"),
             ProjectType::Go => write!(f, "Go"),
         }
@@ -125,7 +128,7 @@ pub fn detect_and_generate(dir: &Path) -> Result<(ProjectInfo, Pipeline)> {
     }
 
     anyhow::bail!(
-        "Could not detect project type in '{}' or its subdirectories. Supported: Maven, Gradle, Rust, Node.js, Python, Go",
+        "Could not detect project type in '{}' or its subdirectories. Supported: Maven, Gradle, Rust, Node.js, Vue.js, Python, Go",
         dir.display()
     );
 }
