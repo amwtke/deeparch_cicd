@@ -3,12 +3,11 @@ use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
 use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
 
-/// PMD version used for standalone CLI fallback when the Gradle PMD plugin is unavailable.
+/// PMD version used for standalone CLI.
 const PMD_CLI_VERSION: &str = "7.9.0";
 
 pub struct PmdStep {
     image: String,
-    #[allow(dead_code)]
     source_paths: Vec<String>,
     subdir: Option<String>,
 }
@@ -29,53 +28,52 @@ impl StepDef for PmdStep {
             Some(subdir) => format!("cd {} && ", subdir),
             None => String::new(),
         };
-        // PMD step with two execution paths:
+        // Incremental PMD: only scan staged + unpushed-commit Java files.
+        // Always uses standalone PMD CLI for file-level targeting.
         //
-        // Path A: Ruleset exists → run PMD
-        //   1. Check if Gradle PMD plugin is available (./gradlew pmdMain --dry-run)
-        //   2a. Plugin exists → configure ruleset via init script, run ./gradlew pmdMain
-        //   2b. Plugin missing → download standalone PMD CLI, scan all src/main/java dirs
-        //
-        // Path B: No ruleset → emit callback for LLM to search/generate one
+        // Flow:
+        //   1. Collect changed .java files (git staged + origin/main..HEAD)
+        //   2. If none → skip with success
+        //   3. Check ruleset exists → if not, callback auto_gen_pmd_ruleset
+        //   4. Ensure standalone PMD CLI cached
+        //   5. Run PMD on changed files only
+        //   6. Check for ruleset errors → callback auto_gen_pmd_ruleset
+        //   7. Report violations (non-zero exit if any found → triggers auto_fix)
         let cmd = format!(
-            "{cd}if [ -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
-             mkdir -p /workspace/pipelight-misc/pmd-report && \
-             if ./gradlew pmdMain --dry-run > /dev/null 2>&1; then \
-               cat > /tmp/pmd-init.gradle << 'INITEOF'\n\
-allprojects {{\n\
-  plugins.withId('pmd') {{\n\
-    pmd {{\n\
-      ruleSetFiles = files('/workspace/pipelight-misc/pmd-ruleset.xml')\n\
-      ruleSets = []\n\
-    }}\n\
-  }}\n\
-}}\n\
-INITEOF\n\
-               ./gradlew --init-script /tmp/pmd-init.gradle pmdMain && \
-               find . -path '*/build/reports/pmd/*.xml' -type f -exec cp {{}} /workspace/pipelight-misc/pmd-report/ \\; 2>/dev/null; \
-             else \
-               echo 'PMD plugin not found in Gradle, using standalone PMD CLI...' && \
-               PMD_CACHE=$HOME/.pipelight/cache && \
-               PMD_DIR=$PMD_CACHE/pmd-bin-{pmd_ver} && \
-               if [ ! -f $PMD_DIR/bin/pmd ]; then \
-                 mkdir -p $PMD_CACHE && \
-                 curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F{pmd_ver}/pmd-dist-{pmd_ver}-bin.zip -o /tmp/pmd.zip && \
-                 (cd $PMD_CACHE && jar xf /tmp/pmd.zip) && chmod +x $PMD_DIR/bin/pmd && rm -f /tmp/pmd.zip; \
-               fi && \
-               SOURCES=$(find . -path '*/src/main/java' -type d | tr '\\n' ',' | sed 's/,$//') && \
-               if [ -z \"$SOURCES\" ]; then SOURCES=.; fi && \
-               $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
-                 -R /workspace/pipelight-misc/pmd-ruleset.xml \
-                 -f xml --no-cache \
-                 -r /workspace/pipelight-misc/pmd-report/pmd-result.xml \
-                 2>/tmp/pmd-stderr.log; \
-               if grep -q 'Cannot load ruleset\\|Unable to find referenced rule' /tmp/pmd-stderr.log 2>/dev/null; then \
-                 echo 'ERROR: PMD ruleset has invalid rules. Details:' >&2; \
-                 grep 'Unable to find referenced rule\\|Cannot load ruleset\\|XML validation error' /tmp/pmd-stderr.log >&2; \
-                 echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - pmd-ruleset.xml contains invalid rule references for PMD {pmd_ver}. LLM must regenerate with correct PMD 7.x rule names.' >&2; \
-                 exit 1; \
-               fi; \
+            "{cd}CHANGED_FILES=$( \
+               {{ git diff --cached --name-only --diff-filter=ACMR -- '*.java' 2>/dev/null; \
+                  git diff origin/main..HEAD --name-only --diff-filter=ACMR -- '*.java' 2>/dev/null; \
+               }} | sort -u | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
+             ) && \
+             if [ -z \"$CHANGED_FILES\" ]; then \
+               echo 'PMD: no changed Java files — skipping'; \
+               exit 0; \
              fi && \
+             echo \"PMD: scanning $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ') changed file(s)\" && \
+             if [ ! -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
+               echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD {pmd_ver} rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
+             fi && \
+             PMD_CACHE=$HOME/.pipelight/cache && \
+             PMD_DIR=$PMD_CACHE/pmd-bin-{pmd_ver} && \
+             if [ ! -f $PMD_DIR/bin/pmd ]; then \
+               mkdir -p $PMD_CACHE && \
+               curl -sL https://github.com/pmd/pmd/releases/download/pmd_releases%2F{pmd_ver}/pmd-dist-{pmd_ver}-bin.zip -o /tmp/pmd.zip && \
+               (cd $PMD_CACHE && jar xf /tmp/pmd.zip) && chmod +x $PMD_DIR/bin/pmd && rm -f /tmp/pmd.zip; \
+             fi && \
+             SOURCES=$(echo \"$CHANGED_FILES\" | tr '\\n' ',' | sed 's/,$//') && \
+             mkdir -p /workspace/pipelight-misc/pmd-report && \
+             $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+               -R /workspace/pipelight-misc/pmd-ruleset.xml \
+               -f xml --no-cache \
+               -r /workspace/pipelight-misc/pmd-report/pmd-result.xml \
+               2>/tmp/pmd-stderr.log; \
+             PMD_RC=$?; \
+             if grep -q 'Cannot load ruleset\\|Unable to find referenced rule' /tmp/pmd-stderr.log 2>/dev/null; then \
+               echo 'ERROR: PMD ruleset has invalid rules. Details:' >&2; \
+               grep 'Unable to find referenced rule\\|Cannot load ruleset\\|XML validation error' /tmp/pmd-stderr.log >&2; \
+               echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - pmd-ruleset.xml contains invalid rule references for PMD {pmd_ver}. LLM must regenerate with correct PMD 7.x rule names.' >&2; \
+               exit 1; \
+             fi; \
              REPORT=/workspace/pipelight-misc/pmd-report; \
              TOTAL=0; \
              for f in $REPORT/*.xml; do \
@@ -85,6 +83,7 @@ INITEOF\n\
                TOTAL=$((TOTAL + COUNT)); \
              done; \
              echo \"\"; echo \"PMD Total: $TOTAL violations\"; \
+             echo \"Scanned files: $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ')\"; \
              echo \"\"; echo \"=== Violations by Rule ===\"; \
              for f in $REPORT/*.xml; do \
                [ -f \"$f\" ] || continue; \
@@ -95,14 +94,13 @@ INITEOF\n\
                [ -f \"$f\" ] || continue; \
                grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
              done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
-             if [ -f $PMD_DIR/bin/pmd ] 2>/dev/null; then \
-               $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
-                 -R /workspace/pipelight-misc/pmd-ruleset.xml \
-                 -f html --no-cache --no-progress \
-                 -r $REPORT/pmd-result.html 2>/dev/null || true; \
-             fi; \
+             $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+               -R /workspace/pipelight-misc/pmd-ruleset.xml \
+               -f html --no-cache --no-progress \
+               -r $REPORT/pmd-result.html 2>/dev/null || true; \
              ( echo \"PMD Report Summary\"; echo \"==================\"; \
                echo \"Total violations: $TOTAL\"; echo \"\"; \
+               echo \"Scanned files:\"; echo \"$CHANGED_FILES\"; echo \"\"; \
                echo \"By Rule:\"; \
                for f in $REPORT/*.xml; do \
                  [ -f \"$f\" ] || continue; \
@@ -114,9 +112,8 @@ INITEOF\n\
                  grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
                done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              ) > $REPORT/pmd-summary.txt 2>/dev/null; \
-             else \
-             echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD {pmd_ver} rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
-             fi",
+             if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
+             exit $PMD_RC",
             cd = cd_prefix,
             pmd_ver = PMD_CLI_VERSION
         );
@@ -130,7 +127,15 @@ INITEOF\n\
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::RuntimeError)
+        ExceptionMapping::new(CallbackCommand::AutoFix)
+            .add(
+                "pmd_violation",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoFix,
+                    max_retries: 3,
+                    context_paths: self.source_paths.clone(),
+                },
+            )
             .add(
                 "ruleset_not_found",
                 ExceptionEntry {
@@ -157,7 +162,8 @@ INITEOF\n\
         } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             Some("ruleset_not_found".into())
         } else {
-            None
+            // Any other failure (PMD found violations) → auto_fix
+            Some("pmd_violation".into())
         }
     }
 
@@ -165,6 +171,9 @@ INITEOF\n\
         let output = format!("{}{}", stdout, stderr);
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
+        }
+        if output.contains("no changed Java files") {
+            return "pmd: skipped (no changed files)".into();
         }
         let violations = count_pattern(&output, &["PMD Total:"]);
         if violations > 0 {
@@ -176,7 +185,7 @@ INITEOF\n\
         if !success && violation_count == 0 {
             "pmd: failed".into()
         } else if violation_count > 0 {
-            format!("pmd: {} violations (report only)", violation_count)
+            format!("pmd: {} violations", violation_count)
         } else {
             "pmd: no violations".into()
         }

@@ -113,7 +113,23 @@ impl PipelineStrategy for GradleStrategy {
         )));
         prev = "pmd".into();
 
-        let test_step = TestStep::new(info).with_parser(parse_gradle_test);
+        // Test step: run all tests (--continue), report-only (allow_failure),
+        // no auto_fix — just produce the test report.
+        let mut test_info = info.clone();
+        test_info.test_cmd = info
+            .test_cmd
+            .iter()
+            .map(|cmd| {
+                if !cmd.contains("--continue") {
+                    format!("{} --continue", cmd)
+                } else {
+                    cmd.clone()
+                }
+            })
+            .collect();
+        let test_step = TestStep::new(&test_info)
+            .with_parser(parse_gradle_test)
+            .with_allow_failure(true);
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
             Box::new(test_step),
             vec![prev],
@@ -286,9 +302,13 @@ mod tests {
         let info = make_gradle_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
         let of = step.exception_mapping().to_on_failure();
-        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
+        assert!(of.exceptions.contains_key("pmd_violation"));
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
+        let pv = &of.exceptions["pmd_violation"];
+        assert_eq!(pv.command, CallbackCommand::AutoFix);
+        assert_eq!(pv.max_retries, 3);
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(rnf.max_retries, 2);
@@ -306,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pmd_step_has_standalone_fallback() {
+    fn test_pmd_step_uses_standalone_cli() {
         let info = make_gradle_info_without_lint();
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
@@ -317,20 +337,12 @@ mod tests {
             .config();
         let cmd = &pmd_cfg.commands[0];
         assert!(
-            cmd.contains("pmdMain --dry-run"),
-            "should check if Gradle PMD plugin exists"
-        );
-        assert!(
-            cmd.contains("pmd-init.gradle"),
-            "should use init script when plugin exists"
-        );
-        assert!(
-            cmd.contains("standalone PMD CLI"),
-            "should fall back to standalone PMD"
-        );
-        assert!(
             cmd.contains("pmd check"),
-            "should have standalone pmd check command"
+            "should use standalone pmd check command"
+        );
+        assert!(
+            cmd.contains("pmd-bin-"),
+            "should download standalone PMD CLI"
         );
     }
 
@@ -352,10 +364,6 @@ mod tests {
         assert!(
             cmd.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset"),
             "should emit callback when no ruleset"
-        );
-        assert!(
-            cmd.contains("pmd-init.gradle"),
-            "should use init script for custom ruleset"
         );
     }
 
@@ -388,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pmd_step_collects_multimodule_reports() {
+    fn test_pmd_step_reports_to_pipelight_misc() {
         let info = make_gradle_info_with_lint();
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
@@ -399,12 +407,12 @@ mod tests {
             .config();
         let cmd = &pmd_cfg.commands[0];
         assert!(
-            cmd.contains("find . -path"),
-            "should collect multi-module reports via find"
+            cmd.contains("pipelight-misc/pmd-report"),
+            "should write reports to pipelight-misc"
         );
         assert!(
-            cmd.contains("pipelight-misc/pmd-report"),
-            "should copy reports to pipelight-misc"
+            cmd.contains("pmd-summary.txt"),
+            "should generate summary text file"
         );
     }
 
@@ -456,6 +464,106 @@ mod tests {
         let pmd = pmd_step::PmdStep::new(&make_gradle_info_with_lint());
         let report = pmd.output_report_str(false, "", "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset");
         assert_eq!(report, "pmd: ruleset not found (callback)");
+    }
+
+    #[test]
+    fn test_pmd_incremental_scan_uses_git_diff() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let pmd_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "pmd")
+            .unwrap()
+            .config();
+        let cmd = &pmd_cfg.commands[0];
+        assert!(
+            cmd.contains("git diff --cached --name-only"),
+            "should collect staged Java files"
+        );
+        assert!(
+            cmd.contains("git diff origin/main..HEAD --name-only"),
+            "should collect unpushed commit Java files"
+        );
+        assert!(
+            cmd.contains("no changed Java files"),
+            "should skip when no changed files"
+        );
+    }
+
+    #[test]
+    fn test_pmd_violation_triggers_autofix() {
+        use crate::ci::callback::command::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let step = pmd_step::PmdStep::new(&info);
+        let mapping = step.exception_mapping();
+        // Generic PMD failure (violations found) → auto_fix
+        let resolved = mapping.resolve(
+            1,
+            "PMD Total: 5 violations",
+            "some pmd output",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.max_retries, 3);
+        assert_eq!(resolved.exception_key, "pmd_violation");
+    }
+
+    #[test]
+    fn test_pmd_report_no_changed_files() {
+        let pmd = pmd_step::PmdStep::new(&make_gradle_info_with_lint());
+        let report = pmd.output_report_str(true, "PMD: no changed Java files — skipping", "");
+        assert_eq!(report, "pmd: skipped (no changed files)");
+    }
+
+    #[test]
+    fn test_test_step_allow_failure() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let test_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        assert!(
+            test_cfg.allow_failure,
+            "test step should have allow_failure=true"
+        );
+    }
+
+    #[test]
+    fn test_test_step_uses_continue_flag() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let test_cfg = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        assert!(
+            test_cfg.commands.iter().any(|c| c.contains("--continue")),
+            "test command should include --continue flag"
+        );
+    }
+
+    #[test]
+    fn test_test_step_no_autofix() {
+        use crate::ci::callback::command::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let step_defs = strategy.steps(&info);
+        let test_step = step_defs.iter().find(|s| s.config().name == "test").unwrap();
+        let resolved = test_step
+            .exception_mapping()
+            .resolve(1, "", "test failure", None);
+        assert_eq!(
+            resolved.command,
+            CallbackCommand::Abort,
+            "test failures should abort, not auto_fix"
+        );
+        assert_eq!(resolved.max_retries, 0, "test should have 0 retries");
     }
 
     #[test]
