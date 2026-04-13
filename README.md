@@ -169,6 +169,75 @@ steps:
       - test
 ```
 
+### 前端（Vue CLI）示例
+
+以下流水线在 Docker 内执行 **lint → 单元测试 → 生产构建**；单测使用 Vue CLI 自带的 `test:unit`（Jest），不含 e2e。完整可运行工程见仓库内 [`examples/vue-cli-pipeline-demo/`](examples/vue-cli-pipeline-demo/)（由 `vue create` 生成，含 `pipeline.yml`）。
+
+```yaml
+name: vue-cli-ci
+steps:
+  - name: lint
+    image: node:20-bookworm-slim
+    commands:
+      - npm ci
+      - npm run lint
+    on_failure:
+      callback_command: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
+        - tests/
+        - package.json
+        - package-lock.json
+        - .eslintrc.js
+        - vue.config.js
+
+  - name: test
+    image: node:20-bookworm-slim
+    depends_on:
+      - lint
+    commands:
+      - npm ci
+      - CI=true npm run test:unit -- --watchAll=false
+    on_failure:
+      callback_command: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
+        - tests/
+        - package.json
+        - package-lock.json
+        - jest.config.js
+        - vue.config.js
+
+  - name: build
+    image: node:20-bookworm-slim
+    depends_on:
+      - test
+    commands:
+      - npm ci
+      - npm run build
+    on_failure:
+      callback_command: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
+        - public/
+        - package.json
+        - package-lock.json
+        - vue.config.js
+        - babel.config.js
+```
+
+在该示例目录下校验并运行：
+
+```bash
+cd examples/vue-cli-pipeline-demo
+pipelight validate -f pipeline.yml
+pipelight run -f pipeline.yml --dry-run
+pipelight run -f pipeline.yml
+```
+
 ## 运行效果
 
 ```

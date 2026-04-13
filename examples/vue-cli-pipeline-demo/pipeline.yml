@@ -1,0 +1,51 @@
+name: vue-cli-ci
+steps:
+  - name: lint
+    image: node:20-bookworm-slim
+    commands:
+      - npm ci
+      - npm run lint
+    on_failure:
+      callback_command: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
+        - tests/
+        - package.json
+        - package-lock.json
+        - .eslintrc.js
+        - vue.config.js
+  - name: test
+    image: node:20-bookworm-slim
+    depends_on:
+      - lint
+    commands:
+      - npm ci
+      - CI=true npm run test:unit -- --watchAll=false
+    on_failure:
+      callback_command: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
+        - tests/
+        - package.json
+        - package-lock.json
+        - jest.config.js
+        - vue.config.js
+  - name: build
+    image: node:20-bookworm-slim
+    depends_on:
+      - test
+    commands:
+      - npm ci
+      - npm run build
+    on_failure:
+      callback_command: auto_fix
+      max_retries: 2
+      context_paths:
+        - src/
+        - public/
+        - package.json
+        - package-lock.json
+        - vue.config.js
+        - babel.config.js
