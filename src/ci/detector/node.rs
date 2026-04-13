@@ -69,6 +69,12 @@ impl NodeDetector {
     fn has_build_script(content: &str) -> bool {
         Self::has_script(content, "build")
     }
+
+    /// Vue CLI or typical Vue SPA: use dedicated pipeline (lint → test → build).
+    fn is_vue_project(content: &str) -> bool {
+        content.contains("@vue/cli-service")
+            || Self::detect_framework(content).as_deref() == Some("vue")
+    }
 }
 
 impl ProjectDetector for NodeDetector {
@@ -83,33 +89,102 @@ impl ProjectDetector for NodeDetector {
         let node_version = Self::extract_node_version(&content).unwrap_or_else(|| "20".to_string());
         let framework = Self::detect_framework(&content);
         let image = format!("node:{}-slim", node_version);
+        let is_vue = Self::is_vue_project(&content);
 
-        let build_cmd = if Self::has_build_script(&content) {
-            vec!["npm install && npm run build".to_string()]
-        } else {
-            vec!["npm install".to_string()]
-        };
+        let (build_cmd, test_cmd, lint_cmd, fmt_cmd, project_type, source_paths, config_files) =
+            if is_vue {
+                let build_cmd = if Self::has_build_script(&content) {
+                    vec!["npm ci".to_string(), "npm run build".to_string()]
+                } else {
+                    vec!["npm ci".to_string()]
+                };
 
-        let test_cmd = if Self::has_script(&content, "test") {
-            vec!["npm test".to_string()]
-        } else {
-            vec![]
-        };
+                let test_cmd = if Self::has_script(&content, "test:unit") {
+                    vec![
+                        "npm ci".to_string(),
+                        "CI=true npm run test:unit -- --watchAll=false".to_string(),
+                    ]
+                } else if Self::has_script(&content, "test") {
+                    vec!["npm ci".to_string(), "CI=true npm test".to_string()]
+                } else {
+                    vec!["npm ci".to_string(), "npm test".to_string()]
+                };
 
-        let lint_cmd = if Self::has_script(&content, "lint") {
-            Some(vec!["npm run lint".to_string()])
-        } else {
-            None
-        };
+                let lint_cmd = if Self::has_script(&content, "lint") {
+                    Some(vec!["npm ci".to_string(), "npm run lint".to_string()])
+                } else {
+                    None
+                };
 
-        let fmt_cmd = if Self::has_script(&content, "format") {
-            Some(vec!["npm run format".to_string()])
-        } else {
-            None
-        };
+                let fmt_cmd = if Self::has_script(&content, "format") {
+                    Some(vec!["npm run format".to_string()])
+                } else {
+                    None
+                };
+
+                let has_tsconfig = dir.join("tsconfig.json").exists();
+
+                let mut config_files = vec![
+                    "package.json".to_string(),
+                    "package-lock.json".to_string(),
+                    ".nvmrc".to_string(),
+                    "vue.config.js".to_string(),
+                    ".eslintrc.js".to_string(),
+                    ".eslintrc.cjs".to_string(),
+                    "babel.config.js".to_string(),
+                    "jest.config.js".to_string(),
+                ];
+                if has_tsconfig {
+                    config_files.push("tsconfig.json".to_string());
+                }
+
+                (
+                    build_cmd,
+                    test_cmd,
+                    lint_cmd,
+                    fmt_cmd,
+                    ProjectType::Vue,
+                    vec!["src/".to_string(), "tests/".to_string()],
+                    config_files,
+                )
+            } else {
+                let build_cmd = if Self::has_build_script(&content) {
+                    vec!["npm install && npm run build".to_string()]
+                } else {
+                    vec!["npm install".to_string()]
+                };
+
+                let test_cmd = if Self::has_script(&content, "test") {
+                    vec!["npm test".to_string()]
+                } else {
+                    vec![]
+                };
+
+                let lint_cmd = if Self::has_script(&content, "lint") {
+                    Some(vec!["npm run lint".to_string()])
+                } else {
+                    None
+                };
+
+                let fmt_cmd = if Self::has_script(&content, "format") {
+                    Some(vec!["npm run format".to_string()])
+                } else {
+                    None
+                };
+
+                (
+                    build_cmd,
+                    test_cmd,
+                    lint_cmd,
+                    fmt_cmd,
+                    ProjectType::Node,
+                    vec!["src/".to_string()],
+                    vec!["package.json".to_string()],
+                )
+            };
 
         Ok(ProjectInfo {
-            project_type: ProjectType::Node,
+            project_type,
             language_version: Some(node_version),
             framework,
             image,
@@ -117,8 +192,8 @@ impl ProjectDetector for NodeDetector {
             test_cmd,
             lint_cmd,
             fmt_cmd,
-            source_paths: vec!["src/".to_string()],
-            config_files: vec!["package.json".to_string()],
+            source_paths,
+            config_files,
             warnings: vec![],
             quality_plugins: vec![],
             subdir: None,

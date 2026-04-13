@@ -171,68 +171,179 @@ steps:
 
 ### 前端（Vue CLI）示例
 
-以下流水线在 Docker 内执行 **lint → 单元测试 → 生产构建**；单测使用 Vue CLI 自带的 `test:unit`（Jest），不含 e2e。完整可运行工程见仓库内 [`examples/vue-cli-pipeline-demo/`](examples/vue-cli-pipeline-demo/)（由 `vue create` 生成，含 `pipeline.yml`）。
+在 **Vue CLI**（或同类 `package.json` + Vue 启发式命中）的项目根目录执行 **`pipelight init`** 可得到与下面一致的 `pipeline.yml`。流水线在 **`ping-pong` → `git-pull`** 之后为 **类型检查（有 TS 时）→ lint → 单元测试 → 生产构建**；**lockfile / `.nvmrc` 校验合并进第一个会跑 `npm ci` 的步骤**（减少一次容器调度）。`git_credentials` 为占位符，请勿将真实凭据提交到版本库。
 
 ```yaml
 name: vue-cli-ci
+git_credentials:
+  username: your_username
+  password: your_token_or_password
 steps:
-  - name: lint
-    image: node:20-bookworm-slim
-    commands:
-      - npm ci
-      - npm run lint
-    on_failure:
-      callback_command: auto_fix
-      max_retries: 2
-      context_paths:
-        - src/
-        - tests/
-        - package.json
-        - package-lock.json
+- name: ping-pong
+  commands:
+  - COUNTER_FILE=pipelight-misc/ping-pong-counter; mkdir -p pipelight-misc; COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0); COUNT=$((COUNT + 1)); echo "$COUNT" > "$COUNTER_FILE"; echo "ping (round $COUNT/10)"; if [ "$COUNT" -ge 10 ]; then rm -f "$COUNTER_FILE"; exit 0; fi; exit 1
+  on_failure:
+    callback_command: ping
+    max_retries: 9
+    context_paths: []
+    exceptions:
+      ping:
+        command: ping
+        max_retries: 9
+  local: true
+  active: false
+- name: git-pull
+  commands:
+  - if [ ! -d .git ]; then echo 'Not a git repository, skipping'; exit 0; fi
+  - if ! git remote | grep -q .; then echo 'No remote configured, skipping'; exit 0; fi
+  - echo "Pulling from $(git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1))..."
+  - STASHED=false; if ! git diff --quiet || ! git diff --cached --quiet; then echo 'Stashing local changes...'; git stash && STASHED=true; fi
+  - 'git pull --rebase || { if $STASHED; then git stash pop; fi; echo ''ERROR: git pull --rebase failed — possible merge conflict''; exit 1; }'
+  - 'if $STASHED; then echo ''Restoring stashed changes...''; git stash pop || { echo ''ERROR: stash pop conflict — run git stash pop manually''; exit 1; }; fi'
+  depends_on:
+  - ping-pong
+  on_failure:
+    callback_command: git_fail
+    max_retries: 0
+    context_paths: []
+  local: true
+- name: lint
+  image: node:20-slim
+  commands:
+  - 'if [ ! -f package-lock.json ]; then echo "ERROR: package-lock.json missing — run npm install and commit the lockfile"; exit 1; fi && if [ -f .nvmrc ]; then WANT=$(grep -v ''^#'' .nvmrc | head -1 | tr -d ''v \r''); MAJOR_WANT=${WANT%%.*}; GOT=$(node -p "process.version.slice(1).split(''.'')[0]"); if [ "$MAJOR_WANT" != "$GOT" ]; then echo "ERROR: Node major mismatch: .nvmrc expects major $MAJOR_WANT, container has $GOT (image must match .nvmrc)"; exit 1; fi; fi && echo "node hygiene: package-lock.json present; .nvmrc matches container (or no .nvmrc)"'
+  - npm ci
+  - npm run lint
+  depends_on:
+  - git-pull
+  on_failure:
+    callback_command: auto_fix
+    max_retries: 2
+    context_paths:
+    - .eslintrc.cjs
+    - .eslintrc.js
+    - .nvmrc
+    - babel.config.js
+    - jest.config.js
+    - package-lock.json
+    - package.json
+    - src/
+    - tests/
+    - vue.config.js
+    exceptions:
+      hygiene_error:
+        command: runtime_error
+        max_retries: 0
+        context_paths:
+        - .eslintrc.cjs
         - .eslintrc.js
+        - .nvmrc
+        - babel.config.js
+        - jest.config.js
+        - package-lock.json
+        - package.json
         - vue.config.js
-
-  - name: test
-    image: node:20-bookworm-slim
-    depends_on:
-      - lint
-    commands:
-      - npm ci
-      - CI=true npm run test:unit -- --watchAll=false
-    on_failure:
-      callback_command: auto_fix
-      max_retries: 2
-      context_paths:
+      lint_error:
+        command: auto_fix
+        max_retries: 2
+        context_paths:
+        - .eslintrc.cjs
+        - .eslintrc.js
+        - .nvmrc
+        - babel.config.js
+        - jest.config.js
+        - package-lock.json
+        - package.json
         - src/
         - tests/
-        - package.json
-        - package-lock.json
-        - jest.config.js
         - vue.config.js
-
-  - name: build
-    image: node:20-bookworm-slim
-    depends_on:
-      - test
-    commands:
-      - npm ci
-      - npm run build
-    on_failure:
-      callback_command: auto_fix
-      max_retries: 2
-      context_paths:
-        - src/
-        - public/
-        - package.json
-        - package-lock.json
-        - vue.config.js
+- name: test
+  image: node:20-slim
+  commands:
+  - npm ci
+  - CI=true npm run test:unit -- --watchAll=false
+  depends_on:
+  - lint
+  on_failure:
+    callback_command: auto_fix
+    max_retries: 2
+    context_paths:
+    - .eslintrc.cjs
+    - .eslintrc.js
+    - .nvmrc
+    - babel.config.js
+    - jest.config.js
+    - package-lock.json
+    - package.json
+    - src/
+    - tests/
+    - vitest.config.js
+    - vitest.config.ts
+    - vue.config.js
+    exceptions:
+      test_failure:
+        command: auto_fix
+        max_retries: 2
+        context_paths:
+        - .eslintrc.cjs
+        - .eslintrc.js
+        - .nvmrc
         - babel.config.js
+        - jest.config.js
+        - package-lock.json
+        - package.json
+        - src/
+        - tests/
+        - vitest.config.js
+        - vitest.config.ts
+        - vue.config.js
+- name: build
+  image: node:20-slim
+  commands:
+  - npm ci
+  - npm run build
+  depends_on:
+  - test
+  on_failure:
+    callback_command: auto_fix
+    max_retries: 2
+    context_paths:
+    - .eslintrc.cjs
+    - .eslintrc.js
+    - .nvmrc
+    - babel.config.js
+    - jest.config.js
+    - package-lock.json
+    - package.json
+    - public/
+    - src/
+    - tests/
+    - vite.config.js
+    - vite.config.ts
+    - vue.config.js
+    exceptions:
+      compile_error:
+        command: auto_fix
+        max_retries: 2
+        context_paths:
+        - .eslintrc.cjs
+        - .eslintrc.js
+        - .nvmrc
+        - babel.config.js
+        - jest.config.js
+        - package-lock.json
+        - package.json
+        - public/
+        - src/
+        - tests/
+        - vite.config.js
+        - vite.config.ts
+        - vue.config.js
 ```
 
-在该示例目录下校验并运行：
+在 Vue 项目根目录（已生成 `pipeline.yml`）校验并运行：
 
 ```bash
-cd examples/vue-cli-pipeline-demo
+cd /path/to/your-vue-app
 pipelight validate -f pipeline.yml
 pipelight run -f pipeline.yml --dry-run
 pipelight run -f pipeline.yml
