@@ -2,6 +2,7 @@
 node_modules
 /dist
 pipelight-misc/
+.npm/
 
 
 # local env files
