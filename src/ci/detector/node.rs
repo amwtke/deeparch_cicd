@@ -32,7 +32,6 @@ impl NodeDetector {
 
     /// Check if a script key exists in the "scripts" section.
     fn has_script(content: &str, script: &str) -> bool {
-        let pattern = format!(r#""{}"s*:"#, regex::escape(script));
         // Use simple string search since scripts values are straightforward
         let search = format!(r#""{}""#, script);
         // Find the scripts block and check within it
@@ -58,7 +57,6 @@ impl NodeDetector {
                 }
                 let scripts_block = &scripts_section[open_pos..=close_pos];
                 // Check for the key pattern within the scripts block
-                let _ = pattern; // suppress unused warning
                 return scripts_block.contains(&search);
             }
         }
