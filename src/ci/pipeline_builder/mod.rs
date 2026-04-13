@@ -121,6 +121,18 @@ pub trait PipelineStrategy {
     fn parse_test_output(&self, _output: &str) -> Option<test_parser::TestSummary> {
         None
     }
+
+    /// Rebuild step definitions from a saved pipeline YAML.
+    /// Default: ignores the pipeline and re-derives from info (works when commands are deterministic).
+    /// Strategies whose commands depend on detector state (e.g. Vue typecheck) should override this
+    /// to read commands back from the saved YAML steps.
+    fn steps_from_pipeline(
+        &self,
+        info: &ProjectInfo,
+        _pipeline: &crate::ci::parser::Pipeline,
+    ) -> Vec<Box<dyn StepDef>> {
+        self.steps(info)
+    }
 }
 
 fn strategy_for(project_type: &ProjectType) -> Box<dyn PipelineStrategy> {
@@ -228,11 +240,7 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
         subdir: None,
     };
 
-    let step_defs = if pipeline.name.starts_with("vue") {
-        vue::step_defs_for_reconstructed_pipeline(&info, pipeline)
-    } else {
-        strategy.steps(&info)
-    };
+    let step_defs = strategy.steps_from_pipeline(&info, pipeline);
     let git_pull = base::GitPullStep::new();
 
     let mut map: HashMap<String, Box<dyn StepDef>> = HashMap::new();

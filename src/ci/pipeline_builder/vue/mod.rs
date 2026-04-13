@@ -113,27 +113,8 @@ fn vue_build_context_paths(info: &ProjectInfo) -> Vec<String> {
     )
 }
 
-/// One-line summary for Jest / Mocha output (used by VueTestStep report).
-fn parse_vue_test_line(output: &str) -> Option<String> {
-    let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").ok()?;
-    if let Some(cap) = jest_re.captures(output) {
-        let failed: u32 = cap
-            .get(1)
-            .and_then(|m| m.as_str().parse().ok())
-            .unwrap_or(0);
-        let passed: u32 = cap[2].parse().unwrap_or(0);
-        return Some(format!("Tests: {} passed, {} failed", passed, failed));
-    }
-    let mocha_re = Regex::new(r"(\d+) passing").ok()?;
-    if let Some(cap) = mocha_re.captures(output) {
-        let passed: u32 = cap[1].parse().unwrap_or(0);
-        return Some(format!("Tests: {} passed", passed));
-    }
-    None
-}
-
 fn parse_vue_test_summary(output: &str) -> Option<test_parser::TestSummary> {
-    let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").ok()?;
+    let jest_re = Regex::new(r"Tests:\s+(?:(\d+) failed,\s*)?(\d+) passed").unwrap();
     if let Some(cap) = jest_re.captures(output) {
         let failed: u32 = cap
             .get(1)
@@ -146,7 +127,7 @@ fn parse_vue_test_summary(output: &str) -> Option<test_parser::TestSummary> {
             skipped: 0,
         });
     }
-    let mocha_re = Regex::new(r"(\d+) passing").ok()?;
+    let mocha_re = Regex::new(r"(\d+) passing").unwrap();
     if let Some(cap) = mocha_re.captures(output) {
         let passed: u32 = cap[1].parse().unwrap_or(0);
         return Some(test_parser::TestSummary {
@@ -156,6 +137,12 @@ fn parse_vue_test_summary(output: &str) -> Option<test_parser::TestSummary> {
         });
     }
     None
+}
+
+/// One-line summary for Jest / Mocha output (used by VueTestStep report).
+fn parse_vue_test_line(output: &str) -> Option<String> {
+    let s = parse_vue_test_summary(output)?;
+    Some(format!("Tests: {} passed, {} failed", s.passed, s.failed))
 }
 
 impl PipelineStrategy for VueStrategy {
@@ -216,6 +203,14 @@ impl PipelineStrategy for VueStrategy {
 
     fn parse_test_output(&self, output: &str) -> Option<test_parser::TestSummary> {
         parse_vue_test_summary(output)
+    }
+
+    fn steps_from_pipeline(
+        &self,
+        info: &ProjectInfo,
+        pipeline: &crate::ci::parser::Pipeline,
+    ) -> Vec<Box<dyn super::StepDef>> {
+        step_defs_for_reconstructed_pipeline(info, pipeline)
     }
 }
 
