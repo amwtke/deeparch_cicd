@@ -111,18 +111,6 @@ pub trait PipelineStrategy {
     /// Return the pipeline name (e.g. "maven-ci", "rust-ci").
     fn pipeline_name(&self, info: &ProjectInfo) -> String;
 
-    /// Parse step output into a human-readable summary line.
-    /// Default: delegates to BaseStrategy for common steps.
-    fn output_report_str(
-        &self,
-        step_name: &str,
-        success: bool,
-        stdout: &str,
-        stderr: &str,
-    ) -> String {
-        base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
-    }
-
     /// Parse test step output into structured TestSummary (backward compat for JSON output).
     fn parse_test_output(&self, _output: &str) -> Option<test_parser::TestSummary> {
         None

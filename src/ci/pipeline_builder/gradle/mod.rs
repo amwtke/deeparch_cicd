@@ -5,7 +5,6 @@ pub mod spotbugs_full_step;
 pub mod spotbugs_step;
 
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::base;
 use crate::ci::pipeline_builder::base::{BuildStep, TestStep};
 use crate::ci::pipeline_builder::{test_parser, PipelineStrategy, StepConfig, StepDef};
 use regex::Regex;
@@ -92,32 +91,6 @@ impl StepDef for GradleCachedStep {
 impl PipelineStrategy for GradleStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "gradle-java-ci".into()
-    }
-
-    fn output_report_str(
-        &self,
-        step_name: &str,
-        success: bool,
-        stdout: &str,
-        stderr: &str,
-    ) -> String {
-        if step_name == "test" {
-            let output = format!("{}{}", stdout, stderr);
-            if let Some(summary) = parse_gradle_test(&output) {
-                return format!("Tests: {}", summary);
-            }
-            // Parser saw no per-module counts (e.g. all tests were cached or
-            // nothing ran). When `--continue` aggregates failures, Gradle still
-            // emits BUILD FAILED / FAILURE markers — surface that instead of
-            // claiming "Tests passed".
-            let looks_failed = output.contains("BUILD FAILED")
-                || output.contains("FAILURE:")
-                || output.contains("There were failing tests");
-            if looks_failed {
-                return "Tests had failures (report-only)".into();
-            }
-        }
-        base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
     }
 
     fn parse_test_output(&self, output: &str) -> Option<test_parser::TestSummary> {
@@ -215,7 +188,15 @@ impl PipelineStrategy for GradleStrategy {
             .with_test_report_globs(vec![
                 "**/build/test-results/test/*.xml".into(),
                 "**/build/reports/tests/test/index.html".into(),
-            ]);
+            ])
+            .with_failure_markers(
+                vec![
+                    "BUILD FAILED".into(),
+                    "FAILURE:".into(),
+                    "There were failing tests".into(),
+                ],
+                "Tests had failures (report-only)",
+            );
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
             Box::new(test_step),
             vec![prev],

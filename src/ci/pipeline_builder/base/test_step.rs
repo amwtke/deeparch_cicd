@@ -13,6 +13,13 @@ pub struct TestStep {
     /// XML reports land. Handed to the LLM via `test_print` callback so it can
     /// aggregate them into a table without guessing the build system layout.
     pub test_report_globs: Vec<String>,
+    /// Substrings whose presence in stdout/stderr signals a real failure even
+    /// when the parser couldn't extract counts (e.g. Maven's `BUILD FAILURE`,
+    /// Gradle's `FAILURE:`). Only consulted in `allow_failure` mode where the
+    /// executor reports `success=true` regardless of build outcome.
+    pub failure_markers: Vec<String>,
+    /// Summary string returned when `failure_markers` matches.
+    pub failure_marker_summary: String,
 }
 
 impl TestStep {
@@ -24,7 +31,22 @@ impl TestStep {
             allow_failure: false,
             callback_command: CallbackCommand::Abort,
             test_report_globs: vec![],
+            failure_markers: vec![],
+            failure_marker_summary: String::new(),
         }
+    }
+
+    /// Configure substrings that indicate a real failure when the parser
+    /// returns nothing. Used by Maven/Gradle whose `allow_failure=true` mode
+    /// makes the executor report success even on `BUILD FAILURE`.
+    pub fn with_failure_markers(
+        mut self,
+        markers: Vec<String>,
+        summary: impl Into<String>,
+    ) -> Self {
+        self.failure_markers = markers;
+        self.failure_marker_summary = summary.into();
+        self
     }
 
     pub fn with_parser(mut self, parser: fn(&str) -> Option<String>) -> Self {
@@ -109,6 +131,14 @@ impl StepDef for TestStep {
                 return report;
             }
         }
+        if !self.failure_markers.is_empty()
+            && self
+                .failure_markers
+                .iter()
+                .any(|m| output.contains(m.as_str()))
+        {
+            return self.failure_marker_summary.clone();
+        }
         if success {
             "Tests passed".into()
         } else {
@@ -185,6 +215,49 @@ mod tests {
         assert_eq!(
             step.output_report_str(true, "some other output", ""),
             "Tests passed"
+        );
+    }
+
+    #[test]
+    fn test_failure_markers_surface_when_parser_returns_none() {
+        // When the parser can't extract counts (e.g. surefire produced no XML
+        // because the build broke early), failure_markers let Maven/Gradle
+        // surface "Tests had failures (report-only)" instead of misleading
+        // "Tests passed" under allow_failure mode.
+        let step = TestStep::new(&make_info()).with_failure_markers(
+            vec!["BUILD FAILURE".into()],
+            "Tests had failures (report-only)",
+        );
+        assert_eq!(
+            step.output_report_str(true, "[INFO] BUILD FAILURE", ""),
+            "Tests had failures (report-only)"
+        );
+    }
+
+    #[test]
+    fn test_failure_markers_ignored_when_no_match() {
+        // No marker in output → fall through to success/failure default.
+        let step = TestStep::new(&make_info())
+            .with_failure_markers(vec!["BUILD FAILURE".into()], "Tests had failures");
+        assert_eq!(
+            step.output_report_str(true, "[INFO] BUILD SUCCESS", ""),
+            "Tests passed"
+        );
+    }
+
+    #[test]
+    fn test_failure_markers_yield_to_parser() {
+        // When the parser succeeds, failure_markers must NOT override its
+        // result — the parsed counts are richer information.
+        fn parser(_: &str) -> Option<String> {
+            Some("42 passed, 0 failed, 0 skipped".into())
+        }
+        let step = TestStep::new(&make_info())
+            .with_parser(parser)
+            .with_failure_markers(vec!["BUILD FAILURE".into()], "Tests had failures");
+        assert_eq!(
+            step.output_report_str(true, "BUILD FAILURE noise", ""),
+            "42 passed, 0 failed, 0 skipped"
         );
     }
 

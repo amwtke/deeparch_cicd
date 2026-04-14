@@ -170,37 +170,6 @@ impl PipelineStrategy for VueStrategy {
         out
     }
 
-    fn output_report_str(
-        &self,
-        step_name: &str,
-        success: bool,
-        stdout: &str,
-        stderr: &str,
-    ) -> String {
-        if step_name == "test" {
-            let output = format!("{}{}", stdout, stderr);
-            if let Some(line) = parse_vue_test_line(&output) {
-                return line;
-            }
-        }
-        if step_name == "typecheck" {
-            let output = format!("{}{}", stdout, stderr);
-            let errors = crate::ci::pipeline_builder::count_pattern(
-                &output,
-                &["error TS", "error:", "Error"],
-            );
-            if success {
-                return "typecheck: passed".into();
-            } else if errors > 0 {
-                return format!("typecheck: {} errors", errors);
-            }
-            return "typecheck: failed".into();
-        }
-        crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
-            step_name, success, stdout, stderr,
-        )
-    }
-
     fn parse_test_output(&self, output: &str) -> Option<test_parser::TestSummary> {
         parse_vue_test_summary(output)
     }

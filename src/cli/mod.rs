@@ -738,14 +738,16 @@ fn generate_step_report(
     stdout: &str,
     stderr: &str,
 ) -> (String, String) {
-    let report_summary =
-        if let Some(strategy) = crate::ci::pipeline_builder::strategy_for_pipeline(pipeline) {
-            strategy.output_report_str(step_name, success, stdout, stderr)
-        } else {
+    let report_summary = crate::ci::pipeline_builder::step_defs_for_pipeline(pipeline)
+        .and_then(|map| {
+            map.get(step_name)
+                .map(|sd| sd.output_report_str(success, stdout, stderr))
+        })
+        .unwrap_or_else(|| {
             crate::ci::pipeline_builder::base::BaseStrategy::default_report_str(
                 step_name, success, stdout, stderr,
             )
-        };
+        });
 
     let report_log_path =
         crate::ci::pipeline_builder::write_step_report(misc_dir, step_name, stdout, stderr);
@@ -1513,11 +1515,29 @@ mod tests {
     // in that retry now produces identical report fields as initial runs.
 
     fn make_pipeline(name: &str) -> Pipeline {
+        // Include one docker step so `step_defs_for_pipeline` can reconstruct
+        // language-specific StepDefs (which carry their own output_report_str).
+        // Without this, the cli falls back to BaseStrategy::default_report_str
+        // and loses parser-driven summaries.
+        let image = if name.starts_with("rust") {
+            "rust:latest"
+        } else if name.starts_with("maven") {
+            "maven:latest"
+        } else if name.starts_with("gradle") {
+            "gradle:latest"
+        } else {
+            ""
+        };
+        let mut steps = vec![];
+        if !image.is_empty() {
+            let yaml = format!("name: build\nimage: {image}\ncommands: [\"true\"]\n");
+            steps.push(serde_yaml::from_str::<crate::ci::parser::Step>(&yaml).unwrap());
+        }
         Pipeline {
             name: name.into(),
             git_credentials: None,
             env: Default::default(),
-            steps: vec![],
+            steps,
         }
     }
 
@@ -1552,8 +1572,8 @@ mod tests {
         let (summary, _path) =
             generate_step_report(&pipeline, dir.path(), dir.path(), "test", true, stdout, "");
         assert!(
-            summary.contains("Tests:") && summary.contains("41"),
-            "expected parsed Tests summary, got: {summary}"
+            summary.contains("41 passed"),
+            "expected parsed test summary, got: {summary}"
         );
     }
 
@@ -1575,6 +1595,41 @@ mod tests {
             "",
         );
         assert_eq!(summary, "Tests passed");
+    }
+
+    #[test]
+    fn test_generate_step_report_rust_test_uses_parser() {
+        // Regression: previously the cli called PipelineStrategy::output_report_str
+        // which dispatched by step name and never reached TestStep::test_parser,
+        // so cargo test runs always reported "Tests passed" instead of the parsed
+        // "N passed, N failed, N ignored" summary. The fix routes through
+        // StepDef::output_report_str on the reconstructed step definitions.
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("rust-ci");
+        let stdout = "\
+running 5 tests
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out
+
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+";
+        let (summary, _path) =
+            generate_step_report(&pipeline, dir.path(), dir.path(), "test", true, stdout, "");
+        assert_eq!(summary, "5 passed, 0 failed, 1 ignored");
+    }
+
+    #[test]
+    fn test_generate_step_report_maven_test_failure_markers_surface_build_failure() {
+        // When Maven runs with allow_failure=true the executor reports
+        // success=true even on `BUILD FAILURE`. The TestStep failure_markers
+        // wiring must surface this as "Tests had failures (report-only)" rather
+        // than the misleading default "Tests passed".
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = make_pipeline("maven-java-ci");
+        let stdout = "[INFO] Reactor Summary:\n[INFO] BUILD FAILURE\n";
+        let (summary, _path) =
+            generate_step_report(&pipeline, dir.path(), dir.path(), "test", true, stdout, "");
+        assert_eq!(summary, "Tests had failures (report-only)");
     }
 
     #[test]

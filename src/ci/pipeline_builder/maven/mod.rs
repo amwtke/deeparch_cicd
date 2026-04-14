@@ -6,7 +6,7 @@ pub mod spotbugs_full_step;
 pub mod spotbugs_step;
 
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::base::{self, BuildStep, TestStep};
+use crate::ci::pipeline_builder::base::{BuildStep, TestStep};
 use crate::ci::pipeline_builder::{test_parser, PipelineStrategy, StepConfig, StepDef};
 use regex::Regex;
 
@@ -88,32 +88,6 @@ impl StepDef for MavenCachedStep {
 impl PipelineStrategy for MavenStrategy {
     fn pipeline_name(&self, _info: &ProjectInfo) -> String {
         "maven-java-ci".into()
-    }
-
-    fn output_report_str(
-        &self,
-        step_name: &str,
-        success: bool,
-        stdout: &str,
-        stderr: &str,
-    ) -> String {
-        if step_name == "test" {
-            let output = format!("{}{}", stdout, stderr);
-            if let Some(summary) = parse_maven_test(&output) {
-                return format!("Tests: {}", summary);
-            }
-            // Parser returned nothing (all modules cached / surefire skipped).
-            // Under `allow_failure` the executor still marks success=true even
-            // though the build failed — detect BUILD FAILURE so the summary
-            // doesn't lie.
-            let looks_failed = output.contains("BUILD FAILURE")
-                || output.contains("There are test failures")
-                || output.contains("Tests run: 0") && output.contains("FAILED");
-            if looks_failed {
-                return "Tests had failures (report-only)".into();
-            }
-        }
-        base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
     }
 
     fn parse_test_output(&self, output: &str) -> Option<test_parser::TestSummary> {
@@ -211,7 +185,11 @@ impl PipelineStrategy for MavenStrategy {
             .with_test_report_globs(vec![
                 "**/target/surefire-reports/TEST-*.xml".into(),
                 "**/target/failsafe-reports/TEST-*.xml".into(),
-            ]);
+            ])
+            .with_failure_markers(
+                vec!["BUILD FAILURE".into(), "There are test failures".into()],
+                "Tests had failures (report-only)",
+            );
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
             Box::new(test_step),
             vec![prev],
@@ -344,7 +322,11 @@ mod tests {
             let cfg = sd.config();
             match cfg.name.as_str() {
                 "pmd" | "spotbugs" => {
-                    assert_eq!(cfg.tag, "non-full", "{} should be tagged non-full", cfg.name);
+                    assert_eq!(
+                        cfg.tag, "non-full",
+                        "{} should be tagged non-full",
+                        cfg.name
+                    );
                     assert!(!cfg.allow_failure, "{} must fail hard on issues", cfg.name);
                     assert!(cfg.active);
                 }
