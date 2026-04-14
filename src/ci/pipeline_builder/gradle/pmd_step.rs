@@ -1,9 +1,7 @@
 use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::{
-    count_pattern, git_changed_files_snippet, StepConfig, StepDef,
-};
+use crate::ci::pipeline_builder::{count_pattern, git_changed_files_snippet, StepConfig, StepDef};
 
 /// PMD version used for standalone CLI.
 const PMD_CLI_VERSION: &str = "7.9.0";

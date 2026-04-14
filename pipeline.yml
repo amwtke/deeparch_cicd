@@ -31,12 +31,57 @@ steps:
     max_retries: 0
     context_paths: []
   local: true
+- name: git-diff
+  commands:
+  - |-
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then echo 'git-diff: not a git repository — skipping'; exit 0; fi
+    REPORT_DIR=pipelight-misc/git-diff-report
+    mkdir -p "$REPORT_DIR"
+    UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || true)
+    UNSTAGED=$(git diff --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
+    STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
+    UNPUSHED=""
+    if [ -n "$UPSTREAM" ]; then
+      UNPUSHED=$(git diff "$UPSTREAM"..HEAD --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
+    fi
+    printf '%s\n' "$UNSTAGED"  | sed '/^$/d' > "$REPORT_DIR/unstaged.txt"
+    printf '%s\n' "$STAGED"    | sed '/^$/d' > "$REPORT_DIR/staged.txt"
+    printf '%s\n' "$UNPUSHED"  | sed '/^$/d' > "$REPORT_DIR/unpushed.txt"
+    U=$(wc -l < "$REPORT_DIR/unstaged.txt" | tr -d ' ')
+    S=$(wc -l < "$REPORT_DIR/staged.txt"   | tr -d ' ')
+    P=$(wc -l < "$REPORT_DIR/unpushed.txt" | tr -d ' ')
+    TOTAL=$((U + S + P))
+    if [ "$TOTAL" -eq 0 ]; then echo 'git-diff: working tree clean and no unpushed commits — skipping'; exit 0; fi
+    echo "git-diff: $TOTAL change record(s) on current branch"
+    echo "  unstaged: $U file(s)"
+    echo "  staged: $S file(s)"
+    if [ -n "$UPSTREAM" ]; then echo "  unpushed (ahead of $UPSTREAM): $P file(s)"; else echo "  unpushed: n/a (no upstream configured)"; fi
+    exit 1
+  depends_on:
+  - git-pull
+  allow_failure: true
+  on_failure:
+    callback_command: git_diff_command
+    max_retries: 0
+    context_paths:
+    - pipelight-misc/git-diff-report/staged.txt
+    - pipelight-misc/git-diff-report/unpushed.txt
+    - pipelight-misc/git-diff-report/unstaged.txt
+    exceptions:
+      git_diff_changes_found:
+        command: git_diff_command
+        max_retries: 0
+        context_paths:
+        - pipelight-misc/git-diff-report/unstaged.txt
+        - pipelight-misc/git-diff-report/staged.txt
+        - pipelight-misc/git-diff-report/unpushed.txt
+  local: true
 - name: build
   image: rust:latest
   commands:
   - cargo build
   depends_on:
-  - git-pull
+  - git-diff
   on_failure:
     callback_command: auto_fix
     max_retries: 3
@@ -86,7 +131,7 @@ steps:
   commands:
   - rustup component add rustfmt 2>/dev/null; cargo fmt -- --check
   depends_on:
-  - git-pull
+  - git-diff
   on_failure:
     callback_command: auto_fix
     max_retries: 1
