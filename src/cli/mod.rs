@@ -777,6 +777,48 @@ fn parse_step_test_summary(
     strategy.parse_test_output(&full_output)
 }
 
+/// Re-resolve a step's `on_failure` callback based on the latest stdout/stderr
+/// and carry over the already-decremented `retries_remaining`.
+///
+/// Used by `cmd_retry` so callbacks reflect the current run, not the frozen
+/// state from the initial failure. Returns `None` when the step has no
+/// `StepDef` or the step succeeded with no `match_exception` marker.
+fn reresolve_on_failure(
+    sd: Option<&dyn crate::ci::pipeline_builder::StepDef>,
+    exit_code: i64,
+    stdout: &str,
+    stderr: &str,
+    prev_remaining: Option<u32>,
+    registry: &CallbackCommandRegistry,
+) -> Option<OnFailureState> {
+    let sd = sd?;
+    let match_fn =
+        |ec: i64, out: &str, err: &str| -> Option<String> { sd.match_exception(ec, out, err) };
+
+    // On success, only surface a callback when match_exception produced a key
+    // (e.g. test_print on a passing test step). Otherwise return None.
+    if exit_code == 0 && match_fn(exit_code, stdout, stderr).is_none() {
+        return None;
+    }
+
+    let resolved = sd
+        .exception_mapping()
+        .resolve(exit_code, stdout, stderr, Some(&match_fn));
+    let action = registry.action_for(&resolved.command);
+    let mut of = OnFailureState {
+        exception_key: resolved.exception_key,
+        command: resolved.command,
+        action,
+        max_retries: resolved.max_retries,
+        retries_remaining: resolved.max_retries,
+        context_paths: resolved.context_paths,
+    };
+    if let Some(rem) = prev_remaining {
+        of.retries_remaining = rem.min(of.max_retries);
+    }
+    Some(of)
+}
+
 async fn cmd_retry(
     run_id: String,
     step: Option<String>,
@@ -915,62 +957,23 @@ async fn cmd_retry(
         // (already decremented above); only refresh the other fields.
         let registry = CallbackCommandRegistry::new();
         let step_def_map = crate::ci::pipeline_builder::step_defs_for_pipeline(&pipeline);
-        let new_on_failure: Option<OnFailureState> = if result.exit_code != 0 {
-            step_def_map
-                .as_ref()
-                .and_then(|defs| defs.get(&step_name))
-                .map(|sd| {
-                    let mapping = sd.exception_mapping();
-                    let match_fn =
-                        |ec: i64, out: &str, err: &str| -> Option<String> { sd.match_exception(ec, out, err) };
-                    let resolved = mapping.resolve(result.exit_code, &stdout, &stderr, Some(&match_fn));
-                    let action = registry.action_for(&resolved.command);
-                    OnFailureState {
-                        exception_key: resolved.exception_key,
-                        command: resolved.command,
-                        action,
-                        max_retries: resolved.max_retries,
-                        retries_remaining: resolved.max_retries,
-                        context_paths: resolved.context_paths,
-                    }
-                })
-        } else {
-            step_def_map
-                .as_ref()
-                .and_then(|defs| defs.get(&step_name))
-                .and_then(|sd| {
-                    let match_fn =
-                        |ec: i64, out: &str, err: &str| -> Option<String> { sd.match_exception(ec, out, err) };
-                    match_fn(result.exit_code, &stdout, &stderr).map(|_| {
-                        let resolved =
-                            sd.exception_mapping()
-                                .resolve(result.exit_code, &stdout, &stderr, Some(&match_fn));
-                        let action = registry.action_for(&resolved.command);
-                        OnFailureState {
-                            exception_key: resolved.exception_key,
-                            command: resolved.command,
-                            action,
-                            max_retries: resolved.max_retries,
-                            retries_remaining: resolved.max_retries,
-                            context_paths: resolved.context_paths,
-                        }
-                    })
-                })
-        };
+        let sd = step_def_map.as_ref().and_then(|defs| defs.get(&step_name));
         let prev_remaining = state
             .get_step(&step_name)
             .and_then(|s| s.on_failure.as_ref())
             .map(|of| of.retries_remaining);
+        let new_on_failure = reresolve_on_failure(
+            sd.map(|b| b.as_ref()),
+            result.exit_code,
+            &stdout,
+            &stderr,
+            prev_remaining,
+            &registry,
+        );
         let ss = state
             .get_step_mut(&step_name)
             .expect("step must exist in state");
-        ss.on_failure = new_on_failure.map(|mut of| {
-            // Carry over the remaining budget already decremented for this retry.
-            if let Some(rem) = prev_remaining {
-                of.retries_remaining = rem.min(of.max_retries);
-            }
-            of
-        });
+        ss.on_failure = new_on_failure;
     }
 
     // If retried step succeeded, run downstream Skipped steps.
@@ -1768,5 +1771,152 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
     fn test_parse_step_test_summary_no_surefire_pattern_returns_none() {
         let pipeline = make_pipeline("maven-java-ci");
         assert!(parse_step_test_summary(&pipeline, "test", "BUILD SUCCESS", "").is_none());
+    }
+
+    // ── reresolve_on_failure ─────────────────────────────────────
+    //
+    // Regression tests for the bug where `cmd_retry` froze `on_failure`
+    // to whatever was resolved on the initial failure, so a PMD step that
+    // first failed for a missing ruleset kept reporting
+    // `auto_gen_pmd_ruleset` even after the ruleset was generated and PMD
+    // started reporting real violations.
+
+    fn pmd_step_def() -> Box<dyn crate::ci::pipeline_builder::StepDef> {
+        use crate::ci::detector::{ProjectInfo, ProjectType};
+        let info = ProjectInfo {
+            project_type: ProjectType::Maven,
+            language_version: None,
+            framework: None,
+            image: "maven:3.9".into(),
+            build_cmd: vec![],
+            test_cmd: vec![],
+            lint_cmd: None,
+            fmt_cmd: None,
+            source_paths: vec!["src/".into(), "src/pom.xml".into()],
+            config_files: vec!["pom.xml".into()],
+            warnings: vec![],
+            quality_plugins: vec![],
+            subdir: None,
+        };
+        Box::new(crate::ci::pipeline_builder::maven::pmd_step::PmdStep::new(&info))
+    }
+
+    #[test]
+    fn test_reresolve_switches_ruleset_not_found_to_pmd_violations() {
+        let sd = pmd_step_def();
+        let registry = CallbackCommandRegistry::new();
+        // First-run scenario: ruleset missing -> stderr carries the callback marker.
+        let first = reresolve_on_failure(
+            Some(sd.as_ref()),
+            1,
+            "",
+            "PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml\n",
+            None,
+            &registry,
+        )
+        .expect("first failure should produce on_failure");
+        assert_eq!(first.exception_key, "ruleset_not_found");
+        assert_eq!(first.command, CallbackCommand::AutoGenPmdRuleset);
+
+        // Second-run scenario (what cmd_retry must emit): ruleset fine, violations found.
+        // Must re-resolve to pmd_violations / auto_fix, not stay on the first state.
+        let second = reresolve_on_failure(
+            Some(sd.as_ref()),
+            1,
+            "PMD Total: 3 violations\n",
+            "",
+            Some(first.retries_remaining),
+            &registry,
+        )
+        .expect("second failure should produce on_failure");
+        assert_eq!(second.exception_key, "pmd_violations");
+        assert_eq!(second.command, CallbackCommand::AutoFix);
+        assert_eq!(second.action, CallbackCommandAction::Retry);
+        assert!(second
+            .context_paths
+            .iter()
+            .any(|p| p == "pipelight-misc/pmd-report/pmd-result.xml"));
+    }
+
+    #[test]
+    fn test_reresolve_carries_over_decremented_retries_remaining() {
+        let sd = pmd_step_def();
+        let registry = CallbackCommandRegistry::new();
+        // Caller has already decremented retries_remaining for this attempt.
+        let of = reresolve_on_failure(
+            Some(sd.as_ref()),
+            1,
+            "PMD Total: 1 violations\n",
+            "",
+            Some(3),
+            &registry,
+        )
+        .unwrap();
+        assert_eq!(of.max_retries, 9);
+        // retries_remaining must reflect the caller's remaining budget, not reset.
+        assert_eq!(of.retries_remaining, 3);
+    }
+
+    #[test]
+    fn test_reresolve_clamps_prev_remaining_to_max_retries() {
+        let sd = pmd_step_def();
+        let registry = CallbackCommandRegistry::new();
+        // If exception changes so the new entry has a smaller max_retries,
+        // prev_remaining must be clamped down to the new max.
+        // (ruleset_invalid and pmd_violations currently share max_retries=9,
+        //  so we simulate the bound with an oversized prev value.)
+        let of = reresolve_on_failure(
+            Some(sd.as_ref()),
+            1,
+            "PMD Total: 1 violations\n",
+            "",
+            Some(999),
+            &registry,
+        )
+        .unwrap();
+        assert!(of.retries_remaining <= of.max_retries);
+        assert_eq!(of.retries_remaining, of.max_retries);
+    }
+
+    #[test]
+    fn test_reresolve_returns_none_when_no_step_def() {
+        let registry = CallbackCommandRegistry::new();
+        let of = reresolve_on_failure(None, 1, "PMD Total: 3 violations\n", "", Some(5), &registry);
+        assert!(of.is_none());
+    }
+
+    #[test]
+    fn test_reresolve_returns_none_on_success_without_match() {
+        let sd = pmd_step_def();
+        let registry = CallbackCommandRegistry::new();
+        // Success (exit=0) with stdout/stderr that don't match any rule -> no callback.
+        let of = reresolve_on_failure(
+            Some(sd.as_ref()),
+            0,
+            "PMD: no changed source files on current branch — skipping\n",
+            "",
+            None,
+            &registry,
+        );
+        assert!(of.is_none());
+    }
+
+    #[test]
+    fn test_reresolve_prefers_stderr_markers_over_stdout() {
+        let sd = pmd_step_def();
+        let registry = CallbackCommandRegistry::new();
+        // Even if stdout contains "PMD Total:", stderr errors take precedence
+        // (ruleset load failures win over violation counts).
+        let of = reresolve_on_failure(
+            Some(sd.as_ref()),
+            1,
+            "PMD Total: 0 violations\n",
+            "Cannot load ruleset pipelight-misc/pmd-ruleset.xml\n",
+            None,
+            &registry,
+        )
+        .unwrap();
+        assert_eq!(of.exception_key, "ruleset_invalid");
+        assert_eq!(of.command, CallbackCommand::AutoGenPmdRuleset);
     }
 }
