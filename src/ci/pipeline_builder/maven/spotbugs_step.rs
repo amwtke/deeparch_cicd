@@ -112,7 +112,7 @@ impl StepDef for SpotbugsStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
-            // Report-only: bugs surface via bughot_print_command.
+            // Report-only: bugs surface via spotbugs_print_command.
             allow_failure: true,
             ..Default::default()
         }
@@ -122,7 +122,7 @@ impl StepDef for SpotbugsStep {
         ExceptionMapping::new(CallbackCommand::RuntimeError).add(
             "spotbugs_bugs_found",
             ExceptionEntry {
-                command: CallbackCommand::BughotPrintCommand,
+                command: CallbackCommand::SpotbugsPrintCommand,
                 max_retries: 0,
                 context_paths: vec![
                     "pipelight-misc/spotbugs-report/spotbugs-result.xml".into(),

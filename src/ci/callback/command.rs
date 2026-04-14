@@ -15,7 +15,7 @@ pub enum CallbackCommand {
     Ping,
     TestPrintCommand,
     PmdPrintCommand,
-    BughotPrintCommand,
+    SpotbugsPrintCommand,
 }
 
 pub struct CallbackCommandDef {
@@ -109,9 +109,9 @@ impl CallbackCommandRegistry {
             },
         );
         registry.register(
-            CallbackCommand::BughotPrintCommand,
+            CallbackCommand::SpotbugsPrintCommand,
             CallbackCommandDef {
-                action: CallbackCommandAction::BughotPrint,
+                action: CallbackCommandAction::SpotbugsPrint,
                 description:
                     "SpotBugs scan found bugs (report-only). LLM parses the SpotBugs XML report and prints a grouped-by-category bugs table. Pipeline continues."
                         .into(),
@@ -156,7 +156,7 @@ mod tests {
             (CallbackCommand::Ping, "\"ping\""),
             (CallbackCommand::TestPrintCommand, "\"test_print_command\""),
             (CallbackCommand::PmdPrintCommand, "\"pmd_print_command\""),
-            (CallbackCommand::BughotPrintCommand, "\"bughot_print_command\""),
+            (CallbackCommand::SpotbugsPrintCommand, "\"spotbugs_print_command\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -205,8 +205,8 @@ mod tests {
             CallbackCommandAction::PmdPrint
         );
         assert_eq!(
-            registry.action_for(&CallbackCommand::BughotPrintCommand),
-            CallbackCommandAction::BughotPrint
+            registry.action_for(&CallbackCommand::SpotbugsPrintCommand),
+            CallbackCommandAction::SpotbugsPrint
         );
     }
 
@@ -236,7 +236,7 @@ mod tests {
         assert!(registry.get(&CallbackCommand::Ping).is_some());
         assert!(registry.get(&CallbackCommand::TestPrintCommand).is_some());
         assert!(registry.get(&CallbackCommand::PmdPrintCommand).is_some());
-        assert!(registry.get(&CallbackCommand::BughotPrintCommand).is_some());
+        assert!(registry.get(&CallbackCommand::SpotbugsPrintCommand).is_some());
     }
 
     #[test]

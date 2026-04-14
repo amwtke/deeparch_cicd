@@ -186,7 +186,7 @@ Example:
 | test | success | Tests: 42 passed, 0 failed |
 | package | success | Packaged successfully |
 
-**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` asking you to print a post-run report (e.g. `test_print_command`, `pmd_print_command`, `bughot_print_command` from report-only steps). After rendering the summary table, look at every step's `on_failure` field — if `action` is `test_print`, `pmd_print`, or `bughot_print`, dispatch via the callback table below. These are pure reporting actions; the pipeline has already continued.
+**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` asking you to print a post-run report (e.g. `test_print_command`, `pmd_print_command`, `spotbugs_print_command` from report-only steps). After rendering the summary table, look at every step's `on_failure` field — if `action` is `test_print`, `pmd_print`, or `spotbugs_print`, dispatch via the callback table below. These are pure reporting actions; the pipeline has already continued.
 
 ### `status: "failed"`
 
@@ -211,7 +211,7 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 | `ping` | retry | 在终端打印 `pong`，然后 `pipelight retry` 重试该 step | `pipelight retry` 重试该 step | 10 轮完成后 step 自动成功 |
 | `test_print_command` | test_print | 见下方 **`test_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `pmd_print_command` | pmd_print | 见下方 **`pmd_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
-| `bughot_print_command` | bughot_print | 见下方 **`bughot_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `spotbugs_print_command` | spotbugs_print | 见下方 **`spotbugs_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
@@ -327,9 +327,9 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 
 > **注意**：不要尝试修改源码。若用户明确要求修复，再按常规编辑流程处理，但那不是 pmd_print 的职责。
 
-#### `bughot_print` 详细流程
+#### `spotbugs_print` 详细流程
 
-`bughot_print` 是 SpotBugs 的 post-run 打印型 action（由 `bughot_print_command` 触发）。流程与 pmd_print 同构。
+`spotbugs_print` 是 SpotBugs 的 post-run 打印型 action（由 `spotbugs_print_command` 触发）。流程与 pmd_print 同构。
 
 1. 从 `on_failure.context_paths` 读路径：
    - `pipelight-misc/spotbugs-report/spotbugs-result.xml`

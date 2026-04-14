@@ -16,7 +16,7 @@ pub enum CallbackCommandAction {
     PmdPrint,
     /// LLM parses the SpotBugs XML report and prints a grouped-by-category
     /// bugs table. Pipeline flow unaffected.
-    BughotPrint,
+    SpotbugsPrint,
 }
 
 #[cfg(test)]
@@ -32,7 +32,7 @@ mod tests {
             (CallbackCommandAction::Skip, "\"skip\""),
             (CallbackCommandAction::TestPrint, "\"test_print\""),
             (CallbackCommandAction::PmdPrint, "\"pmd_print\""),
-            (CallbackCommandAction::BughotPrint, "\"bughot_print\""),
+            (CallbackCommandAction::SpotbugsPrint, "\"spotbugs_print\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);

@@ -441,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn test_spotbugs_step_uses_bughot_print() {
+    fn test_spotbugs_step_uses_spotbugs_print() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_gradle_info_with_lint();
         let step = spotbugs_step::SpotbugsStep::new(&info);
@@ -451,7 +451,7 @@ mod tests {
             "",
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
-        assert_eq!(resolved.command, CallbackCommand::BughotPrintCommand);
+        assert_eq!(resolved.command, CallbackCommand::SpotbugsPrintCommand);
     }
 
     #[test]
