@@ -66,7 +66,8 @@ impl StepDef for SpotbugsStep {
                  echo 'SpotBugs: no changed java files on current branch — skipping'; \
                  exit 0; \
                fi && \
-               ANALYZE_TARGETS=\"\" && \
+               printf '%s\\n' \"$CHANGED_FILES\" > /tmp/sb-changed && \
+               : > /tmp/sb-targets && \
                while IFS= read -r jf; do \
                  rel=$(echo \"$jf\" | sed -n 's|.*/src/main/java/||p'); \
                  [ -z \"$rel\" ] && continue; \
@@ -77,11 +78,12 @@ impl StepDef for SpotbugsStep {
                    class_base=$(basename \"$base\"); \
                    if [ -d \"$pkg_dir\" ]; then \
                      for cf in \"$pkg_dir/$class_base.class\" \"$pkg_dir/$class_base\"\\$*.class; do \
-                       [ -f \"$cf\" ] && ANALYZE_TARGETS=\"$ANALYZE_TARGETS $cf\"; \
+                       [ -f \"$cf\" ] && printf '%s ' \"$cf\" >> /tmp/sb-targets; \
                      done; \
                    fi; \
                  done; \
-               done <<< \"$CHANGED_FILES\"; \
+               done < /tmp/sb-changed; \
+               ANALYZE_TARGETS=$(cat /tmp/sb-targets); \
                if [ -z \"$ANALYZE_TARGETS\" ]; then \
                  echo 'SpotBugs: changed java files have no matching compiled classes — skipping'; \
                  exit 0; \

@@ -162,6 +162,11 @@ impl BaseStrategy {
     }
 
     fn report_spotbugs(success: bool, output: &str) -> String {
+        if output.contains("no changed java files")
+            || output.contains("changed java files have no matching compiled classes")
+        {
+            return "spotbugs: skipped (no changed files)".into();
+        }
         // Extract "SpotBugs Total: N bugs found" line from shell output
         if let Some(line) = output.lines().find(|l| l.contains("SpotBugs Total:")) {
             return line.trim().to_string();
@@ -174,6 +179,15 @@ impl BaseStrategy {
     }
 
     fn report_pmd(success: bool, output: &str) -> String {
+        if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
+            return "pmd: ruleset not found (callback)".into();
+        }
+        if output.contains("full-scan skipped — no pipelight-misc/pmd-ruleset.xml") {
+            return "pmd: skipped (no ruleset, full-report mode)".into();
+        }
+        if output.contains("no changed source files") {
+            return "pmd: skipped (no changed files)".into();
+        }
         // Extract "PMD Total: N violations" summary line if present
         if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
             return line.trim().to_string();

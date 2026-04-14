@@ -206,6 +206,9 @@ impl StepDef for PmdStep {
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
         }
+        if output.contains("full-scan skipped — no pipelight-misc/pmd-ruleset.xml") {
+            return "pmd: skipped (no ruleset, full-report mode)".into();
+        }
         if output.contains("no changed source files") {
             return "pmd: skipped (no changed files)".into();
         }
