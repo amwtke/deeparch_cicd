@@ -7,6 +7,8 @@ pub struct TestStep {
     pub image: String,
     pub test_cmd: Vec<String>,
     pub test_parser: Option<fn(&str) -> Option<String>>,
+    pub allow_failure: bool,
+    pub callback_command: CallbackCommand,
 }
 
 impl TestStep {
@@ -15,11 +17,26 @@ impl TestStep {
             image: info.image.clone(),
             test_cmd: info.test_cmd.clone(),
             test_parser: None,
+            allow_failure: false,
+            callback_command: CallbackCommand::Abort,
         }
     }
 
     pub fn with_parser(mut self, parser: fn(&str) -> Option<String>) -> Self {
         self.test_parser = Some(parser);
+        self
+    }
+
+    /// When true, the step may fail without aborting the pipeline (report-only mode).
+    pub fn with_allow_failure(mut self, allow: bool) -> Self {
+        self.allow_failure = allow;
+        self
+    }
+
+    /// Override the default callback command for test failures.
+    #[allow(dead_code)]
+    pub fn with_callback_command(mut self, cmd: CallbackCommand) -> Self {
+        self.callback_command = cmd;
         self
     }
 }
@@ -31,12 +48,13 @@ impl StepDef for TestStep {
             image: self.image.clone(),
             commands: self.test_cmd.clone(),
             depends_on: vec!["build".into()],
+            allow_failure: self.allow_failure,
             ..Default::default()
         }
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::Abort)
+        ExceptionMapping::new(self.callback_command.clone())
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -123,5 +141,27 @@ mod tests {
             step.output_report_str(true, "some other output", ""),
             "Tests passed"
         );
+    }
+
+    #[test]
+    fn test_allow_failure_default_false() {
+        let step = TestStep::new(&make_info());
+        assert!(!step.config().allow_failure);
+    }
+
+    #[test]
+    fn test_allow_failure_true() {
+        let step = TestStep::new(&make_info()).with_allow_failure(true);
+        assert!(step.config().allow_failure);
+    }
+
+    #[test]
+    fn test_custom_callback_command() {
+        let step =
+            TestStep::new(&make_info()).with_callback_command(CallbackCommand::RuntimeError);
+        let resolved = step
+            .exception_mapping()
+            .resolve(1, "", "failure", None);
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
     }
 }
