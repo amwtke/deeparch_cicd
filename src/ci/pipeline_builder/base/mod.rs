@@ -1,5 +1,6 @@
 pub mod build_step;
 pub mod fmt_step;
+pub mod git_diff_step;
 pub mod git_pull_step;
 pub mod lint_step;
 pub mod ping_pong_step;
@@ -7,6 +8,7 @@ pub mod test_step;
 
 pub use build_step::BuildStep;
 pub use fmt_step::FmtStep;
+pub use git_diff_step::GitDiffStep;
 pub use git_pull_step::GitPullStep;
 pub use lint_step::LintStep;
 pub use ping_pong_step::PingPongStep;
@@ -40,6 +42,7 @@ impl BaseStrategy {
                 }
             }
             "git-pull" => Self::report_git_pull(&output),
+            "git-diff" => Self::report_git_diff(&output, success),
             "build" => Self::report_build(success, &output),
             "test" => Self::report_test_generic(success, &output),
             "lint" | "clippy" | "checkstyle" | "vet" => {
@@ -56,6 +59,26 @@ impl BaseStrategy {
                     "Failed (exit non-zero)".into()
                 }
             }
+        }
+    }
+
+    fn report_git_diff(output: &str, success: bool) -> String {
+        if output.contains("not a git repository") {
+            return "git-diff: skipped (no git repo)".into();
+        }
+        if output.contains("working tree clean") {
+            return "git-diff: skipped (tree clean)".into();
+        }
+        if let Some(line) = output
+            .lines()
+            .find(|l| l.contains("change record(s) on current branch"))
+        {
+            return line.trim().to_string();
+        }
+        if success {
+            "git-diff: ok".into()
+        } else {
+            "git-diff: failed".into()
         }
     }
 

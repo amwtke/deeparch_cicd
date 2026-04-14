@@ -186,7 +186,7 @@ Example:
 | test | success | Tests: 42 passed, 0 failed |
 | package | success | Packaged successfully |
 
-**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` asking you to print a post-run report (e.g. `test_print_command`, `pmd_print_command`, `spotbugs_print_command` from report-only steps). After rendering the summary table, look at every step's `on_failure` field — if `action` is `test_print`, `pmd_print`, or `spotbugs_print`, dispatch via the callback table below. These are pure reporting actions; the pipeline has already continued.
+**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` asking you to print a post-run report (e.g. `git_diff_command`, `test_print_command`, `pmd_print_command`, `spotbugs_print_command` from report-only steps). After rendering the summary table, look at every step's `on_failure` field — if `action` is `git_diff_report`, `test_print`, `pmd_print`, or `spotbugs_print`, dispatch via the callback table below. These are pure reporting actions; the pipeline has already continued.
 
 ### `status: "failed"`
 
@@ -212,6 +212,7 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 | `test_print_command` | test_print | 见下方 **`test_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `pmd_print_command` | pmd_print | 见下方 **`pmd_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `spotbugs_print_command` | spotbugs_print | 见下方 **`spotbugs_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `git_diff_command` | git_diff_report | 见下方 **`git_diff_report` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
@@ -363,6 +364,34 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 5. **不修代码、不 retry**
 
 > **注意**：Priority 1 (High) 的 Bug 若涉及安全类（SQL 注入、XSS 等），在表下方简短点出 1-2 行告警，但仍然只是报告，不自动改代码。
+
+#### `git_diff_report` 详细流程
+
+`git_diff_report` 是 `git-diff` step 的 post-run 打印型 action（由 `git_diff_command` 触发）。当工作区或本地有未推送的改动时 pipelight 把三份按类别划分的文件清单写进 `on_failure.context_paths`，LLM 只做分类汇报，**不修代码、不 retry**。
+
+若 step 因 "not a git repository" 或 "working tree clean" 而 skipped，`on_failure` 仍为 null（不会触发本 action）。
+
+1. 从 `on_failure.context_paths` 读三份清单（每行一个路径）：
+   - `pipelight-misc/git-diff-report/unstaged.txt` — 工作区改动但未 `git add`
+   - `pipelight-misc/git-diff-report/staged.txt` — 已 `git add` 但未 commit
+   - `pipelight-misc/git-diff-report/unpushed.txt` — 本地 commit 但未 push（ahead of `@{upstream}`）
+2. 打印三段按类别分组的文件列表，每段前加标题；空类别跳过（不要打印空表）。建议用 Markdown 列表或表格，示例：
+
+```markdown
+### git-diff: 5 change record(s) on current branch
+
+**① 未暂存 (unstaged, 2 file)**
+- src/foo.rs
+- src/bar.rs
+
+**② 已暂存未提交 (staged, 1 file)**
+- src/baz.rs
+
+**③ 已提交未推送 (unpushed, ahead of origin/main, 2 file)**
+- src/quux.rs
+- Cargo.toml
+```
+3. **不修代码、不 retry**，打印完继续下一 step 的分发。
 
 ### Success Report (after retries)
 

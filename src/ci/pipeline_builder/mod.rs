@@ -242,11 +242,13 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
 
     let step_defs = strategy.steps_from_pipeline(&info, pipeline);
     let git_pull = base::GitPullStep::new();
+    let git_diff = base::GitDiffStep::new();
 
     let mut map: HashMap<String, Box<dyn StepDef>> = HashMap::new();
     let ping_pong = base::PingPongStep::new();
     map.insert(ping_pong.config().name, Box::new(ping_pong));
     map.insert(git_pull.config().name, Box::new(git_pull));
+    map.insert(git_diff.config().name, Box::new(git_diff));
     for sd in step_defs {
         map.insert(sd.config().name, sd);
     }
@@ -264,12 +266,15 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
     let mut step_defs = strategy.steps(info);
     let name = strategy.pipeline_name(info);
 
-    // Prepend ping-pong (first) → git-pull (second), wire dependencies
+    // Prepend ping-pong → git-pull → git-diff, wire dependencies
     let ping_pong = base::PingPongStep::new();
     let ping_pong_name = ping_pong.config().name.clone();
 
     let git_pull = base::GitPullStep::new();
     let git_pull_name = git_pull.config().name.clone();
+
+    let git_diff = base::GitDiffStep::new();
+    let git_diff_name = git_diff.config().name.clone();
 
     for sd in &mut step_defs {
         let cfg = sd.config();
@@ -279,25 +284,29 @@ pub fn generate_pipeline(info: &ProjectInfo) -> (Pipeline, Vec<Box<dyn StepDef>>
         }
     }
 
-    // Collect configs: ping-pong first, then git-pull (depends on ping-pong),
-    // then strategy steps (root steps depend on git-pull)
+    // Collect configs: ping-pong → git-pull (depends on ping-pong) →
+    // git-diff (depends on git-pull) → strategy steps (root steps depend on git-diff).
     let ping_pong_cfg = ping_pong.config();
 
     let mut git_pull_cfg = git_pull.config();
     git_pull_cfg.depends_on.push(ping_pong_name.clone());
 
-    let mut all_configs: Vec<StepConfig> = vec![ping_pong_cfg, git_pull_cfg];
+    let mut git_diff_cfg = git_diff.config();
+    git_diff_cfg.depends_on.push(git_pull_name.clone());
+
+    let mut all_configs: Vec<StepConfig> = vec![ping_pong_cfg, git_pull_cfg, git_diff_cfg];
 
     for sd in &step_defs {
         let mut cfg = sd.config();
         if cfg.depends_on.is_empty() {
-            cfg.depends_on.push(git_pull_name.clone());
+            cfg.depends_on.push(git_diff_name.clone());
         }
         all_configs.push(cfg);
     }
 
-    // Build the full step def list with ping-pong and git-pull at the front
-    let mut all_step_defs: Vec<Box<dyn StepDef>> = vec![Box::new(ping_pong), Box::new(git_pull)];
+    // Build the full step def list with ping-pong, git-pull, git-diff at the front
+    let mut all_step_defs: Vec<Box<dyn StepDef>> =
+        vec![Box::new(ping_pong), Box::new(git_pull), Box::new(git_diff)];
     all_step_defs.extend(step_defs);
 
     // Convert configs to Steps, then attach on_failure from exception_mapping
@@ -492,9 +501,31 @@ mod tests {
         let defs = step_defs_for_pipeline(&pipeline).expect("should find rust strategy");
         assert!(defs.contains_key("ping-pong"));
         assert!(defs.contains_key("git-pull"));
+        assert!(defs.contains_key("git-diff"));
         assert!(defs.contains_key("build"));
         assert!(defs.contains_key("test"));
         assert!(defs.contains_key("clippy"));
         assert!(defs.contains_key("fmt-check"));
+    }
+
+    #[test]
+    fn test_generate_pipeline_has_git_diff_step() {
+        let info = make_rust_info();
+        let (pipeline, _) = generate_pipeline(&info);
+
+        let git_diff = pipeline
+            .get_step("git-diff")
+            .expect("git-diff step should exist");
+        assert!(git_diff.depends_on.contains(&"git-pull".to_string()));
+        assert!(git_diff.allow_failure);
+        let of = git_diff
+            .on_failure
+            .as_ref()
+            .expect("git-diff should have on_failure");
+        assert_eq!(of.callback_command, CallbackCommand::GitDiffCommand);
+
+        // Root strategy steps now depend on git-diff instead of git-pull
+        let build = pipeline.get_step("build").unwrap();
+        assert!(build.depends_on.contains(&"git-diff".to_string()));
     }
 }

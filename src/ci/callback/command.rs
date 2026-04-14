@@ -16,6 +16,7 @@ pub enum CallbackCommand {
     TestPrintCommand,
     PmdPrintCommand,
     SpotbugsPrintCommand,
+    GitDiffCommand,
 }
 
 pub struct CallbackCommandDef {
@@ -117,6 +118,15 @@ impl CallbackCommandRegistry {
                         .into(),
             },
         );
+        registry.register(
+            CallbackCommand::GitDiffCommand,
+            CallbackCommandDef {
+                action: CallbackCommandAction::GitDiffReport,
+                description:
+                    "git-diff found uncommitted or unpushed changes (report-only). LLM reads the three per-category file lists (unstaged / staged / unpushed) from pipelight-misc/git-diff-report/ and prints them grouped to the terminal. Pipeline continues."
+                        .into(),
+            },
+        );
         registry
     }
 
@@ -160,6 +170,7 @@ mod tests {
                 CallbackCommand::SpotbugsPrintCommand,
                 "\"spotbugs_print_command\"",
             ),
+            (CallbackCommand::GitDiffCommand, "\"git_diff_command\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -211,6 +222,10 @@ mod tests {
             registry.action_for(&CallbackCommand::SpotbugsPrintCommand),
             CallbackCommandAction::SpotbugsPrint
         );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::GitDiffCommand),
+            CallbackCommandAction::GitDiffReport
+        );
     }
 
     #[test]
@@ -242,6 +257,7 @@ mod tests {
         assert!(registry
             .get(&CallbackCommand::SpotbugsPrintCommand)
             .is_some());
+        assert!(registry.get(&CallbackCommand::GitDiffCommand).is_some());
     }
 
     #[test]

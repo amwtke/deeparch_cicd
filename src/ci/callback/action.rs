@@ -17,6 +17,10 @@ pub enum CallbackCommandAction {
     /// LLM parses the SpotBugs XML report and prints a grouped-by-category
     /// bugs table. Pipeline flow unaffected.
     SpotbugsPrint,
+    /// LLM reads the three per-category file lists produced by the git-diff
+    /// step and prints them grouped (unstaged / staged / unpushed) to the
+    /// terminal. Pipeline flow unaffected.
+    GitDiffReport,
 }
 
 #[cfg(test)]
@@ -33,6 +37,7 @@ mod tests {
             (CallbackCommandAction::TestPrint, "\"test_print\""),
             (CallbackCommandAction::PmdPrint, "\"pmd_print\""),
             (CallbackCommandAction::SpotbugsPrint, "\"spotbugs_print\""),
+            (CallbackCommandAction::GitDiffReport, "\"git_diff_report\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
