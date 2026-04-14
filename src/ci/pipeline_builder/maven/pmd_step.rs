@@ -30,22 +30,22 @@ impl StepDef for PmdStep {
         };
         // PMD with two modes (kept in sync with gradle/pmd_step.rs):
         //
-        //   Incremental mode (git repo present, PIPELIGHT_FULL unset):
+        //   Incremental mode (git repo present, PIPELIGHT_FULL_REPORT_ONLY unset):
         //     Scans source changes on the current branch that aren't yet pushed:
         //     - unstaged working tree edits
         //     - staged (uncommitted) changes
         //     - local commits ahead of @{upstream} (if upstream configured)
         //     If no changes → skip. Violations → auto_fix.
         //
-        //   Full-scan mode (PIPELIGHT_FULL=1 from `pipelight run --full`, OR no git repo):
+        //   Full-scan mode (PIPELIGHT_FULL_REPORT_ONLY=1 from `pipelight run --full-report-only`, OR no git repo):
         //     Scans every src/main/{java,kotlin} dir, produces a report, and always
         //     exits 0 (report-only; no auto_fix, does not block the pipeline).
         //
         // Uses standalone PMD CLI (bypasses the Maven plugin to avoid its default-ruleset merge).
         let cmd = format!(
-            "{cd}FULL_SCAN=${{PIPELIGHT_FULL:-0}} && \
+            "{cd}FULL_SCAN=${{PIPELIGHT_FULL_REPORT_ONLY:-0}} && \
              if [ \"$FULL_SCAN\" = \"1\" ]; then \
-               echo 'PMD: --full requested — full scan (report-only)'; \
+               echo 'PMD: --full-report-only requested — full scan (report-only)'; \
              elif ! git rev-parse --git-dir >/dev/null 2>&1; then \
                echo 'PMD: not a git repository — full scan (report-only)'; \
                FULL_SCAN=1; \

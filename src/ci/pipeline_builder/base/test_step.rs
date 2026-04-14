@@ -205,11 +205,8 @@ mod tests {
 
     #[test]
     fn test_custom_callback_command() {
-        let step =
-            TestStep::new(&make_info()).with_callback_command(CallbackCommand::RuntimeError);
-        let resolved = step
-            .exception_mapping()
-            .resolve(1, "", "failure", None);
+        let step = TestStep::new(&make_info()).with_callback_command(CallbackCommand::RuntimeError);
+        let resolved = step.exception_mapping().resolve(1, "", "failure", None);
         assert_eq!(resolved.command, CallbackCommand::RuntimeError);
     }
 }

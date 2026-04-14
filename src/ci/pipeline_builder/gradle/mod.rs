@@ -3,8 +3,8 @@ pub mod pmd_step;
 pub mod spotbugs_step;
 
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::base::{BuildStep, TestStep};
 use crate::ci::pipeline_builder::base;
+use crate::ci::pipeline_builder::base::{BuildStep, TestStep};
 use crate::ci::pipeline_builder::{test_parser, PipelineStrategy, StepConfig, StepDef};
 use regex::Regex;
 
@@ -15,8 +15,7 @@ fn parse_gradle_test(output: &str) -> Option<String> {
     // whenever that module has failing tests. With `--continue` every failing
     // module emits its own line, so we aggregate across all matches instead of
     // reading only the first.
-    let re =
-        Regex::new(r"(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?").unwrap();
+    let re = Regex::new(r"(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?").unwrap();
     let (mut total, mut failed, mut skipped) = (0u32, 0u32, 0u32);
     let mut found = false;
     for cap in re.captures_iter(output) {
@@ -651,7 +650,10 @@ mod tests {
         let info = make_gradle_info_with_lint();
         let strategy = GradleStrategy;
         let step_defs = strategy.steps(&info);
-        let test_step = step_defs.iter().find(|s| s.config().name == "test").unwrap();
+        let test_step = step_defs
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap();
         let resolved = test_step
             .exception_mapping()
             .resolve(1, "", "test failure", None);

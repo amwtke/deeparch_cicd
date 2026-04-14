@@ -156,7 +156,10 @@ mod tests {
             (CallbackCommand::Ping, "\"ping\""),
             (CallbackCommand::TestPrintCommand, "\"test_print_command\""),
             (CallbackCommand::PmdPrintCommand, "\"pmd_print_command\""),
-            (CallbackCommand::SpotbugsPrintCommand, "\"spotbugs_print_command\""),
+            (
+                CallbackCommand::SpotbugsPrintCommand,
+                "\"spotbugs_print_command\"",
+            ),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -236,7 +239,9 @@ mod tests {
         assert!(registry.get(&CallbackCommand::Ping).is_some());
         assert!(registry.get(&CallbackCommand::TestPrintCommand).is_some());
         assert!(registry.get(&CallbackCommand::PmdPrintCommand).is_some());
-        assert!(registry.get(&CallbackCommand::SpotbugsPrintCommand).is_some());
+        assert!(registry
+            .get(&CallbackCommand::SpotbugsPrintCommand)
+            .is_some());
     }
 
     #[test]

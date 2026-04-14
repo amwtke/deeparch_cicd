@@ -106,8 +106,7 @@ impl PipelineStrategy for MavenStrategy {
             // doesn't lie.
             let looks_failed = output.contains("BUILD FAILURE")
                 || output.contains("There are test failures")
-                || output.contains("Tests run: 0")
-                    && output.contains("FAILED");
+                || output.contains("Tests run: 0") && output.contains("FAILED");
             if looks_failed {
                 return "Tests had failures (report-only)".into();
             }

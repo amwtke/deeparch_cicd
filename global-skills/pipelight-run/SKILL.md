@@ -1,6 +1,6 @@
 ---
 name: pipelight-run
-description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --dry-run --verbose --docker-prepare --clean --full. Example: /pipelight-run --skip spotbugs,pmd --verbose"
+description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --dry-run --verbose --docker-prepare --clean --full-report-only. Example: /pipelight-run --skip spotbugs,pmd --verbose"
 ---
 
 # /pipelight-run
@@ -55,22 +55,22 @@ digraph pipelight {
 | `--docker-prepare` | Pull all Docker images from pipeline.yml without running pipeline | `/pipelight-run --docker-prepare` |
 | `--clean` | Remove pipeline.yml and pipelight-misc/ from current project | `/pipelight-run --clean` |
 | `--ping-pong` | Enable ping-pong communication test step (inactive by default) | `/pipelight-run --ping-pong` |
-| `--full` | Force full-scan + report-only mode for lint/scan steps (e.g. PMD). Bypasses incremental git-diff; violations do NOT trigger auto_fix | `/pipelight-run --full` |
+| `--full-report-only` | Force full-scan + report-only mode for lint/scan steps (e.g. PMD). Bypasses incremental git-diff; violations do NOT trigger auto_fix | `/pipelight-run --full-report-only` |
 
 Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
 
-## Full-Scan Mode (`--full`)
+## Full-Scan Mode (`--full-report-only`)
 
 By default, PMD (both Maven and Gradle) runs in **incremental mode**: scans only the source files (`*.java` / `*.kt`) changed on the current branch — unstaged working tree + staged + unpushed commits — and triggers `auto_fix` on violations.
 
-When `--full` is passed, pipelight sets `PIPELIGHT_FULL=1` on every step and persists the flag into `RunState`, so subsequent `pipelight retry` invocations inherit it automatically. PMD (Maven & Gradle) switches into **full-scan + report-only mode**:
+When `--full-report-only` is passed, pipelight sets `PIPELIGHT_FULL_REPORT_ONLY=1` on every step and persists the flag into `RunState`, so subsequent `pipelight retry` invocations inherit it automatically. PMD (Maven & Gradle) switches into **full-scan + report-only mode**:
 
 - Scans the entire project source tree (e.g. all `src/main/{java,kotlin}` directories)
 - Generates a complete PMD report at `pipelight-misc/pmd-report/`
 - **Always exits 0** regardless of violation count — the step never fails the pipeline
 - Violations do **NOT** trigger `auto_fix`; the LLM must not attempt to fix violations reported in this mode
 
-Use `--full` when you want a one-shot complete quality report across the whole codebase (e.g. before a release cut, or to get a baseline) without blocking the pipeline or mutating source files.
+Use `--full-report-only` when you want a one-shot complete quality report across the whole codebase (e.g. before a release cut, or to get a baseline) without blocking the pipeline or mutating source files.
 
 ## Clean Mode
 
@@ -128,7 +128,7 @@ pipelight run -f pipeline.yml --output json --run-id <short-id>
 - If `--dry-run` was passed, add `--dry-run` to show plan without executing
 - If `--verbose` was passed, add `--verbose` to show full container output
 - If `--ping-pong` was passed, add `--ping-pong` to activate the ping-pong communication test step
-- If `--full` was passed, add `--full` to force full-scan + report-only mode on lint/scan steps
+- If `--full-report-only` was passed, add `--full-report-only` to force full-scan + report-only mode on lint/scan steps
 
 ## Step 3: Parse JSON Result
 

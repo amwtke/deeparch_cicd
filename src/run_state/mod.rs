@@ -69,10 +69,10 @@ pub struct RunState {
     pub status: PipelineStatus,
     pub duration_ms: Option<u64>,
     pub steps: Vec<StepState>,
-    /// Full-scan mode flag set by `pipelight run --full`; persisted so retries
-    /// inherit the same scan semantics.
-    #[serde(default)]
-    pub full: bool,
+    /// Full-scan report-only mode flag set by `pipelight run --full-report-only`;
+    /// persisted so retries inherit the same scan semantics.
+    #[serde(default, alias = "full")]
+    pub full_report_only: bool,
 }
 
 impl RunState {
@@ -83,7 +83,7 @@ impl RunState {
             status: PipelineStatus::Running,
             duration_ms: None,
             steps: Vec::new(),
-            full: false,
+            full_report_only: false,
         }
     }
 

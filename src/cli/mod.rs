@@ -65,8 +65,8 @@ pub enum Command {
 
         /// Force full-scan + report-only mode for lint/scan steps (e.g. PMD).
         /// Bypasses incremental git-diff scanning; violations do not trigger auto_fix.
-        #[arg(long)]
-        full: bool,
+        #[arg(long = "full-report-only")]
+        full_report_only: bool,
     },
 
     /// Validate pipeline config
@@ -164,10 +164,18 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             run_id,
             verbose,
             ping_pong,
-            full,
+            full_report_only,
         } => {
             cmd_run(
-                file, step, skip, dry_run, output, run_id, verbose, ping_pong, full,
+                file,
+                step,
+                skip,
+                dry_run,
+                output,
+                run_id,
+                verbose,
+                ping_pong,
+                full_report_only,
             )
             .await
         }
@@ -203,7 +211,7 @@ async fn cmd_run(
     run_id: Option<String>,
     verbose: bool,
     ping_pong: bool,
-    full: bool,
+    full_report_only: bool,
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
@@ -239,7 +247,7 @@ async fn cmd_run(
 
     let run_id = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()[..8].to_string());
     let mut state = RunState::new(&run_id, &pipeline.name);
-    state.full = full;
+    state.full_report_only = full_report_only;
     let pipeline_start = std::time::Instant::now();
 
     // Clear logs and report directories in pipelight-misc/, but preserve config files
@@ -348,10 +356,11 @@ async fn cmd_run(
                 }
             }
 
-            // Propagate --full into every step as env var; scan steps (e.g. PMD)
-            // read PIPELIGHT_FULL to switch into full-scan + report-only mode.
-            if full {
-                step.env.insert("PIPELIGHT_FULL".into(), "1".into());
+            // Propagate --full-report-only into every step as env var; scan steps (e.g. PMD)
+            // read PIPELIGHT_FULL_REPORT_ONLY to switch into full-scan + report-only mode.
+            if full_report_only {
+                step.env
+                    .insert("PIPELIGHT_FULL_REPORT_ONLY".into(), "1".into());
             }
 
             // Signal step start
@@ -828,9 +837,11 @@ async fn cmd_retry(
         }
     }
 
-    // Inherit --full from the original run so retries keep the same scan semantics.
-    if state.full {
-        retry_step.env.insert("PIPELIGHT_FULL".into(), "1".into());
+    // Inherit --full-report-only from the original run so retries keep the same scan semantics.
+    if state.full_report_only {
+        retry_step
+            .env
+            .insert("PIPELIGHT_FULL_REPORT_ONLY".into(), "1".into());
     }
 
     let result = if retry_step.local {
