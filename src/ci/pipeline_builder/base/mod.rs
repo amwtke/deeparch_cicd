@@ -49,8 +49,8 @@ impl BaseStrategy {
                 Self::report_lint(success, step_name, &output)
             }
             "fmt-check" | "typecheck" | "mypy" => Self::report_check(success, step_name, &output),
-            "spotbugs" => Self::report_spotbugs(success, &output),
-            "pmd" => Self::report_pmd(success, &output),
+            "spotbugs" | "spotbugs_full" => Self::report_spotbugs(step_name, success, &output),
+            "pmd" | "pmd_full" => Self::report_pmd(step_name, success, &output),
             "package" => Self::report_package(success, &output),
             _ => {
                 if success {
@@ -161,44 +161,45 @@ impl BaseStrategy {
         }
     }
 
-    fn report_spotbugs(success: bool, output: &str) -> String {
+    fn report_spotbugs(step_name: &str, success: bool, output: &str) -> String {
+        if output.contains("not a git repository") {
+            return format!("{}: skipped (no git repo)", step_name);
+        }
         if output.contains("no changed java files")
             || output.contains("changed java files have no matching compiled classes")
         {
-            return "spotbugs: skipped (no changed files)".into();
+            return format!("{}: skipped (no changed files)", step_name);
         }
-        // Extract "SpotBugs Total: N bugs found" line from shell output
         if let Some(line) = output.lines().find(|l| l.contains("SpotBugs Total:")) {
             return line.trim().to_string();
         }
         if !success {
-            "spotbugs: failed".into()
+            format!("{}: failed", step_name)
         } else {
-            "spotbugs: no bugs found".into()
+            format!("{}: no bugs found", step_name)
         }
     }
 
-    fn report_pmd(success: bool, output: &str) -> String {
+    fn report_pmd(step_name: &str, success: bool, output: &str) -> String {
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
-            return "pmd: ruleset not found (callback)".into();
+            return format!("{}: ruleset not found (callback)", step_name);
         }
-        if output.contains("full-scan skipped — no pipelight-misc/pmd-ruleset.xml") {
-            return "pmd: skipped (no ruleset, full-report mode)".into();
+        if output.contains("not a git repository") {
+            return format!("{}: skipped (no git repo)", step_name);
         }
         if output.contains("no changed source files") {
-            return "pmd: skipped (no changed files)".into();
+            return format!("{}: skipped (no changed files)", step_name);
         }
-        // Extract "PMD Total: N violations" summary line if present
         if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
             return line.trim().to_string();
         }
         let violation_count = count_pattern(output, &["violation", "Violation"]);
         if !success && violation_count == 0 {
-            "pmd: failed".into()
+            format!("{}: failed", step_name)
         } else if violation_count > 0 {
-            format!("pmd: {} violations (report only)", violation_count)
+            format!("{}: {} violations", step_name, violation_count)
         } else {
-            "pmd: no violations".into()
+            format!("{}: no violations", step_name)
         }
     }
 

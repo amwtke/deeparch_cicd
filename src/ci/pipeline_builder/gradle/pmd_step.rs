@@ -6,6 +6,11 @@ use crate::ci::pipeline_builder::{count_pattern, git_changed_files_snippet, Step
 /// PMD version used for standalone CLI.
 const PMD_CLI_VERSION: &str = "7.9.0";
 
+/// Incremental PMD step (tag = "non-full").
+///
+/// Scans only source changes on the current branch that aren't yet pushed.
+/// Skips when there's no git repo or no pending changes. Violations trigger
+/// an `auto_fix` callback. Full-repo scans live in `pmd_full_step`.
 pub struct PmdStep {
     image: String,
     source_paths: Vec<String>,
@@ -28,40 +33,17 @@ impl StepDef for PmdStep {
             Some(subdir) => format!("cd {} && ", subdir),
             None => String::new(),
         };
-        // PMD with two modes:
-        //
-        //   Incremental mode (git repo present, --full-report-only not set):
-        //     Scans all source changes on the current branch that aren't yet pushed:
-        //     - unstaged working tree edits
-        //     - staged (uncommitted) changes
-        //     - local commits ahead of @{upstream} (if upstream configured)
-        //     If no changes → skip. Violations → auto_fix.
-        //
-        //   Full-scan mode (PIPELIGHT_FULL_REPORT_ONLY=1 from `pipelight run --full-report-only`, OR no git repo):
-        //     Scans every src/main/{java,kotlin} dir, produces a report, and always
-        //     exits 0 (report-only; no auto_fix, does not block the pipeline).
-        //
-        // Always uses standalone PMD CLI for file/dir-level targeting.
         let cmd = format!(
-            "{cd}FULL_SCAN=${{PIPELIGHT_FULL_REPORT_ONLY:-0}} && \
-             if [ \"$FULL_SCAN\" = \"1\" ]; then \
-               echo 'PMD: --full-report-only requested — full scan (report-only)'; \
-             elif ! git rev-parse --git-dir >/dev/null 2>&1; then \
-               echo 'PMD: not a git repository — full scan (report-only)'; \
-               FULL_SCAN=1; \
+            "{cd}if ! git rev-parse --git-dir >/dev/null 2>&1; then \
+               echo 'PMD: not a git repository — skipping (use pmd_full for full scan)'; \
+               exit 0; \
              fi && \
-             if [ \"$FULL_SCAN\" = \"0\" ]; then \
-               {changed_files} && \
-               if [ -z \"$CHANGED_FILES\" ]; then \
-                 echo 'PMD: no changed source files on current branch — skipping'; \
-                 exit 0; \
-               fi && \
-               echo \"PMD: scanning $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ') changed file(s) on current branch\"; \
-             else \
-               CHANGED_FILES=$(find . \\( -path '*/src/main/java' -o -path '*/src/main/kotlin' \\) -type d 2>/dev/null); \
-               if [ -z \"$CHANGED_FILES\" ]; then CHANGED_FILES=.; fi; \
-               echo \"PMD: full-scan sources:\"; echo \"$CHANGED_FILES\"; \
+             {changed_files} && \
+             if [ -z \"$CHANGED_FILES\" ]; then \
+               echo 'PMD: no changed source files on current branch — skipping'; \
+               exit 0; \
              fi && \
+             echo \"PMD: scanning $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ') changed file(s) on current branch\" && \
              if [ ! -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
                echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD {pmd_ver} rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
              fi && \
@@ -87,51 +69,24 @@ impl StepDef for PmdStep {
                exit 1; \
              fi; \
              REPORT=/workspace/pipelight-misc/pmd-report; \
-             TOTAL=0; \
-             for f in $REPORT/*.xml; do \
-               [ -f \"$f\" ] || continue; \
-               COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null); \
-               COUNT=${{COUNT:-0}}; \
-               if [ \"$COUNT\" -gt 0 ]; then echo \"  $(basename $f .xml): $COUNT violations\"; fi; \
-               TOTAL=$((TOTAL + COUNT)); \
-             done; \
+             TOTAL=$(grep -c '<violation' $REPORT/pmd-result.xml 2>/dev/null); \
+             TOTAL=${{TOTAL:-0}}; \
              echo \"\"; echo \"PMD Total: $TOTAL violations\"; \
-             echo \"Scanned files: $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ')\"; \
              echo \"\"; echo \"=== Violations by Rule ===\"; \
-             for f in $REPORT/*.xml; do \
-               [ -f \"$f\" ] || continue; \
-               grep -o 'rule=\"[^\"]*\"' \"$f\" 2>/dev/null; \
-             done | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
+             grep -o 'rule=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+               | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
              echo \"\"; echo \"=== Top 10 Files ===\"; \
-             for f in $REPORT/*.xml; do \
-               [ -f \"$f\" ] || continue; \
-               grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
-             done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
-             if [ \"$TOTAL\" -gt 0 ]; then \
-               $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
-                 -R /workspace/pipelight-misc/pmd-ruleset.xml \
-                 -f html --no-cache --no-progress \
-                 -r $REPORT/pmd-result.html 2>/dev/null || true; \
-             fi; \
-             mkdir -p $REPORT; \
-             ( echo \"PMD Report Summary\"; echo \"==================\";\
+             grep -o 'name=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+               | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
+             ( echo \"PMD Report Summary\"; echo \"==================\"; \
                echo \"Total violations: $TOTAL\"; echo \"\"; \
-               echo \"Scanned files:\"; echo \"$CHANGED_FILES\"; echo \"\"; \
                echo \"By Rule:\"; \
-               for f in $REPORT/*.xml; do \
-                 [ -f \"$f\" ] || continue; \
-                 grep -o 'rule=\"[^\"]*\"' \"$f\" 2>/dev/null; \
-               done | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
+               grep -o 'rule=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+                 | sed 's/rule=\"//;s/\"//' | sort | uniq -c | sort -rn; \
                echo \"\"; echo \"Top 10 Files:\"; \
-               for f in $REPORT/*.xml; do \
-                 [ -f \"$f\" ] || continue; \
-                 grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
-               done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
+               grep -o 'name=\"[^\"]*\"' $REPORT/pmd-result.xml 2>/dev/null \
+                 | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              ) > $REPORT/pmd-summary.txt 2>/dev/null; \
-             if [ \"$FULL_SCAN\" = \"1\" ]; then \
-               echo \"PMD: full-scan report-only mode — report at /workspace/pipelight-misc/pmd-report/\"; \
-               exit 0; \
-             fi; \
              if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
              exit $PMD_RC",
             cd = cd_prefix,
@@ -143,27 +98,25 @@ impl StepDef for PmdStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
-            // Report-only: violations surface via pmd_print_command callback,
-            // they don't block the pipeline. Ruleset-missing / invalid-ruleset
-            // still fire their retry callbacks because callbacks resolve on
-            // exit_code != 0 regardless of allow_failure.
-            allow_failure: true,
+            allow_failure: false,
+            tag: "non-full".into(),
             ..Default::default()
         }
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        // Default = RuntimeError: unclassified failures (git missing, network, IO)
-        // should abort rather than ask the LLM to do anything.
         ExceptionMapping::new(CallbackCommand::RuntimeError)
             .add(
                 "pmd_violations",
                 ExceptionEntry {
-                    command: CallbackCommand::PmdPrintCommand,
-                    max_retries: 0,
+                    command: CallbackCommand::AutoFix,
+                    max_retries: 3,
                     context_paths: vec![
                         "pipelight-misc/pmd-report/pmd-result.xml".into(),
                         "pipelight-misc/pmd-report/pmd-summary.txt".into(),
+                        "pipelight-misc/git-diff-report/staged.txt".into(),
+                        "pipelight-misc/git-diff-report/unstaged.txt".into(),
+                        "pipelight-misc/git-diff-report/unpushed.txt".into(),
                     ],
                 },
             )
@@ -193,10 +146,8 @@ impl StepDef for PmdStep {
         } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             Some("ruleset_not_found".into())
         } else if stdout.contains("PMD Total:") {
-            // PMD ran to completion; non-zero exit ⇒ violations found → pmd_print_command
             Some("pmd_violations".into())
         } else {
-            // PMD did not run (git missing, network, IO, etc.) → fall through to default
             None
         }
     }
@@ -206,17 +157,14 @@ impl StepDef for PmdStep {
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
         }
-        if output.contains("full-scan skipped — no pipelight-misc/pmd-ruleset.xml") {
-            return "pmd: skipped (no ruleset, full-report mode)".into();
+        if output.contains("not a git repository") {
+            return "pmd: skipped (no git repo)".into();
         }
         if output.contains("no changed source files") {
             return "pmd: skipped (no changed files)".into();
         }
-        let violations = count_pattern(&output, &["PMD Total:"]);
-        if violations > 0 {
-            if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
-                return line.trim().to_string();
-            }
+        if let Some(line) = output.lines().find(|l| l.contains("PMD Total:")) {
+            return line.trim().to_string();
         }
         let violation_count = count_pattern(&output, &["violation", "Violation"]);
         if !success && violation_count == 0 {

@@ -79,6 +79,13 @@ pub struct Step {
     /// Whether this step is active. Inactive steps are skipped at runtime.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub active: bool,
+
+    /// Activation-group tag. Toggled by `--full-report-only`:
+    /// - `"full"`: active only with `--full-report-only`
+    /// - `"non-full"`: active only *without* `--full-report-only`
+    /// - empty / `"default"`: always respect the `active` field as-is
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tag: String,
 }
 
 fn default_workdir() -> String {

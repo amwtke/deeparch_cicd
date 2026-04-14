@@ -225,6 +225,16 @@ async fn cmd_run(
         }
     }
 
+    // Tag-based activation: --full-report-only flips the "full" / "non-full"
+    // activation groups. Steps with empty/"default" tag are untouched.
+    for step in pipeline.steps.iter_mut() {
+        match step.tag.as_str() {
+            "full" => step.active = full_report_only,
+            "non-full" => step.active = !full_report_only,
+            _ => {}
+        }
+    }
+
     // Resolve project directory from pipeline file location
     let project_dir = file
         .canonicalize()
@@ -1314,6 +1324,7 @@ mod tests {
             volumes: vec![],
             local: false,
             active,
+            tag: String::new(),
         }
     }
 

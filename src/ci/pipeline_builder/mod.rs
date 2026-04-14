@@ -28,6 +28,10 @@ pub struct StepConfig {
     pub volumes: Vec<String>,
     pub local: bool,
     pub active: bool,
+    /// Activation group. Default = always active. "full" / "non-full" are
+    /// toggled by `--full-report-only`: with the flag → only "full" steps
+    /// run; without → only "non-full" steps run.
+    pub tag: String,
 }
 
 impl Default for StepConfig {
@@ -42,6 +46,7 @@ impl Default for StepConfig {
             volumes: vec![],
             local: false,
             active: true,
+            tag: String::new(),
         }
     }
 }
@@ -61,6 +66,7 @@ impl From<StepConfig> for Step {
             env: HashMap::new(),
             condition: None,
             active: sc.active,
+            tag: sc.tag,
         }
     }
 }

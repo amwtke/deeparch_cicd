@@ -1,22 +1,21 @@
 use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::{git_changed_files_snippet, StepConfig, StepDef};
+use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
-/// Incremental SpotBugs step (tag = "non-full").
+/// Full-repo SpotBugs scan (tag = "full").
 ///
-/// Scans only the `.class` files mapped from `.java` sources changed on the
-/// current branch. Skips when there's no git repo or no pending changes.
-/// Bugs trigger an `auto_fix` callback so the LLM fixes the source and
-/// retries. Full-repo scans live in `spotbugs_full_step` (tag = "full").
-pub struct SpotbugsStep {
+/// Activated by `--full-report-only`. Scans every `*/target/classes`
+/// directory. Never auto-fixes — bugs are surfaced via
+/// `spotbugs_print_command`; pipeline is not blocked (`allow_failure: true`).
+pub struct SpotbugsFullStep {
     image: String,
     #[allow(dead_code)]
     source_paths: Vec<String>,
     subdir: Option<String>,
 }
 
-impl SpotbugsStep {
+impl SpotbugsFullStep {
     pub fn new(info: &ProjectInfo) -> Self {
         Self {
             image: info.image.clone(),
@@ -26,7 +25,7 @@ impl SpotbugsStep {
     }
 }
 
-impl StepDef for SpotbugsStep {
+impl StepDef for SpotbugsFullStep {
     fn config(&self) -> StepConfig {
         let cd_prefix = match &self.subdir {
             Some(subdir) => format!("cd {} && ", subdir),
@@ -49,40 +48,7 @@ impl StepDef for SpotbugsStep {
              if [ -z \"$CLASS_DIRS\" ]; then \
                echo 'No compiled classes found (target/classes). Run build step first.' >&2; exit 1; \
              fi && \
-             if ! git rev-parse --git-dir >/dev/null 2>&1; then \
-               echo 'SpotBugs: not a git repository — skipping (use spotbugs_full for full scan)'; \
-               exit 0; \
-             fi && \
-             {changed_files} && \
-             if [ -z \"$CHANGED_FILES\" ]; then \
-               echo 'SpotBugs: no changed java files on current branch — skipping'; \
-               exit 0; \
-             fi && \
-             printf '%s\\n' \"$CHANGED_FILES\" > /tmp/sb-changed && \
-             : > /tmp/sb-targets && \
-             while IFS= read -r jf; do \
-               rel=$(echo \"$jf\" | sed -n 's|.*/src/main/java/||p'); \
-               [ -z \"$rel\" ] && continue; \
-               base=${{rel%.java}}; \
-               for cdir in $CLASS_DIRS; do \
-                 cdir_stripped=$(echo \"$cdir\" | sed 's:/*$::'); \
-                 pkg_dir=\"$cdir_stripped/$(dirname \"$base\")\"; \
-                 class_base=$(basename \"$base\"); \
-                 if [ -d \"$pkg_dir\" ]; then \
-                   for cf in \"$pkg_dir/$class_base.class\" \"$pkg_dir/$class_base\"\\$*.class; do \
-                     [ -f \"$cf\" ] && printf '%s ' \"$cf\" >> /tmp/sb-targets; \
-                   done; \
-                 fi; \
-               done; \
-             done < /tmp/sb-changed; \
-             ANALYZE_TARGETS=$(cat /tmp/sb-targets); \
-             if [ -z \"$ANALYZE_TARGETS\" ]; then \
-               echo 'SpotBugs: changed java files have no matching compiled classes — skipping'; \
-               exit 0; \
-             fi; \
-             NUM_FILES=$(echo \"$CHANGED_FILES\" | wc -l | tr -d ' '); \
-             NUM_CLASSES=$(echo \"$ANALYZE_TARGETS\" | wc -w | tr -d ' '); \
-             echo \"SpotBugs: scanning $NUM_CLASSES compiled class(es) from $NUM_FILES changed java file(s) on current branch\"; \
+             echo 'SpotBugs (full): scanning all */target/classes directories' && \
              AUX_CP=\"\" && \
              for dep_dir in $(find . -path '*/target/dependency' -type d 2>/dev/null); do \
                for jar in $dep_dir/*.jar; do \
@@ -103,7 +69,7 @@ impl StepDef for SpotbugsStep {
                -auxclasspath \"$AUX_CP\" \
                -low \
                $EXCLUDE_OPT \
-               $ANALYZE_TARGETS \
+               $CLASS_DIRS \
                2>/tmp/sb-stderr.log; \
              BUGS=$(grep -c '<BugInstance' /workspace/pipelight-misc/spotbugs-report/spotbugs-result.xml 2>/dev/null || echo 0); \
              echo \"\"; echo \"SpotBugs Total: $BUGS bugs found\"; \
@@ -118,6 +84,13 @@ impl StepDef for SpotbugsStep {
                grep -o 'type=\"[^\"]*\"' /workspace/pipelight-misc/spotbugs-report/spotbugs-result.xml 2>/dev/null \
                  | sed 's/type=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              fi && \
+             $SB_DIR/bin/spotbugs -textui \
+               -html \
+               -output /workspace/pipelight-misc/spotbugs-report/spotbugs-result.html \
+               -auxclasspath \"$AUX_CP\" \
+               -low \
+               $EXCLUDE_OPT \
+               $CLASS_DIRS 2>/dev/null || true && \
              ( echo \"SpotBugs Report Summary\"; echo \"======================\"; \
                echo \"Total bugs: $BUGS\"; echo \"\"; \
                echo \"By Category:\"; \
@@ -130,18 +103,18 @@ impl StepDef for SpotbugsStep {
                grep -o 'type=\"[^\"]*\"' /workspace/pipelight-misc/spotbugs-report/spotbugs-result.xml 2>/dev/null \
                  | sed 's/type=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              ) > /workspace/pipelight-misc/spotbugs-report/spotbugs-summary.txt 2>/dev/null; \
-             if [ \"$BUGS\" -gt 0 ]; then exit 1; fi; \
+             echo \"SpotBugs (full): report at /workspace/pipelight-misc/spotbugs-report/\"; \
              exit 0",
             cd = cd_prefix,
-            changed_files = git_changed_files_snippet(&["*.java"])
         );
         StepConfig {
-            name: "spotbugs".into(),
+            name: "spotbugs_full".into(),
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
-            allow_failure: false,
-            tag: "non-full".into(),
+            allow_failure: true,
+            active: false,
+            tag: "full".into(),
             ..Default::default()
         }
     }
@@ -150,14 +123,11 @@ impl StepDef for SpotbugsStep {
         ExceptionMapping::new(CallbackCommand::RuntimeError).add(
             "spotbugs_bugs_found",
             ExceptionEntry {
-                command: CallbackCommand::AutoFix,
-                max_retries: 3,
+                command: CallbackCommand::SpotbugsPrintCommand,
+                max_retries: 0,
                 context_paths: vec![
                     "pipelight-misc/spotbugs-report/spotbugs-result.xml".into(),
                     "pipelight-misc/spotbugs-report/spotbugs-summary.txt".into(),
-                    "pipelight-misc/git-diff-report/staged.txt".into(),
-                    "pipelight-misc/git-diff-report/unstaged.txt".into(),
-                    "pipelight-misc/git-diff-report/unpushed.txt".into(),
                 ],
             },
         )
@@ -173,21 +143,13 @@ impl StepDef for SpotbugsStep {
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
         let output = format!("{}{}", stdout, stderr);
-        if output.contains("not a git repository") {
-            return "spotbugs: skipped (no git repo)".into();
-        }
-        if output.contains("no changed java files")
-            || output.contains("changed java files have no matching compiled classes")
-        {
-            return "spotbugs: skipped (no changed files)".into();
-        }
         if let Some(line) = output.lines().find(|l| l.contains("SpotBugs Total:")) {
             return line.trim().to_string();
         }
         if !success {
-            "spotbugs: failed".into()
+            "spotbugs_full: failed".into()
         } else {
-            "spotbugs: no bugs found".into()
+            "spotbugs_full: no bugs found".into()
         }
     }
 }

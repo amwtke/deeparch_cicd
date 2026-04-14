@@ -1,5 +1,7 @@
 pub mod checkstyle_step;
+pub mod pmd_full_step;
 pub mod pmd_step;
+pub mod spotbugs_full_step;
 pub mod spotbugs_step;
 
 use crate::ci::detector::ProjectInfo;
@@ -172,14 +174,26 @@ impl PipelineStrategy for GradleStrategy {
                 vec![prev.clone()],
             )));
             prev = "spotbugs".into();
+
+            steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+                Box::new(spotbugs_full_step::SpotbugsFullStep::new(info)),
+                vec![prev.clone()],
+            )));
+            prev = "spotbugs_full".into();
         }
 
-        // PMD always runs — uses init script to inject plugin if not configured.
+        // PMD always runs — uses standalone CLI regardless of plugin configuration.
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
             Box::new(pmd_step::PmdStep::new(info)),
             vec![prev.clone()],
         )));
         prev = "pmd".into();
+
+        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+            Box::new(pmd_full_step::PmdFullStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "pmd_full".into();
 
         // Test step: run all tests (--continue), report-only (allow_failure),
         // no auto_fix — just produce the test report.
@@ -264,9 +278,16 @@ mod tests {
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
         assert_eq!(
             names,
-            vec!["build", "checkstyle", "spotbugs", "pmd", "test"]
+            vec![
+                "build",
+                "checkstyle",
+                "spotbugs",
+                "spotbugs_full",
+                "pmd",
+                "pmd_full",
+                "test",
+            ]
         );
-        // Serial chain: each step depends on the immediately preceding one.
         let by_name: std::collections::HashMap<String, Vec<String>> = steps
             .iter()
             .map(|s| {
@@ -276,8 +297,10 @@ mod tests {
             .collect();
         assert_eq!(by_name["checkstyle"], vec!["build".to_string()]);
         assert_eq!(by_name["spotbugs"], vec!["checkstyle".to_string()]);
-        assert_eq!(by_name["pmd"], vec!["spotbugs".to_string()]);
-        assert_eq!(by_name["test"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["spotbugs_full"], vec!["spotbugs".to_string()]);
+        assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
+        assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
     }
 
     #[test]
@@ -286,13 +309,41 @@ mod tests {
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
-        // PMD is always present even without lint plugins
-        assert_eq!(names, vec!["build", "pmd", "test"]);
-        // Serial chain collapses cleanly when quality plugins are absent.
-        let pmd_cfg = steps[1].config();
-        let test_cfg = steps[2].config();
-        assert_eq!(pmd_cfg.depends_on, vec!["build".to_string()]);
-        assert_eq!(test_cfg.depends_on, vec!["pmd".to_string()]);
+        // PMD (+ its full variant) always runs even without lint plugins.
+        assert_eq!(names, vec!["build", "pmd", "pmd_full", "test"]);
+        let by_name: std::collections::HashMap<String, Vec<String>> = steps
+            .iter()
+            .map(|s| {
+                let c = s.config();
+                (c.name, c.depends_on)
+            })
+            .collect();
+        assert_eq!(by_name["pmd"], vec!["build".to_string()]);
+        assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
+    }
+
+    #[test]
+    fn test_gradle_full_steps_tagged_and_inactive() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        for sd in &steps {
+            let cfg = sd.config();
+            match cfg.name.as_str() {
+                "pmd" | "spotbugs" => {
+                    assert_eq!(cfg.tag, "non-full");
+                    assert!(!cfg.allow_failure);
+                    assert!(cfg.active);
+                }
+                "pmd_full" | "spotbugs_full" => {
+                    assert_eq!(cfg.tag, "full");
+                    assert!(cfg.allow_failure);
+                    assert!(!cfg.active);
+                }
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -379,8 +430,8 @@ mod tests {
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
         let pv = &of.exceptions["pmd_violations"];
-        assert_eq!(pv.command, CallbackCommand::PmdPrintCommand);
-        assert_eq!(pv.max_retries, 0);
+        assert_eq!(pv.command, CallbackCommand::AutoFix);
+        assert_eq!(pv.max_retries, 3);
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(rnf.max_retries, 2);
@@ -440,10 +491,24 @@ mod tests {
     }
 
     #[test]
-    fn test_spotbugs_step_uses_spotbugs_print() {
+    fn test_spotbugs_incremental_uses_auto_fix() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_gradle_info_with_lint();
         let step = spotbugs_step::SpotbugsStep::new(&info);
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "SpotBugs Total: 3 bugs found\n",
+            "",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+    }
+
+    #[test]
+    fn test_spotbugs_full_uses_print_command() {
+        use crate::ci::callback::command::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let step = spotbugs_full_step::SpotbugsFullStep::new(&info);
         let resolved = step.exception_mapping().resolve(
             1,
             "SpotBugs Total: 3 bugs found\n",
@@ -549,56 +614,46 @@ mod tests {
             .unwrap()
             .config();
         let cmd = &pmd_cfg.commands[0];
+        assert!(cmd.contains("git diff --relative --name-only"));
+        assert!(cmd.contains("git diff --cached --relative --name-only"));
+        assert!(cmd.contains("\"$UPSTREAM\"..HEAD"));
+        assert!(cmd.contains("'*.java' '*.kt'"));
+        assert!(cmd.contains("@{upstream}"));
+        assert!(cmd.contains("no changed source files"));
         assert!(
-            cmd.contains("git diff --relative --name-only"),
-            "should collect unstaged working tree changes"
-        );
-        assert!(
-            cmd.contains("git diff --cached --relative --name-only"),
-            "should collect staged source files"
-        );
-        assert!(
-            cmd.contains("\"$UPSTREAM\"..HEAD"),
-            "should collect unpushed commits via upstream diff"
-        );
-        assert!(
-            cmd.contains("'*.java' '*.kt'"),
-            "should scan both .java and .kt files"
-        );
-        assert!(
-            cmd.contains("@{upstream}"),
-            "should detect upstream of current branch"
-        );
-        assert!(
-            cmd.contains("no changed source files"),
-            "should skip when no changed files"
-        );
-        assert!(
-            cmd.contains("FULL_SCAN=1") && cmd.contains("src/main/kotlin"),
-            "should fall back to full scan when not a git repo"
-        );
-        assert!(
-            cmd.contains("report-only"),
-            "full-scan mode should be report-only"
+            cmd.contains("not a git repository"),
+            "incremental step should skip when no git repo (full scan lives in pmd_full)"
         );
     }
 
     #[test]
-    fn test_pmd_violation_triggers_pmd_print() {
+    fn test_pmd_violation_triggers_auto_fix() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_gradle_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
-        let mapping = step.exception_mapping();
-        // PMD violations → pmd_print_command (report-only, no retry)
-        let resolved = mapping.resolve(
+        let resolved = step.exception_mapping().resolve(
             1,
             "PMD Total: 5 violations",
             "some pmd output",
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
-        assert_eq!(resolved.command, CallbackCommand::PmdPrintCommand);
-        assert_eq!(resolved.max_retries, 0);
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.max_retries, 3);
         assert_eq!(resolved.exception_key, "pmd_violations");
+    }
+
+    #[test]
+    fn test_pmd_full_violation_triggers_print() {
+        use crate::ci::callback::command::CallbackCommand;
+        let info = make_gradle_info_with_lint();
+        let step = pmd_full_step::PmdFullStep::new(&info);
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "PMD Total: 5 violations",
+            "",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::PmdPrintCommand);
     }
 
     #[test]

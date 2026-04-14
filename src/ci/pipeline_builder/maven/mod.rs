@@ -1,6 +1,8 @@
 pub mod checkstyle_step;
 pub mod package_step;
+pub mod pmd_full_step;
 pub mod pmd_step;
+pub mod spotbugs_full_step;
 pub mod spotbugs_step;
 
 use crate::ci::detector::ProjectInfo;
@@ -142,7 +144,13 @@ impl PipelineStrategy for MavenStrategy {
     }
 
     fn steps(&self, info: &ProjectInfo) -> Vec<Box<dyn StepDef>> {
-        // Serial chain: build → (checkstyle →)? spotbugs → pmd → test → package
+        // Serial chain:
+        //   build → (checkstyle →)? spotbugs → spotbugs_full → pmd → pmd_full → test → package
+        //
+        // Only one of {spotbugs, spotbugs_full} runs per invocation — picked by
+        // the tag-activation layer in cli/mod.rs based on --full-report-only.
+        // Same for {pmd, pmd_full}. The inactive step is skipped, so `test` and
+        // `package` can uniformly depend on the tail of the quality chain.
         let mut steps: Vec<Box<dyn StepDef>> = vec![];
         let mut prev: String = "build".into();
 
@@ -165,10 +173,22 @@ impl PipelineStrategy for MavenStrategy {
         prev = "spotbugs".into();
 
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(spotbugs_full_step::SpotbugsFullStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "spotbugs_full".into();
+
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
             Box::new(pmd_step::PmdStep::new(info)),
             vec![prev.clone()],
         )));
         prev = "pmd".into();
+
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(pmd_full_step::PmdFullStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "pmd_full".into();
 
         // Maven test step: mirror gradle — inject `--fail-at-end` so every
         // module's tests run (A fails → B still runs), then mark the step
@@ -255,9 +275,17 @@ mod tests {
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
         assert_eq!(
             names,
-            vec!["build", "checkstyle", "spotbugs", "pmd", "test", "package"]
+            vec![
+                "build",
+                "checkstyle",
+                "spotbugs",
+                "spotbugs_full",
+                "pmd",
+                "pmd_full",
+                "test",
+                "package",
+            ]
         );
-        // Serial chain: each quality step chains onto the previous one.
         let by_name: std::collections::HashMap<String, Vec<String>> = steps
             .iter()
             .map(|s| {
@@ -267,8 +295,10 @@ mod tests {
             .collect();
         assert_eq!(by_name["checkstyle"], vec!["build".to_string()]);
         assert_eq!(by_name["spotbugs"], vec!["checkstyle".to_string()]);
-        assert_eq!(by_name["pmd"], vec!["spotbugs".to_string()]);
-        assert_eq!(by_name["test"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["spotbugs_full"], vec!["spotbugs".to_string()]);
+        assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
+        assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
         assert_eq!(by_name["package"], vec!["test".to_string()]);
     }
 
@@ -278,8 +308,18 @@ mod tests {
         let strategy = MavenStrategy;
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
-        assert_eq!(names, vec!["build", "spotbugs", "pmd", "test", "package"]);
-        // Chain collapses cleanly: spotbugs → pmd → test → package, on top of build.
+        assert_eq!(
+            names,
+            vec![
+                "build",
+                "spotbugs",
+                "spotbugs_full",
+                "pmd",
+                "pmd_full",
+                "test",
+                "package",
+            ]
+        );
         let by_name: std::collections::HashMap<String, Vec<String>> = steps
             .iter()
             .map(|s| {
@@ -288,9 +328,34 @@ mod tests {
             })
             .collect();
         assert_eq!(by_name["spotbugs"], vec!["build".to_string()]);
-        assert_eq!(by_name["pmd"], vec!["spotbugs".to_string()]);
-        assert_eq!(by_name["test"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["spotbugs_full"], vec!["spotbugs".to_string()]);
+        assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
+        assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
+        assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
         assert_eq!(by_name["package"], vec!["test".to_string()]);
+    }
+
+    #[test]
+    fn test_maven_full_steps_tagged_and_inactive() {
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        for sd in &steps {
+            let cfg = sd.config();
+            match cfg.name.as_str() {
+                "pmd" | "spotbugs" => {
+                    assert_eq!(cfg.tag, "non-full", "{} should be tagged non-full", cfg.name);
+                    assert!(!cfg.allow_failure, "{} must fail hard on issues", cfg.name);
+                    assert!(cfg.active);
+                }
+                "pmd_full" | "spotbugs_full" => {
+                    assert_eq!(cfg.tag, "full", "{} should be tagged full", cfg.name);
+                    assert!(cfg.allow_failure, "{} is report-only", cfg.name);
+                    assert!(!cfg.active, "{} starts inactive by default", cfg.name);
+                }
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -384,8 +449,8 @@ mod tests {
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
         let pv = &of.exceptions["pmd_violations"];
-        assert_eq!(pv.command, CallbackCommand::PmdPrintCommand);
-        assert_eq!(pv.max_retries, 0);
+        assert_eq!(pv.command, CallbackCommand::AutoFix);
+        assert_eq!(pv.max_retries, 3);
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(rnf.max_retries, 2);
@@ -453,10 +518,24 @@ mod tests {
     }
 
     #[test]
-    fn test_spotbugs_step_uses_spotbugs_print() {
+    fn test_spotbugs_incremental_uses_auto_fix() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = spotbugs_step::SpotbugsStep::new(&info);
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "SpotBugs Total: 3 bugs found\n",
+            "",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+    }
+
+    #[test]
+    fn test_spotbugs_full_uses_print_command() {
+        use crate::ci::callback::command::CallbackCommand;
+        let info = make_maven_info_with_lint();
+        let step = spotbugs_full_step::SpotbugsFullStep::new(&info);
         let resolved = step.exception_mapping().resolve(
             1,
             "SpotBugs Total: 3 bugs found\n",
