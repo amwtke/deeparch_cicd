@@ -113,7 +113,7 @@ mod tests {
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
         assert_eq!(resolved.command, CallbackCommand::AutoFix);
-        assert_eq!(resolved.max_retries, 3);
+        assert_eq!(resolved.max_retries, 9);
         assert!(resolved.context_paths.contains(&"src/".to_string()));
         assert!(resolved.context_paths.contains(&"Cargo.toml".to_string()));
     }

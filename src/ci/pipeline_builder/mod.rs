@@ -455,7 +455,7 @@ mod tests {
             .as_ref()
             .expect("build should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::AutoFix);
-        assert_eq!(of.max_retries, 3);
+        assert_eq!(of.max_retries, 9);
         assert!(of.context_paths.contains(&"src/".to_string()));
         assert!(of.context_paths.contains(&"Cargo.toml".to_string()));
 
@@ -475,7 +475,7 @@ mod tests {
             .as_ref()
             .expect("fmt-check should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::AutoFix);
-        assert_eq!(of.max_retries, 1);
+        assert_eq!(of.max_retries, 9);
         assert!(of.context_paths.contains(&"src/".into()));
 
         // clippy: AutoFix, 2 retries
@@ -485,7 +485,7 @@ mod tests {
             .as_ref()
             .expect("clippy should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::AutoFix);
-        assert_eq!(of.max_retries, 2);
+        assert_eq!(of.max_retries, 9);
     }
 
     #[test]

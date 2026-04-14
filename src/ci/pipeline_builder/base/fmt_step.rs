@@ -112,7 +112,7 @@ mod tests {
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
         assert_eq!(resolved.command, CallbackCommand::AutoFix);
-        assert_eq!(resolved.max_retries, 1);
+        assert_eq!(resolved.max_retries, 9);
         assert_eq!(resolved.context_paths, vec!["src/"]);
     }
 

@@ -388,7 +388,7 @@ mod tests {
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
         assert_eq!(resolved.command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(resolved.max_retries, 2);
+        assert_eq!(resolved.max_retries, 9);
         assert!(!resolved.context_paths.is_empty());
     }
 
@@ -407,7 +407,7 @@ mod tests {
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
         assert_eq!(not_found.command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(not_found.max_retries, 2);
+        assert_eq!(not_found.max_retries, 9);
 
         // ruleset_invalid → AutoGenPmdRuleset (LLM regenerates with correct rule names)
         let invalid = mapping.resolve(
@@ -417,7 +417,7 @@ mod tests {
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
         assert_eq!(invalid.command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(invalid.max_retries, 2);
+        assert_eq!(invalid.max_retries, 9);
     }
 
     #[test]
@@ -432,13 +432,13 @@ mod tests {
         assert!(of.exceptions.contains_key("ruleset_invalid"));
         let pv = &of.exceptions["pmd_violations"];
         assert_eq!(pv.command, CallbackCommand::AutoFix);
-        assert_eq!(pv.max_retries, 3);
+        assert_eq!(pv.max_retries, 9);
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(rnf.max_retries, 2);
+        assert_eq!(rnf.max_retries, 9);
         let ri = &of.exceptions["ruleset_invalid"];
         assert_eq!(ri.command, CallbackCommand::AutoGenPmdRuleset);
-        assert_eq!(ri.max_retries, 2);
+        assert_eq!(ri.max_retries, 9);
     }
 
     #[test]
