@@ -487,17 +487,50 @@ async fn cmd_run(
                     })
                 }
             } else {
-                // Step succeeded — still attach on_failure for JSON output completeness
-                pipeline_step.and_then(|s| s.on_failure.as_ref()).map(|of| {
-                    let action = registry.action_for(&of.callback_command);
-                    OnFailureState {
-                        exception_key: "yaml_configured".into(),
-                        command: of.callback_command.clone(),
-                        action,
-                        max_retries: of.max_retries,
-                        retries_remaining: of.max_retries,
-                        context_paths: of.context_paths.clone(),
-                    }
+                // Step succeeded — try runtime resolver first so steps like `test`
+                // can still emit a report-only callback (e.g. `test_print_command`)
+                // to have the LLM print a per-module summary table. Fall back to
+                // the YAML-configured on_failure for JSON output completeness.
+                let runtime_state = if let Some(ref defs) = step_def_map {
+                    defs.get(step_name).and_then(|sd| {
+                        let match_fn = |ec: i64, out: &str, err: &str| -> Option<String> {
+                            sd.match_exception(ec, out, err)
+                        };
+                        // Only surface a callback when match_exception returned a key —
+                        // otherwise the default (Abort/RuntimeError) is meaningless noise.
+                        match_fn(result.exit_code, &stdout, &stderr).map(|_| {
+                            let resolved = sd.exception_mapping().resolve(
+                                result.exit_code,
+                                &stdout,
+                                &stderr,
+                                Some(&match_fn),
+                            );
+                            let action = registry.action_for(&resolved.command);
+                            OnFailureState {
+                                exception_key: resolved.exception_key,
+                                command: resolved.command,
+                                action,
+                                max_retries: resolved.max_retries,
+                                retries_remaining: resolved.max_retries,
+                                context_paths: resolved.context_paths,
+                            }
+                        })
+                    })
+                } else {
+                    None
+                };
+                runtime_state.or_else(|| {
+                    pipeline_step.and_then(|s| s.on_failure.as_ref()).map(|of| {
+                        let action = registry.action_for(&of.callback_command);
+                        OnFailureState {
+                            exception_key: "yaml_configured".into(),
+                            command: of.callback_command.clone(),
+                            action,
+                            max_retries: of.max_retries,
+                            retries_remaining: of.max_retries,
+                            context_paths: of.context_paths.clone(),
+                        }
+                    })
                 })
             };
 

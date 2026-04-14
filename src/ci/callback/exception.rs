@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use super::command::CallbackCommand;
 use crate::ci::parser::OnFailureException;
 
+#[derive(Clone)]
 pub struct ExceptionEntry {
     pub command: CallbackCommand,
     pub max_retries: u32,

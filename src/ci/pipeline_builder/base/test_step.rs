@@ -66,25 +66,30 @@ impl StepDef for TestStep {
 
     fn exception_mapping(&self) -> ExceptionMapping {
         let mut mapping = ExceptionMapping::new(self.callback_command.clone());
-        // When allow_failure is on and the build reports test failures, the
-        // executor still marks the step success. We surface a `test_print`
-        // callback so the LLM knows to parse per-module reports and print a
-        // formatted table instead of claiming everything passed.
-        if self.allow_failure {
-            mapping = mapping.add(
-                "test_failures",
-                ExceptionEntry {
-                    command: CallbackCommand::TestPrintCommand,
-                    max_retries: 0,
-                    context_paths: self.test_report_globs.clone(),
-                },
-            );
+        // Fire `test_print` whenever per-module JUnit reports exist — on failure
+        // (so the LLM explains what broke) and on success (so it always prints
+        // the summary table). Both paths share the same context_paths.
+        if !self.test_report_globs.is_empty() {
+            let entry = ExceptionEntry {
+                command: CallbackCommand::TestPrintCommand,
+                max_retries: 0,
+                context_paths: self.test_report_globs.clone(),
+            };
+            if self.allow_failure {
+                mapping = mapping.add("test_failures", entry.clone());
+            }
+            mapping = mapping.add("test_success", entry);
         }
         mapping
     }
 
     fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
         if exit_code == 0 {
+            // Always surface a test_print callback on success when globs are
+            // configured — we want the summary table printed every run.
+            if !self.test_report_globs.is_empty() {
+                return Some("test_success".into());
+            }
             return None;
         }
         let output = format!("{}{}", stdout, stderr);
