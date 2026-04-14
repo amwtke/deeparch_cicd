@@ -1,7 +1,9 @@
 use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::{count_pattern, StepConfig, StepDef};
+use crate::ci::pipeline_builder::{
+    count_pattern, git_changed_files_snippet, StepConfig, StepDef,
+};
 
 /// PMD version used for standalone CLI.
 const PMD_CLI_VERSION: &str = "7.9.0";
@@ -51,15 +53,7 @@ impl StepDef for PmdStep {
                FULL_SCAN=1; \
              fi && \
              if [ \"$FULL_SCAN\" = \"0\" ]; then \
-               UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{{upstream}} 2>/dev/null || true) && \
-               CHANGED_FILES=$( \
-                 {{ git diff --relative --name-only --diff-filter=ACMR -- '*.java' '*.kt' 2>/dev/null; \
-                    git diff --cached --relative --name-only --diff-filter=ACMR -- '*.java' '*.kt' 2>/dev/null; \
-                    if [ -n \"$UPSTREAM\" ]; then \
-                      git diff \"$UPSTREAM\"..HEAD --relative --name-only --diff-filter=ACMR -- '*.java' '*.kt' 2>/dev/null; \
-                    fi; \
-                 }} | sort -u | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
-               ) && \
+               {changed_files} && \
                if [ -z \"$CHANGED_FILES\" ]; then \
                  echo 'PMD: no changed source files on current branch — skipping'; \
                  exit 0; \
@@ -143,7 +137,8 @@ impl StepDef for PmdStep {
              if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
              exit $PMD_RC",
             cd = cd_prefix,
-            pmd_ver = PMD_CLI_VERSION
+            pmd_ver = PMD_CLI_VERSION,
+            changed_files = git_changed_files_snippet(&["*.java", "*.kt"])
         );
         StepConfig {
             name: "pmd".into(),

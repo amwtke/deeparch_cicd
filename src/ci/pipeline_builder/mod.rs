@@ -350,6 +350,40 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
     log_path
 }
 
+/// Shell snippet that sets `CHANGED_FILES` to the newline-separated list of files
+/// changed on the current branch but not yet pushed.
+///
+/// Combines three git diffs (all relative to cwd):
+/// - unstaged working tree edits
+/// - staged (uncommitted) changes
+/// - local commits ahead of `@{upstream}` (if upstream is configured)
+///
+/// Only files that currently exist on disk are kept. Caller decides what to do
+/// when `$CHANGED_FILES` is empty (typically print a "skipping" message and `exit 0`).
+///
+/// `globs` are pathspec patterns passed to `git diff -- <globs>` (e.g. `["*.java", "*.kt"]`).
+/// Callers must have already verified that the cwd is a git repo
+/// (e.g. `git rev-parse --git-dir >/dev/null 2>&1`).
+pub fn git_changed_files_snippet(globs: &[&str]) -> String {
+    let globs_arg = globs
+        .iter()
+        .map(|g| format!("'{}'", g))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{{upstream}} 2>/dev/null || true) && \
+         CHANGED_FILES=$( \
+           {{ git diff --relative --name-only --diff-filter=ACMR -- {globs} 2>/dev/null; \
+              git diff --cached --relative --name-only --diff-filter=ACMR -- {globs} 2>/dev/null; \
+              if [ -n \"$UPSTREAM\" ]; then \
+                git diff \"$UPSTREAM\"..HEAD --relative --name-only --diff-filter=ACMR -- {globs} 2>/dev/null; \
+              fi; \
+           }} | sort -u | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
+         )",
+        globs = globs_arg
+    )
+}
+
 /// Count lines in output that match any of the given patterns.
 pub fn count_pattern(output: &str, patterns: &[&str]) -> usize {
     output
