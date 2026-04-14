@@ -186,7 +186,7 @@ Example:
 | test | success | Tests: 42 passed, 0 failed |
 | package | success | Packaged successfully |
 
-**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` whose action is `print` (e.g. `test_print` when a `report-only` test step saw failures). After rendering the summary table, look at every step's `on_failure` field — if `action == "print"`, dispatch via the callback table below (it's a post-run report the pipeline already let pass).
+**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` asking you to print a post-run report (e.g. `test_print_command`, `pmd_print_command`, `bughot_print_command` from report-only steps). After rendering the summary table, look at every step's `on_failure` field — if `action` is `test_print`, `pmd_print`, or `bughot_print`, dispatch via the callback table below. These are pure reporting actions; the pipeline has already continued.
 
 ### `status: "failed"`
 
@@ -209,7 +209,9 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 | `auto_fix` | retry | 见下方 **`auto_fix` 详细流程** | `pipelight retry` 重试该 step | retries 耗尽则报告失败 |
 | `auto_gen_pmd_ruleset` | retry | 见下方 **`auto_gen_pmd_ruleset` 详细流程** | `pipelight retry` 重试该 step | skip PMD: `pipelight retry --skip pmd` |
 | `ping` | retry | 在终端打印 `pong`，然后 `pipelight retry` 重试该 step | `pipelight retry` 重试该 step | 10 轮完成后 step 自动成功 |
-| `test_print` | print | 见下方 **`test_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `test_print_command` | test_print | 见下方 **`test_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `pmd_print_command` | pmd_print | 见下方 **`pmd_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `bughot_print_command` | bughot_print | 见下方 **`bughot_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
@@ -297,7 +299,7 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 
 #### `test_print` 详细流程
 
-`test_print` 是 post-run 打印型回调（`action: "print"`），由 `allow_failure` 的 test step 在有测试失败时发出。pipeline 已经判定为 success，**不 retry**，LLM 的任务只是把 per-module 的测试结果聚合成表格打印给用户。
+`test_print` 是 post-run 打印型 action（由 `test_print_command` 触发），`allow_failure` 的 test step 在有测试失败时发出。pipeline 已经判定为 success，**不 retry**，LLM 的任务只是把 per-module 的测试结果聚合成表格。
 
 1. 从失败 step 的 `on_failure.context_paths` 读 glob（已根据构建工具给好）：
    - Gradle：`**/build/test-results/test/*.xml`、`**/build/reports/tests/test/index.html`
@@ -309,7 +311,38 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 6. 表格下方用 2-3 句话点明：本次实际跑了多少模块（vs 被 gradle/maven cache 判定 UP-TO-DATE 未重跑的模块数，可从 stdout 的 `N executed, M up-to-date` 提取；没有就不提），以及最常见的失败根因（从 XML 的 `<failure message="...">` 提炼一条）
 7. **没有 retry 步骤** — pipeline 已经继续，这是纯报告行为
 
-> **注意**：`test_print` 只在 step 已经 success 且 `on_failure.command == "test_print"` 时执行。别把它当成 retryable step 去调 `pipelight retry`。
+#### `pmd_print` 详细流程
+
+`pmd_print` 是 PMD 的 post-run 打印型 action（由 `pmd_print_command` 触发）。当 PMD 扫到违规时 pipelight 把报告路径写进 `on_failure.context_paths`，LLM 只做报告，**不修代码、不 retry**。
+
+1. 从 `on_failure.context_paths` 读路径（已经给好）：
+   - `pipelight-misc/pmd-report/pmd-result.xml` — 原始结构化报告
+   - `pipelight-misc/pmd-report/pmd-summary.txt` — pipelight 预生成的文本摘要（可直接引用）
+2. 解析 `pmd-result.xml`，聚合 `<violation rule="..." ruleset="..." priority="..." beginline="...">` 节点
+3. 打印两张 Markdown 表格：
+   - **按规则**：规则名 / 触发次数 / 优先级 / 示例文件:行号（取首个）
+   - **按文件（Top 10）**：文件路径 / 违规条数（含最高优先级）
+4. 表格上方用一行标明：`PMD Total: N violations（扫描 K 个文件）` — N 取自 stdout 的 `PMD Total:`，K 取自 `Scanned files:`
+5. 若 violations 为 0 则不用打印任何表（callback 本来也不会触发）
+
+> **注意**：不要尝试修改源码。若用户明确要求修复，再按常规编辑流程处理，但那不是 pmd_print 的职责。
+
+#### `bughot_print` 详细流程
+
+`bughot_print` 是 SpotBugs 的 post-run 打印型 action（由 `bughot_print_command` 触发）。流程与 pmd_print 同构。
+
+1. 从 `on_failure.context_paths` 读路径：
+   - `pipelight-misc/spotbugs-report/spotbugs-result.xml`
+   - `pipelight-misc/spotbugs-report/spotbugs-summary.txt`
+2. 解析 `spotbugs-result.xml` 的 `<BugInstance type="..." priority="..." category="...">` 与子节点 `<Class classname="..."><SourceLine sourcefile="..." start="..." />` 等
+3. 打印三张表：
+   - **按 Category**：category / 次数
+   - **按 Priority**：priority (1=High / 2=Medium / 3=Low) / 次数
+   - **Top 10 Bug Types**：type / 次数 / 示例 class:line
+4. 表格上方一行：`SpotBugs Total: N bugs found`（取自 stdout）
+5. **不修代码、不 retry**
+
+> **注意**：Priority 1 (High) 的 Bug 若涉及安全类（SQL 注入、XSS 等），在表下方简短点出 1-2 行告警，但仍然只是报告，不自动改代码。
 
 ### Success Report (after retries)
 

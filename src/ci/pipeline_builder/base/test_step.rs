@@ -74,7 +74,7 @@ impl StepDef for TestStep {
             mapping = mapping.add(
                 "test_failures",
                 ExceptionEntry {
-                    command: CallbackCommand::TestPrint,
+                    command: CallbackCommand::TestPrintCommand,
                     max_retries: 0,
                     context_paths: self.test_report_globs.clone(),
                 },

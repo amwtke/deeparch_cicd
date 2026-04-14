@@ -134,20 +134,23 @@ impl StepDef for PmdStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
+            // Report-only: see gradle/pmd_step.rs for rationale.
+            allow_failure: true,
             ..Default::default()
         }
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        // Default = RuntimeError: unclassified failures (git missing, network, IO)
-        // should abort rather than ask the LLM to edit source code.
         ExceptionMapping::new(CallbackCommand::RuntimeError)
             .add(
-                "pmd_violation",
+                "pmd_violations",
                 ExceptionEntry {
-                    command: CallbackCommand::AutoFix,
-                    max_retries: 3,
-                    context_paths: self.source_paths.clone(),
+                    command: CallbackCommand::PmdPrintCommand,
+                    max_retries: 0,
+                    context_paths: vec![
+                        "pipelight-misc/pmd-report/pmd-result.xml".into(),
+                        "pipelight-misc/pmd-report/pmd-summary.txt".into(),
+                    ],
                 },
             )
             .add(
@@ -176,10 +179,10 @@ impl StepDef for PmdStep {
         } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             Some("ruleset_not_found".into())
         } else if stdout.contains("PMD Total:") {
-            // PMD ran to completion; non-zero exit ⇒ violations found → auto_fix
-            Some("pmd_violation".into())
+            // PMD ran to completion; non-zero exit ⇒ violations found → pmd_print_command
+            Some("pmd_violations".into())
         } else {
-            // PMD did not run (git missing, network, IO) → fall through to default RuntimeError
+            // PMD did not run (git missing, network, IO) → fall through to default
             None
         }
     }

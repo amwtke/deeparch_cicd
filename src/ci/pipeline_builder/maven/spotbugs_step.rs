@@ -103,6 +103,7 @@ impl StepDef for SpotbugsStep {
                grep -o 'type=\"[^\"]*\"' /workspace/pipelight-misc/spotbugs-report/spotbugs-result.xml 2>/dev/null \
                  | sed 's/type=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              ) > /workspace/pipelight-misc/spotbugs-report/spotbugs-summary.txt 2>/dev/null; \
+             if [ \"$BUGS\" -gt 0 ]; then exit 1; fi; \
              exit 0",
             cd = cd_prefix
         );
@@ -111,23 +112,32 @@ impl StepDef for SpotbugsStep {
             image: self.image.clone(),
             commands: vec![cmd],
             depends_on: vec!["build".into()],
+            // Report-only: bugs surface via bughot_print_command.
+            allow_failure: true,
             ..Default::default()
         }
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::AutoFix).add(
-            "spotbugs_found",
+        ExceptionMapping::new(CallbackCommand::RuntimeError).add(
+            "spotbugs_bugs_found",
             ExceptionEntry {
-                command: CallbackCommand::AutoFix,
-                max_retries: 2,
-                context_paths: self.source_paths.clone(),
+                command: CallbackCommand::BughotPrintCommand,
+                max_retries: 0,
+                context_paths: vec![
+                    "pipelight-misc/spotbugs-report/spotbugs-result.xml".into(),
+                    "pipelight-misc/spotbugs-report/spotbugs-summary.txt".into(),
+                ],
             },
         )
     }
 
-    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
-        Some("spotbugs_found".into())
+    fn match_exception(&self, _exit_code: i64, stdout: &str, _stderr: &str) -> Option<String> {
+        if stdout.contains("SpotBugs Total:") {
+            Some("spotbugs_bugs_found".into())
+        } else {
+            None
+        }
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {

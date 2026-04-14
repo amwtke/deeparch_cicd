@@ -381,12 +381,12 @@ mod tests {
         let step = pmd_step::PmdStep::new(&info);
         let of = step.exception_mapping().to_on_failure();
         assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
-        assert!(of.exceptions.contains_key("pmd_violation"));
+        assert!(of.exceptions.contains_key("pmd_violations"));
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
-        let pv = &of.exceptions["pmd_violation"];
-        assert_eq!(pv.command, CallbackCommand::AutoFix);
-        assert_eq!(pv.max_retries, 3);
+        let pv = &of.exceptions["pmd_violations"];
+        assert_eq!(pv.command, CallbackCommand::PmdPrintCommand);
+        assert_eq!(pv.max_retries, 0);
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(rnf.max_retries, 2);
@@ -454,17 +454,17 @@ mod tests {
     }
 
     #[test]
-    fn test_spotbugs_step_uses_autofix() {
+    fn test_spotbugs_step_uses_bughot_print() {
         use crate::ci::callback::command::CallbackCommand;
         let info = make_maven_info_with_lint();
         let step = spotbugs_step::SpotbugsStep::new(&info);
         let resolved = step.exception_mapping().resolve(
             1,
+            "SpotBugs Total: 3 bugs found\n",
             "",
-            "some spotbugs error",
             Some(&|ec, out, err| step.match_exception(ec, out, err)),
         );
-        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.command, CallbackCommand::BughotPrintCommand);
     }
 
     #[test]

@@ -13,7 +13,9 @@ pub enum CallbackCommand {
     FailAndSkip,
     GitFail,
     Ping,
-    TestPrint,
+    TestPrintCommand,
+    PmdPrintCommand,
+    BughotPrintCommand,
 }
 
 pub struct CallbackCommandDef {
@@ -89,11 +91,29 @@ impl CallbackCommandRegistry {
             },
         );
         registry.register(
-            CallbackCommand::TestPrint,
+            CallbackCommand::TestPrintCommand,
             CallbackCommandDef {
-                action: CallbackCommandAction::Print,
+                action: CallbackCommandAction::TestPrint,
                 description:
-                    "Test run finished with failures (report-only). LLM parses per-module test reports and prints a formatted summary table. Pipeline continues."
+                    "Test run finished with failures (report-only). LLM parses per-module JUnit XML reports and prints a formatted summary table. Pipeline continues."
+                        .into(),
+            },
+        );
+        registry.register(
+            CallbackCommand::PmdPrintCommand,
+            CallbackCommandDef {
+                action: CallbackCommandAction::PmdPrint,
+                description:
+                    "PMD scan found violations (report-only). LLM parses the PMD XML report and prints a grouped-by-rule violations table. Pipeline continues."
+                        .into(),
+            },
+        );
+        registry.register(
+            CallbackCommand::BughotPrintCommand,
+            CallbackCommandDef {
+                action: CallbackCommandAction::BughotPrint,
+                description:
+                    "SpotBugs scan found bugs (report-only). LLM parses the SpotBugs XML report and prints a grouped-by-category bugs table. Pipeline continues."
                         .into(),
             },
         );
@@ -134,7 +154,9 @@ mod tests {
             (CallbackCommand::FailAndSkip, "\"fail_and_skip\""),
             (CallbackCommand::GitFail, "\"git_fail\""),
             (CallbackCommand::Ping, "\"ping\""),
-            (CallbackCommand::TestPrint, "\"test_print\""),
+            (CallbackCommand::TestPrintCommand, "\"test_print_command\""),
+            (CallbackCommand::PmdPrintCommand, "\"pmd_print_command\""),
+            (CallbackCommand::BughotPrintCommand, "\"bughot_print_command\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -175,8 +197,16 @@ mod tests {
             CallbackCommandAction::Retry
         );
         assert_eq!(
-            registry.action_for(&CallbackCommand::TestPrint),
-            CallbackCommandAction::Print
+            registry.action_for(&CallbackCommand::TestPrintCommand),
+            CallbackCommandAction::TestPrint
+        );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::PmdPrintCommand),
+            CallbackCommandAction::PmdPrint
+        );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::BughotPrintCommand),
+            CallbackCommandAction::BughotPrint
         );
     }
 
@@ -204,7 +234,9 @@ mod tests {
         assert!(registry.get(&CallbackCommand::FailAndSkip).is_some());
         assert!(registry.get(&CallbackCommand::GitFail).is_some());
         assert!(registry.get(&CallbackCommand::Ping).is_some());
-        assert!(registry.get(&CallbackCommand::TestPrint).is_some());
+        assert!(registry.get(&CallbackCommand::TestPrintCommand).is_some());
+        assert!(registry.get(&CallbackCommand::PmdPrintCommand).is_some());
+        assert!(registry.get(&CallbackCommand::BughotPrintCommand).is_some());
     }
 
     #[test]
