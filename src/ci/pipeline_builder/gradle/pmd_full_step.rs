@@ -108,7 +108,7 @@ impl StepDef for PmdFullStep {
                 "ruleset_not_found",
                 ExceptionEntry {
                     command: CallbackCommand::AutoGenPmdRuleset,
-                    max_retries: 2,
+                    max_retries: 9,
                     context_paths: self.source_paths.clone(),
                 },
             )
@@ -116,7 +116,7 @@ impl StepDef for PmdFullStep {
                 "ruleset_invalid",
                 ExceptionEntry {
                     command: CallbackCommand::AutoGenPmdRuleset,
-                    max_retries: 2,
+                    max_retries: 9,
                     context_paths: self.source_paths.clone(),
                 },
             )

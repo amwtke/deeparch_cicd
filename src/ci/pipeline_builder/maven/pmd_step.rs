@@ -112,7 +112,7 @@ impl StepDef for PmdStep {
                 "pmd_violations",
                 ExceptionEntry {
                     command: CallbackCommand::AutoFix,
-                    max_retries: 3,
+                    max_retries: 9,
                     context_paths: vec![
                         "pipelight-misc/pmd-report/pmd-result.xml".into(),
                         "pipelight-misc/pmd-report/pmd-summary.txt".into(),
@@ -126,7 +126,7 @@ impl StepDef for PmdStep {
                 "ruleset_not_found",
                 ExceptionEntry {
                     command: CallbackCommand::AutoGenPmdRuleset,
-                    max_retries: 2,
+                    max_retries: 9,
                     context_paths: self.source_paths.clone(),
                 },
             )
@@ -134,7 +134,7 @@ impl StepDef for PmdStep {
                 "ruleset_invalid",
                 ExceptionEntry {
                     command: CallbackCommand::AutoGenPmdRuleset,
-                    max_retries: 2,
+                    max_retries: 9,
                     context_paths: self.source_paths.clone(),
                 },
             )

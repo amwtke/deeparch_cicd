@@ -90,7 +90,7 @@ impl StepDef for VueTypecheckStep {
             "typecheck_error",
             ExceptionEntry {
                 command: CallbackCommand::AutoFix,
-                max_retries: 2,
+                max_retries: 9,
                 context_paths: self.context_paths.clone(),
             },
         );

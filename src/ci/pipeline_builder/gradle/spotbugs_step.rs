@@ -131,7 +131,7 @@ impl StepDef for SpotbugsStep {
             "spotbugs_bugs_found",
             ExceptionEntry {
                 command: CallbackCommand::AutoFix,
-                max_retries: 3,
+                max_retries: 9,
                 context_paths: vec![
                     "pipelight-misc/spotbugs-report/spotbugs-result.xml".into(),
                     "pipelight-misc/spotbugs-report/spotbugs-summary.txt".into(),
