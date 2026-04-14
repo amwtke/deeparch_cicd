@@ -62,6 +62,11 @@ pub enum Command {
         /// Enable ping-pong communication test step
         #[arg(long)]
         ping_pong: bool,
+
+        /// Force full-scan + report-only mode for lint/scan steps (e.g. PMD).
+        /// Bypasses incremental git-diff scanning; violations do not trigger auto_fix.
+        #[arg(long)]
+        full: bool,
     },
 
     /// Validate pipeline config
@@ -159,9 +164,10 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             run_id,
             verbose,
             ping_pong,
+            full,
         } => {
             cmd_run(
-                file, step, skip, dry_run, output, run_id, verbose, ping_pong,
+                file, step, skip, dry_run, output, run_id, verbose, ping_pong, full,
             )
             .await
         }
@@ -197,6 +203,7 @@ async fn cmd_run(
     run_id: Option<String>,
     verbose: bool,
     ping_pong: bool,
+    full: bool,
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
@@ -232,6 +239,7 @@ async fn cmd_run(
 
     let run_id = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()[..8].to_string());
     let mut state = RunState::new(&run_id, &pipeline.name);
+    state.full = full;
     let pipeline_start = std::time::Instant::now();
 
     // Clear logs and report directories in pipelight-misc/, but preserve config files
@@ -340,6 +348,12 @@ async fn cmd_run(
                 }
             }
 
+            // Propagate --full into every step as env var; scan steps (e.g. PMD)
+            // read PIPELIGHT_FULL to switch into full-scan + report-only mode.
+            if full {
+                step.env.insert("PIPELIGHT_FULL".into(), "1".into());
+            }
+
             // Signal step start
             if let Some(ref progress) = progress {
                 progress.lock().unwrap().start_step(step_name);
@@ -421,8 +435,11 @@ async fn cmd_run(
                 );
             }
 
-            // Build on_failure state: prefer runtime exception resolve, fall back to YAML config
-            let mut on_failure_state = if !result.success {
+            // Build on_failure state: prefer runtime exception resolve, fall back to YAML config.
+            // NOTE: we key on exit_code != 0 (not !success) so that `allow_failure` steps —
+            // which are marked success even when the underlying build failed — still publish
+            // a callback (e.g. `test_print`) that the LLM can act on.
+            let mut on_failure_state = if result.exit_code != 0 {
                 // Try runtime resolve via StepDef exception_mapping
                 if let Some(ref defs) = step_def_map {
                     if let Some(sd) = defs.get(step_name) {
@@ -776,6 +793,11 @@ async fn cmd_retry(
                 .env
                 .insert("GIT_PIPELIGHT_PASS".into(), creds.password.clone());
         }
+    }
+
+    // Inherit --full from the original run so retries keep the same scan semantics.
+    if state.full {
+        retry_step.env.insert("PIPELIGHT_FULL".into(), "1".into());
     }
 
     let result = if retry_step.local {

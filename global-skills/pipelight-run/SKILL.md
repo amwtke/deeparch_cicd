@@ -1,6 +1,6 @@
 ---
 name: pipelight-run
-description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --dry-run --verbose --docker-prepare --clean. Example: /pipelight-run --skip spotbugs,pmd --verbose"
+description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --dry-run --verbose --docker-prepare --clean --full. Example: /pipelight-run --skip spotbugs,pmd --verbose"
 ---
 
 # /pipelight-run
@@ -55,8 +55,22 @@ digraph pipelight {
 | `--docker-prepare` | Pull all Docker images from pipeline.yml without running pipeline | `/pipelight-run --docker-prepare` |
 | `--clean` | Remove pipeline.yml and pipelight-misc/ from current project | `/pipelight-run --clean` |
 | `--ping-pong` | Enable ping-pong communication test step (inactive by default) | `/pipelight-run --ping-pong` |
+| `--full` | Force full-scan + report-only mode for lint/scan steps (e.g. PMD). Bypasses incremental git-diff; violations do NOT trigger auto_fix | `/pipelight-run --full` |
 
 Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
+
+## Full-Scan Mode (`--full`)
+
+By default, PMD (both Maven and Gradle) runs in **incremental mode**: scans only the source files (`*.java` / `*.kt`) changed on the current branch — unstaged working tree + staged + unpushed commits — and triggers `auto_fix` on violations.
+
+When `--full` is passed, pipelight sets `PIPELIGHT_FULL=1` on every step and persists the flag into `RunState`, so subsequent `pipelight retry` invocations inherit it automatically. PMD (Maven & Gradle) switches into **full-scan + report-only mode**:
+
+- Scans the entire project source tree (e.g. all `src/main/{java,kotlin}` directories)
+- Generates a complete PMD report at `pipelight-misc/pmd-report/`
+- **Always exits 0** regardless of violation count — the step never fails the pipeline
+- Violations do **NOT** trigger `auto_fix`; the LLM must not attempt to fix violations reported in this mode
+
+Use `--full` when you want a one-shot complete quality report across the whole codebase (e.g. before a release cut, or to get a baseline) without blocking the pipeline or mutating source files.
 
 ## Clean Mode
 
@@ -114,6 +128,7 @@ pipelight run -f pipeline.yml --output json --run-id <short-id>
 - If `--dry-run` was passed, add `--dry-run` to show plan without executing
 - If `--verbose` was passed, add `--verbose` to show full container output
 - If `--ping-pong` was passed, add `--ping-pong` to activate the ping-pong communication test step
+- If `--full` was passed, add `--full` to force full-scan + report-only mode on lint/scan steps
 
 ## Step 3: Parse JSON Result
 
@@ -171,6 +186,8 @@ Example:
 | test | success | Tests: 42 passed, 0 failed |
 | package | success | Packaged successfully |
 
+**Important:** even under `status: "success"`, a step may still carry an `on_failure.command` whose action is `print` (e.g. `test_print` when a `report-only` test step saw failures). After rendering the summary table, look at every step's `on_failure` field — if `action == "print"`, dispatch via the callback table below (it's a post-run report the pipeline already let pass).
+
 ### `status: "failed"`
 
 Pipeline failed with no auto-fix strategy. Report the error:
@@ -192,6 +209,7 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 | `auto_fix` | retry | 见下方 **`auto_fix` 详细流程** | `pipelight retry` 重试该 step | retries 耗尽则报告失败 |
 | `auto_gen_pmd_ruleset` | retry | 见下方 **`auto_gen_pmd_ruleset` 详细流程** | `pipelight retry` 重试该 step | skip PMD: `pipelight retry --skip pmd` |
 | `ping` | retry | 在终端打印 `pong`，然后 `pipelight retry` 重试该 step | `pipelight retry` 重试该 step | 10 轮完成后 step 自动成功 |
+| `test_print` | print | 见下方 **`test_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
@@ -276,6 +294,22 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 **两轮都找不到** → 立即 skip PMD：新起 pipeline `pipelight run -f pipeline.yml --output json --run-id <new-id> --skip pmd`。**禁止 LLM 在没有找到任何已有配置或编码规范文档的情况下凭空生成 ruleset 文件。**
 
 **注意：`pipelight-misc/` 必须位于目标项目根目录下**（即 `pipeline.yml` 所在目录），而非 pipelight 工具自身的目录。
+
+#### `test_print` 详细流程
+
+`test_print` 是 post-run 打印型回调（`action: "print"`），由 `allow_failure` 的 test step 在有测试失败时发出。pipeline 已经判定为 success，**不 retry**，LLM 的任务只是把 per-module 的测试结果聚合成表格打印给用户。
+
+1. 从失败 step 的 `on_failure.context_paths` 读 glob（已根据构建工具给好）：
+   - Gradle：`**/build/test-results/test/*.xml`、`**/build/reports/tests/test/index.html`
+   - Maven：`**/target/surefire-reports/TEST-*.xml`、`**/target/failsafe-reports/TEST-*.xml`
+2. 在**项目根目录**（`pipeline.yml` 所在目录）下用 glob 枚举所有 JUnit XML 报告
+3. 解析每个 XML 的 `<testsuite tests="N" failures="F" errors="E" skipped="S">` 属性
+4. 按模块聚合（模块路径 = XML 文件路径去掉 `build/test-results/test/...` 或 `target/surefire-reports/...` 后缀）
+5. 打印一张 Markdown 表格，列：模块 / Tests / Passed / Failed / Skipped；失败模块行前缀 `✗`，通过模块前缀 `✓`；末尾加一行「总计」
+6. 表格下方用 2-3 句话点明：本次实际跑了多少模块（vs 被 gradle/maven cache 判定 UP-TO-DATE 未重跑的模块数，可从 stdout 的 `N executed, M up-to-date` 提取；没有就不提），以及最常见的失败根因（从 XML 的 `<failure message="...">` 提炼一条）
+7. **没有 retry 步骤** — pipeline 已经继续，这是纯报告行为
+
+> **注意**：`test_print` 只在 step 已经 success 且 `on_failure.command == "test_print"` 时执行。别把它当成 retryable step 去调 `pipelight retry`。
 
 ### Success Report (after retries)
 

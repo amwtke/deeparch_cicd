@@ -1,5 +1,5 @@
 use crate::ci::callback::command::CallbackCommand;
-use crate::ci::callback::exception::ExceptionMapping;
+use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
@@ -9,6 +9,10 @@ pub struct TestStep {
     pub test_parser: Option<fn(&str) -> Option<String>>,
     pub allow_failure: bool,
     pub callback_command: CallbackCommand,
+    /// Glob patterns (relative to project root) where per-module JUnit-style
+    /// XML reports land. Handed to the LLM via `test_print` callback so it can
+    /// aggregate them into a table without guessing the build system layout.
+    pub test_report_globs: Vec<String>,
 }
 
 impl TestStep {
@@ -19,6 +23,7 @@ impl TestStep {
             test_parser: None,
             allow_failure: false,
             callback_command: CallbackCommand::Abort,
+            test_report_globs: vec![],
         }
     }
 
@@ -39,6 +44,12 @@ impl TestStep {
         self.callback_command = cmd;
         self
     }
+
+    /// Set glob patterns for JUnit-style XML reports.
+    pub fn with_test_report_globs(mut self, globs: Vec<String>) -> Self {
+        self.test_report_globs = globs;
+        self
+    }
 }
 
 impl StepDef for TestStep {
@@ -54,7 +65,39 @@ impl StepDef for TestStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(self.callback_command.clone())
+        let mut mapping = ExceptionMapping::new(self.callback_command.clone());
+        // When allow_failure is on and the build reports test failures, the
+        // executor still marks the step success. We surface a `test_print`
+        // callback so the LLM knows to parse per-module reports and print a
+        // formatted table instead of claiming everything passed.
+        if self.allow_failure {
+            mapping = mapping.add(
+                "test_failures",
+                ExceptionEntry {
+                    command: CallbackCommand::TestPrint,
+                    max_retries: 0,
+                    context_paths: self.test_report_globs.clone(),
+                },
+            );
+        }
+        mapping
+    }
+
+    fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
+        if exit_code == 0 {
+            return None;
+        }
+        let output = format!("{}{}", stdout, stderr);
+        let looks_failed = output.contains("BUILD FAILED")
+            || output.contains("BUILD FAILURE")
+            || output.contains("FAILURE:")
+            || output.contains("There were failing tests")
+            || output.contains("There are test failures");
+        if looks_failed && self.allow_failure {
+            Some("test_failures".into())
+        } else {
+            None
+        }
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {

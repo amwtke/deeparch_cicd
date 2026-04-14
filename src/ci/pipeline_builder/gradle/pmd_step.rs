@@ -28,28 +28,48 @@ impl StepDef for PmdStep {
             Some(subdir) => format!("cd {} && ", subdir),
             None => String::new(),
         };
-        // Incremental PMD: only scan staged + unpushed-commit Java files.
-        // Always uses standalone PMD CLI for file-level targeting.
+        // PMD with two modes:
         //
-        // Flow:
-        //   1. Collect changed .java files (git staged + origin/main..HEAD)
-        //   2. If none → skip with success
-        //   3. Check ruleset exists → if not, callback auto_gen_pmd_ruleset
-        //   4. Ensure standalone PMD CLI cached
-        //   5. Run PMD on changed files only
-        //   6. Check for ruleset errors → callback auto_gen_pmd_ruleset
-        //   7. Report violations (non-zero exit if any found → triggers auto_fix)
+        //   Incremental mode (git repo present, --full not set):
+        //     Scans all source changes on the current branch that aren't yet pushed:
+        //     - unstaged working tree edits
+        //     - staged (uncommitted) changes
+        //     - local commits ahead of @{upstream} (if upstream configured)
+        //     If no changes → skip. Violations → auto_fix.
+        //
+        //   Full-scan mode (PIPELIGHT_FULL=1 from `pipelight run --full`, OR no git repo):
+        //     Scans every src/main/{java,kotlin} dir, produces a report, and always
+        //     exits 0 (report-only; no auto_fix, does not block the pipeline).
+        //
+        // Always uses standalone PMD CLI for file/dir-level targeting.
         let cmd = format!(
-            "{cd}CHANGED_FILES=$( \
-               {{ git diff --cached --name-only --diff-filter=ACMR -- '*.java' 2>/dev/null; \
-                  git diff origin/main..HEAD --name-only --diff-filter=ACMR -- '*.java' 2>/dev/null; \
-               }} | sort -u | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
-             ) && \
-             if [ -z \"$CHANGED_FILES\" ]; then \
-               echo 'PMD: no changed Java files — skipping'; \
-               exit 0; \
+            "{cd}FULL_SCAN=${{PIPELIGHT_FULL:-0}} && \
+             if [ \"$FULL_SCAN\" = \"1\" ]; then \
+               echo 'PMD: --full requested — full scan (report-only)'; \
+             elif ! git rev-parse --git-dir >/dev/null 2>&1; then \
+               echo 'PMD: not a git repository — full scan (report-only)'; \
+               FULL_SCAN=1; \
              fi && \
-             echo \"PMD: scanning $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ') changed file(s)\" && \
+             if [ \"$FULL_SCAN\" = \"0\" ]; then \
+               UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{{upstream}} 2>/dev/null || true) && \
+               CHANGED_FILES=$( \
+                 {{ git diff --relative --name-only --diff-filter=ACMR -- '*.java' '*.kt' 2>/dev/null; \
+                    git diff --cached --relative --name-only --diff-filter=ACMR -- '*.java' '*.kt' 2>/dev/null; \
+                    if [ -n \"$UPSTREAM\" ]; then \
+                      git diff \"$UPSTREAM\"..HEAD --relative --name-only --diff-filter=ACMR -- '*.java' '*.kt' 2>/dev/null; \
+                    fi; \
+                 }} | sort -u | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
+               ) && \
+               if [ -z \"$CHANGED_FILES\" ]; then \
+                 echo 'PMD: no changed source files on current branch — skipping'; \
+                 exit 0; \
+               fi && \
+               echo \"PMD: scanning $(echo \"$CHANGED_FILES\" | wc -l | tr -d ' ') changed file(s) on current branch\"; \
+             else \
+               CHANGED_FILES=$(find . \\( -path '*/src/main/java' -o -path '*/src/main/kotlin' \\) -type d 2>/dev/null); \
+               if [ -z \"$CHANGED_FILES\" ]; then CHANGED_FILES=.; fi; \
+               echo \"PMD: full-scan sources:\"; echo \"$CHANGED_FILES\"; \
+             fi && \
              if [ ! -f /workspace/pipelight-misc/pmd-ruleset.xml ]; then \
                echo 'PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset - No pmd-ruleset.xml found in pipelight-misc/. LLM should search project for existing ruleset or coding guidelines to generate one. IMPORTANT: Use PMD {pmd_ver} rule names (not PMD 6.x). Verify rule names exist in PMD 7 before writing the ruleset.' >&2 && exit 1; \
              fi && \
@@ -78,7 +98,8 @@ impl StepDef for PmdStep {
              TOTAL=0; \
              for f in $REPORT/*.xml; do \
                [ -f \"$f\" ] || continue; \
-               COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null || echo 0); \
+               COUNT=$(grep -c '<violation' \"$f\" 2>/dev/null); \
+               COUNT=${{COUNT:-0}}; \
                if [ \"$COUNT\" -gt 0 ]; then echo \"  $(basename $f .xml): $COUNT violations\"; fi; \
                TOTAL=$((TOTAL + COUNT)); \
              done; \
@@ -94,11 +115,14 @@ impl StepDef for PmdStep {
                [ -f \"$f\" ] || continue; \
                grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
              done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
-             $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
-               -R /workspace/pipelight-misc/pmd-ruleset.xml \
-               -f html --no-cache --no-progress \
-               -r $REPORT/pmd-result.html 2>/dev/null || true; \
-             ( echo \"PMD Report Summary\"; echo \"==================\"; \
+             if [ \"$TOTAL\" -gt 0 ]; then \
+               $PMD_DIR/bin/pmd check -d \"$SOURCES\" \
+                 -R /workspace/pipelight-misc/pmd-ruleset.xml \
+                 -f html --no-cache --no-progress \
+                 -r $REPORT/pmd-result.html 2>/dev/null || true; \
+             fi; \
+             mkdir -p $REPORT; \
+             ( echo \"PMD Report Summary\"; echo \"==================\";\
                echo \"Total violations: $TOTAL\"; echo \"\"; \
                echo \"Scanned files:\"; echo \"$CHANGED_FILES\"; echo \"\"; \
                echo \"By Rule:\"; \
@@ -112,6 +136,10 @@ impl StepDef for PmdStep {
                  grep -o 'name=\"[^\"]*\"' \"$f\" 2>/dev/null; \
                done | sed 's/name=\"//;s/\"//' | sort | uniq -c | sort -rn | head -10; \
              ) > $REPORT/pmd-summary.txt 2>/dev/null; \
+             if [ \"$FULL_SCAN\" = \"1\" ]; then \
+               echo \"PMD: full-scan report-only mode — report at /workspace/pipelight-misc/pmd-report/\"; \
+               exit 0; \
+             fi; \
              if [ \"$TOTAL\" -gt 0 ]; then exit 1; fi; \
              exit $PMD_RC",
             cd = cd_prefix,
@@ -127,7 +155,9 @@ impl StepDef for PmdStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        ExceptionMapping::new(CallbackCommand::AutoFix)
+        // Default = RuntimeError: unclassified failures (git missing, network, IO)
+        // should abort the pipeline rather than ask the LLM to edit source code.
+        ExceptionMapping::new(CallbackCommand::RuntimeError)
             .add(
                 "pmd_violation",
                 ExceptionEntry {
@@ -154,16 +184,20 @@ impl StepDef for PmdStep {
             )
     }
 
-    fn match_exception(&self, _exit_code: i64, _stdout: &str, stderr: &str) -> Option<String> {
+    fn match_exception(&self, _exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
         if stderr.contains("Cannot load ruleset")
             || stderr.contains("Unable to find referenced rule")
         {
             Some("ruleset_invalid".into())
         } else if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             Some("ruleset_not_found".into())
-        } else {
-            // Any other failure (PMD found violations) → auto_fix
+        } else if stdout.contains("PMD Total:") {
+            // PMD ran to completion; non-zero exit ⇒ violations found → auto_fix
             Some("pmd_violation".into())
+        } else {
+            // PMD did not run (git missing, network, IO, etc.) → fall through to
+            // default RuntimeError instead of asking the LLM to edit source code.
+            None
         }
     }
 
@@ -172,7 +206,7 @@ impl StepDef for PmdStep {
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
         }
-        if output.contains("no changed Java files") {
+        if output.contains("no changed source files") {
             return "pmd: skipped (no changed files)".into();
         }
         let violations = count_pattern(&output, &["PMD Total:"]);

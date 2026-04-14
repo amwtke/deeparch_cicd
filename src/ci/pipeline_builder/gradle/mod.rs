@@ -4,21 +4,36 @@ pub mod spotbugs_step;
 
 use crate::ci::detector::ProjectInfo;
 use crate::ci::pipeline_builder::base::{BuildStep, TestStep};
-use crate::ci::pipeline_builder::{PipelineStrategy, StepConfig, StepDef};
+use crate::ci::pipeline_builder::base;
+use crate::ci::pipeline_builder::{test_parser, PipelineStrategy, StepConfig, StepDef};
 use regex::Regex;
 
 pub struct GradleStrategy;
 
 fn parse_gradle_test(output: &str) -> Option<String> {
-    let re = Regex::new(r"(\d+) tests completed, (\d+) failed").unwrap();
-    let cap = re.captures(output)?;
-    let total: u32 = cap[1].parse().unwrap_or(0);
-    let failed: u32 = cap[2].parse().unwrap_or(0);
-    let skipped_re = Regex::new(r"(\d+) skipped").unwrap();
-    let skipped: u32 = skipped_re
-        .captures(output)
-        .and_then(|c| c[1].parse().ok())
-        .unwrap_or(0);
+    // Gradle prints `N tests completed, M failed[, K skipped]` once per module
+    // whenever that module has failing tests. With `--continue` every failing
+    // module emits its own line, so we aggregate across all matches instead of
+    // reading only the first.
+    let re =
+        Regex::new(r"(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?").unwrap();
+    let (mut total, mut failed, mut skipped) = (0u32, 0u32, 0u32);
+    let mut found = false;
+    for cap in re.captures_iter(output) {
+        found = true;
+        total += cap[1].parse::<u32>().unwrap_or(0);
+        failed += cap
+            .get(2)
+            .and_then(|m| m.as_str().parse::<u32>().ok())
+            .unwrap_or(0);
+        skipped += cap
+            .get(3)
+            .and_then(|m| m.as_str().parse::<u32>().ok())
+            .unwrap_or(0);
+    }
+    if !found {
+        return None;
+    }
     let passed = total.saturating_sub(failed + skipped);
     Some(format!(
         "{} passed, {} failed, {} skipped",
@@ -78,6 +93,60 @@ impl PipelineStrategy for GradleStrategy {
         "gradle-java-ci".into()
     }
 
+    fn output_report_str(
+        &self,
+        step_name: &str,
+        success: bool,
+        stdout: &str,
+        stderr: &str,
+    ) -> String {
+        if step_name == "test" {
+            let output = format!("{}{}", stdout, stderr);
+            if let Some(summary) = parse_gradle_test(&output) {
+                return format!("Tests: {}", summary);
+            }
+            // Parser saw no per-module counts (e.g. all tests were cached or
+            // nothing ran). When `--continue` aggregates failures, Gradle still
+            // emits BUILD FAILED / FAILURE markers — surface that instead of
+            // claiming "Tests passed".
+            let looks_failed = output.contains("BUILD FAILED")
+                || output.contains("FAILURE:")
+                || output.contains("There were failing tests");
+            if looks_failed {
+                return "Tests had failures (report-only)".into();
+            }
+        }
+        base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
+    }
+
+    fn parse_test_output(&self, output: &str) -> Option<test_parser::TestSummary> {
+        let re =
+            Regex::new(r"(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?").unwrap();
+        let (mut total, mut failed, mut skipped) = (0u32, 0u32, 0u32);
+        let mut found = false;
+        for cap in re.captures_iter(output) {
+            found = true;
+            total += cap[1].parse::<u32>().unwrap_or(0);
+            failed += cap
+                .get(2)
+                .and_then(|m| m.as_str().parse::<u32>().ok())
+                .unwrap_or(0);
+            skipped += cap
+                .get(3)
+                .and_then(|m| m.as_str().parse::<u32>().ok())
+                .unwrap_or(0);
+        }
+        if !found {
+            return None;
+        }
+        let passed = total.saturating_sub(failed + skipped);
+        Some(test_parser::TestSummary {
+            passed,
+            failed,
+            skipped,
+        })
+    }
+
     fn steps(&self, info: &ProjectInfo) -> Vec<Box<dyn StepDef>> {
         // Serial chain: build → (checkstyle →)? (spotbugs →)? pmd → test
         // Each step depends on the immediately preceding step, giving a simple,
@@ -129,7 +198,11 @@ impl PipelineStrategy for GradleStrategy {
             .collect();
         let test_step = TestStep::new(&test_info)
             .with_parser(parse_gradle_test)
-            .with_allow_failure(true);
+            .with_allow_failure(true)
+            .with_test_report_globs(vec![
+                "**/build/test-results/test/*.xml".into(),
+                "**/build/reports/tests/test/index.html".into(),
+            ]);
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
             Box::new(test_step),
             vec![prev],
@@ -302,7 +375,7 @@ mod tests {
         let info = make_gradle_info_with_lint();
         let step = pmd_step::PmdStep::new(&info);
         let of = step.exception_mapping().to_on_failure();
-        assert_eq!(of.callback_command, CallbackCommand::AutoFix);
+        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
         assert!(of.exceptions.contains_key("pmd_violation"));
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
@@ -478,16 +551,36 @@ mod tests {
             .config();
         let cmd = &pmd_cfg.commands[0];
         assert!(
-            cmd.contains("git diff --cached --name-only"),
-            "should collect staged Java files"
+            cmd.contains("git diff --relative --name-only"),
+            "should collect unstaged working tree changes"
         );
         assert!(
-            cmd.contains("git diff origin/main..HEAD --name-only"),
-            "should collect unpushed commit Java files"
+            cmd.contains("git diff --cached --relative --name-only"),
+            "should collect staged source files"
         );
         assert!(
-            cmd.contains("no changed Java files"),
+            cmd.contains("\"$UPSTREAM\"..HEAD"),
+            "should collect unpushed commits via upstream diff"
+        );
+        assert!(
+            cmd.contains("'*.java' '*.kt'"),
+            "should scan both .java and .kt files"
+        );
+        assert!(
+            cmd.contains("@{upstream}"),
+            "should detect upstream of current branch"
+        );
+        assert!(
+            cmd.contains("no changed source files"),
             "should skip when no changed files"
+        );
+        assert!(
+            cmd.contains("FULL_SCAN=1") && cmd.contains("src/main/kotlin"),
+            "should fall back to full scan when not a git repo"
+        );
+        assert!(
+            cmd.contains("report-only"),
+            "full-scan mode should be report-only"
         );
     }
 
@@ -512,7 +605,11 @@ mod tests {
     #[test]
     fn test_pmd_report_no_changed_files() {
         let pmd = pmd_step::PmdStep::new(&make_gradle_info_with_lint());
-        let report = pmd.output_report_str(true, "PMD: no changed Java files — skipping", "");
+        let report = pmd.output_report_str(
+            true,
+            "PMD: no changed source files on current branch — skipping",
+            "",
+        );
         assert_eq!(report, "pmd: skipped (no changed files)");
     }
 

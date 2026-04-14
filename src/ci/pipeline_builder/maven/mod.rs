@@ -100,6 +100,17 @@ impl PipelineStrategy for MavenStrategy {
             if let Some(summary) = parse_maven_test(&output) {
                 return format!("Tests: {}", summary);
             }
+            // Parser returned nothing (all modules cached / surefire skipped).
+            // Under `allow_failure` the executor still marks success=true even
+            // though the build failed — detect BUILD FAILURE so the summary
+            // doesn't lie.
+            let looks_failed = output.contains("BUILD FAILURE")
+                || output.contains("There are test failures")
+                || output.contains("Tests run: 0")
+                    && output.contains("FAILED");
+            if looks_failed {
+                return "Tests had failures (report-only)".into();
+            }
         }
         base::BaseStrategy::default_report_str(step_name, success, stdout, stderr)
     }
@@ -160,7 +171,28 @@ impl PipelineStrategy for MavenStrategy {
         )));
         prev = "pmd".into();
 
-        let test_step = TestStep::new(info).with_parser(parse_maven_test);
+        // Maven test step: mirror gradle — inject `--fail-at-end` so every
+        // module's tests run (A fails → B still runs), then mark the step
+        // report-only so the pipeline continues past test failures.
+        let mut test_info = info.clone();
+        test_info.test_cmd = info
+            .test_cmd
+            .iter()
+            .map(|cmd| {
+                if !cmd.contains("--fail-at-end") && !cmd.contains("-fae") {
+                    format!("{} --fail-at-end", cmd)
+                } else {
+                    cmd.clone()
+                }
+            })
+            .collect();
+        let test_step = TestStep::new(&test_info)
+            .with_parser(parse_maven_test)
+            .with_allow_failure(true)
+            .with_test_report_globs(vec![
+                "**/target/surefire-reports/TEST-*.xml".into(),
+                "**/target/failsafe-reports/TEST-*.xml".into(),
+            ]);
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
             Box::new(test_step),
             vec![prev],
@@ -349,8 +381,12 @@ mod tests {
         let step = pmd_step::PmdStep::new(&info);
         let of = step.exception_mapping().to_on_failure();
         assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert!(of.exceptions.contains_key("pmd_violation"));
         assert!(of.exceptions.contains_key("ruleset_not_found"));
         assert!(of.exceptions.contains_key("ruleset_invalid"));
+        let pv = &of.exceptions["pmd_violation"];
+        assert_eq!(pv.command, CallbackCommand::AutoFix);
+        assert_eq!(pv.max_retries, 3);
         let rnf = &of.exceptions["ruleset_not_found"];
         assert_eq!(rnf.command, CallbackCommand::AutoGenPmdRuleset);
         assert_eq!(rnf.max_retries, 2);

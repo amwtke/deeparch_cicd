@@ -329,8 +329,24 @@ impl DockerExecutor {
             match result {
                 Ok(response) => response.status_code,
                 Err(e) => {
-                    warn!(error = %e, "Error waiting for container");
-                    -1
+                    // Fast-exiting containers sometimes race with wait_container
+                    // (the container is already "not-running" before the stream
+                    // subscribes, producing a spurious error). Fall back to
+                    // inspecting the container state to get the real exit code.
+                    match self.docker.inspect_container(&container.id, None).await {
+                        Ok(info) => info
+                            .state
+                            .as_ref()
+                            .and_then(|s| s.exit_code)
+                            .unwrap_or_else(|| {
+                                warn!(error = %e, "wait_container failed and inspect returned no exit code");
+                                -1
+                            }),
+                        Err(inspect_err) => {
+                            warn!(error = %e, inspect_error = %inspect_err, "Error waiting for container");
+                            -1
+                        }
+                    }
                 }
             }
         } else {

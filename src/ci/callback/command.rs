@@ -13,6 +13,7 @@ pub enum CallbackCommand {
     FailAndSkip,
     GitFail,
     Ping,
+    TestPrint,
 }
 
 pub struct CallbackCommandDef {
@@ -87,6 +88,15 @@ impl CallbackCommandRegistry {
                     "Ping-pong communication test. LLM prints 'pong' and retries the step.".into(),
             },
         );
+        registry.register(
+            CallbackCommand::TestPrint,
+            CallbackCommandDef {
+                action: CallbackCommandAction::Print,
+                description:
+                    "Test run finished with failures (report-only). LLM parses per-module test reports and prints a formatted summary table. Pipeline continues."
+                        .into(),
+            },
+        );
         registry
     }
 
@@ -124,6 +134,7 @@ mod tests {
             (CallbackCommand::FailAndSkip, "\"fail_and_skip\""),
             (CallbackCommand::GitFail, "\"git_fail\""),
             (CallbackCommand::Ping, "\"ping\""),
+            (CallbackCommand::TestPrint, "\"test_print\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -163,6 +174,10 @@ mod tests {
             registry.action_for(&CallbackCommand::Ping),
             CallbackCommandAction::Retry
         );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::TestPrint),
+            CallbackCommandAction::Print
+        );
     }
 
     #[test]
@@ -189,6 +204,7 @@ mod tests {
         assert!(registry.get(&CallbackCommand::FailAndSkip).is_some());
         assert!(registry.get(&CallbackCommand::GitFail).is_some());
         assert!(registry.get(&CallbackCommand::Ping).is_some());
+        assert!(registry.get(&CallbackCommand::TestPrint).is_some());
     }
 
     #[test]
