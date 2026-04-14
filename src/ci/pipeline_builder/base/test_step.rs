@@ -66,31 +66,28 @@ impl StepDef for TestStep {
 
     fn exception_mapping(&self) -> ExceptionMapping {
         let mut mapping = ExceptionMapping::new(self.callback_command.clone());
-        // Fire `test_print` whenever per-module JUnit reports exist — on failure
-        // (so the LLM explains what broke) and on success (so it always prints
-        // the summary table). Both paths share the same context_paths.
-        if !self.test_report_globs.is_empty() {
-            let entry = ExceptionEntry {
-                command: CallbackCommand::TestPrintCommand,
-                max_retries: 0,
-                context_paths: self.test_report_globs.clone(),
-            };
-            if self.allow_failure {
-                mapping = mapping.add("test_failures", entry.clone());
-            }
-            mapping = mapping.add("test_success", entry);
+        // Always fire `test_print`: when JUnit globs are configured (Maven/Gradle),
+        // hand them as context_paths for per-module aggregation; otherwise leave
+        // context_paths empty and the LLM falls back to the step's `report_path`
+        // (raw log) to extract pass/fail/skip counts for runners that don't emit
+        // JUnit XML (cargo test, go test, jest --no-reporter, pytest, etc.).
+        let entry = ExceptionEntry {
+            command: CallbackCommand::TestPrintCommand,
+            max_retries: 0,
+            context_paths: self.test_report_globs.clone(),
+        };
+        if self.allow_failure {
+            mapping = mapping.add("test_failures", entry.clone());
         }
+        mapping = mapping.add("test_success", entry);
         mapping
     }
 
     fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
         if exit_code == 0 {
-            // Always surface a test_print callback on success when globs are
-            // configured — we want the summary table printed every run.
-            if !self.test_report_globs.is_empty() {
-                return Some("test_success".into());
-            }
-            return None;
+            // Always surface a test_print callback on success so the LLM prints
+            // the summary table (from JUnit globs or the log file fallback).
+            return Some("test_success".into());
         }
         let output = format!("{}{}", stdout, stderr);
         let looks_failed = output.contains("BUILD FAILED")

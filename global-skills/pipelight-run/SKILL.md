@@ -299,9 +299,13 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 
 #### `test_print` 详细流程
 
-`test_print` 是 post-run 打印型 action（由 `test_print_command` 触发），`allow_failure` 的 test step 在有测试失败时发出。pipeline 已经判定为 success，**不 retry**，LLM 的任务只是把 per-module 的测试结果聚合成表格。
+`test_print` 是 post-run 打印型 action（由 `test_print_command` 触发），**每次 test step 跑完都会发出**（成功或失败），用于让 LLM 打印汇总。pipeline 已经判定完毕，**不 retry**。
 
-1. 从失败 step 的 `on_failure.context_paths` 读 glob（已根据构建工具给好）：
+**分两种场景**，按 `on_failure.context_paths` 是否为空分流：
+
+**场景 A：JUnit XML 多模块聚合**（context_paths 非空 — Maven/Gradle）
+
+1. 从 `on_failure.context_paths` 读 glob：
    - Gradle：`**/build/test-results/test/*.xml`、`**/build/reports/tests/test/index.html`
    - Maven：`**/target/surefire-reports/TEST-*.xml`、`**/target/failsafe-reports/TEST-*.xml`
 2. 在**项目根目录**（`pipeline.yml` 所在目录）下用 glob 枚举所有 JUnit XML 报告
@@ -309,7 +313,23 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 4. 按模块聚合（模块路径 = XML 文件路径去掉 `build/test-results/test/...` 或 `target/surefire-reports/...` 后缀）
 5. 打印一张 Markdown 表格，列：模块 / Tests / Passed / Failed / Skipped；失败模块行前缀 `✗`，通过模块前缀 `✓`；末尾加一行「总计」
 6. 表格下方用 2-3 句话点明：本次实际跑了多少模块（vs 被 gradle/maven cache 判定 UP-TO-DATE 未重跑的模块数，可从 stdout 的 `N executed, M up-to-date` 提取；没有就不提），以及最常见的失败根因（从 XML 的 `<failure message="...">` 提炼一条）
-7. **没有 retry 步骤** — pipeline 已经继续，这是纯报告行为
+
+**场景 B：日志回退汇总**（context_paths 为空 — Rust/Go/Node/Python 等非 JUnit 框架）
+
+1. 从 step JSON 的 `report_path` 字段拿日志路径（形如 `pipelight-misc/test-20260414T153734.log`，路径相对 `pipeline.yml` 所在目录）
+2. 读取该日志文件（Read 工具）
+3. 按语言识别测试汇总行并正则提炼数字：
+   - Rust (`cargo test`)：`test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored` — 多个 test binary 时把所有匹配相加
+   - Go (`go test`)：`--- PASS:` / `--- FAIL:` / `--- SKIP:` 各自计数；或者末尾 `ok` / `FAIL` 汇总行
+   - Node/Jest：`Tests:       N passed, M failed, K skipped, T total`
+   - Python/pytest：`===== N passed, M failed, K skipped in X.XXs =====`
+4. 打印一行汇总：`Tests: N passed, M failed, K skipped`
+5. 若 `M > 0`，再从日志提取前 3 条失败测试名与错误首行，附在下方
+
+**两种场景都一样**：
+
+- 无 retry 步骤（纯报告）
+- 不要修源码；若用户明确要求修，再按常规编辑流程
 
 #### `pmd_print` 详细流程
 

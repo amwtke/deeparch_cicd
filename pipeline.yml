@@ -77,6 +77,10 @@ steps:
     callback_command: abort
     max_retries: 0
     context_paths: []
+    exceptions:
+      test_success:
+        command: test_print_command
+        max_retries: 0
 - name: fmt-check
   image: rust:latest
   commands:
