@@ -777,6 +777,21 @@ fn parse_step_test_summary(
     strategy.parse_test_output(&full_output)
 }
 
+/// Whether `dep_name` counts as "satisfied" for the retry cascade.
+///
+/// A dep satisfies downstream iff it succeeded OR it's an inactive step that
+/// was intentionally skipped (e.g. `pmd_full` when non-full PMD ran). Without
+/// the inactive-Skipped carve-out, steps like `test` that depend on a tag
+/// variant would never cascade on retry.
+fn cascade_dep_satisfied(state: &RunState, pipeline: &Pipeline, dep_name: &str) -> bool {
+    match (state.get_step(dep_name), pipeline.get_step(dep_name)) {
+        (Some(d), Some(c)) => {
+            d.status == StepStatus::Success || (!c.active && d.status == StepStatus::Skipped)
+        }
+        _ => false,
+    }
+}
+
 /// Re-resolve a step's `on_failure` callback based on the latest stdout/stderr
 /// and carry over the already-decremented `retries_remaining`.
 ///
@@ -993,14 +1008,7 @@ async fn cmd_retry(
             // Check if all dependencies are Success
             let ps = pipeline.get_step(skipped_name);
             let deps_satisfied = ps
-                .map(|s| {
-                    s.depends_on.iter().all(|dep| {
-                        state
-                            .get_step(dep)
-                            .map(|d| d.status == StepStatus::Success)
-                            .unwrap_or(false)
-                    })
-                })
+                .map(|s| s.depends_on.iter().all(|dep| cascade_dep_satisfied(&state, &pipeline, dep)))
                 .unwrap_or(true);
 
             if !deps_satisfied {
@@ -1899,6 +1907,83 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
             &registry,
         );
         assert!(of.is_none());
+    }
+
+    // ── cascade_dep_satisfied ────────────────────────────────────
+
+    fn make_pipeline_with_dep_chain() -> Pipeline {
+        // test → pmd_full (inactive/skipped) → pmd
+        let mut pipeline = make_pipeline("maven-java-ci");
+        pipeline.steps = vec![
+            {
+                let mut s = make_pipeline_step("pmd", true);
+                s.image = "maven:latest".into();
+                s
+            },
+            {
+                let mut s = make_pipeline_step("pmd_full", false);
+                s.depends_on = vec!["pmd".into()];
+                s.image = "maven:latest".into();
+                s
+            },
+            {
+                let mut s = make_pipeline_step("test", true);
+                s.depends_on = vec!["pmd_full".into()];
+                s.image = "maven:latest".into();
+                s
+            },
+        ];
+        pipeline
+    }
+
+    fn make_state_with(steps: Vec<StepState>) -> RunState {
+        let mut state = RunState::new("run-test", "maven-java-ci");
+        for s in steps {
+            state.add_step(s);
+        }
+        state
+    }
+
+    #[test]
+    fn test_cascade_dep_satisfied_success_dep() {
+        let pipeline = make_pipeline_with_dep_chain();
+        let state =
+            make_state_with(vec![make_step_state("pmd_full", StepStatus::Success)]);
+        assert!(cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
+    }
+
+    #[test]
+    fn test_cascade_dep_satisfied_inactive_skipped_dep() {
+        // Regression: test.depends_on = [pmd_full]; pmd_full is inactive and
+        // therefore Skipped. Must NOT block the cascade.
+        let pipeline = make_pipeline_with_dep_chain();
+        let state =
+            make_state_with(vec![make_step_state("pmd_full", StepStatus::Skipped)]);
+        assert!(cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
+    }
+
+    #[test]
+    fn test_cascade_dep_satisfied_active_skipped_dep_blocks() {
+        // An ACTIVE step that was skipped (e.g. upstream-hold) is not a pass —
+        // downstream must wait until it actually succeeds.
+        let pipeline = make_pipeline_with_dep_chain();
+        let state = make_state_with(vec![make_step_state("pmd", StepStatus::Skipped)]);
+        assert!(!cascade_dep_satisfied(&state, &pipeline, "pmd"));
+    }
+
+    #[test]
+    fn test_cascade_dep_satisfied_failed_dep_blocks() {
+        let pipeline = make_pipeline_with_dep_chain();
+        let state =
+            make_state_with(vec![make_step_state("pmd_full", StepStatus::Failed)]);
+        assert!(!cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
+    }
+
+    #[test]
+    fn test_cascade_dep_satisfied_missing_dep() {
+        let pipeline = make_pipeline_with_dep_chain();
+        let state = make_state_with(vec![]);
+        assert!(!cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
     }
 
     #[test]
