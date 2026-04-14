@@ -897,18 +897,80 @@ async fn cmd_retry(
         ss.stdout = if stdout.is_empty() {
             None
         } else {
-            Some(stdout)
+            Some(stdout.clone())
         };
         ss.stderr = if stderr.is_empty() {
             None
         } else {
-            Some(stderr)
+            Some(stderr.clone())
         };
         ss.report_summary = Some(report_summary);
         ss.report_path = Some(report_path_str);
         if step_test_summary.is_some() {
             ss.test_summary = step_test_summary;
         }
+
+        // Re-resolve on_failure so the callback reflects THIS run's stdout/stderr,
+        // not the state frozen from the initial failure. Preserve retries_remaining
+        // (already decremented above); only refresh the other fields.
+        let registry = CallbackCommandRegistry::new();
+        let step_def_map = crate::ci::pipeline_builder::step_defs_for_pipeline(&pipeline);
+        let new_on_failure: Option<OnFailureState> = if result.exit_code != 0 {
+            step_def_map
+                .as_ref()
+                .and_then(|defs| defs.get(&step_name))
+                .map(|sd| {
+                    let mapping = sd.exception_mapping();
+                    let match_fn =
+                        |ec: i64, out: &str, err: &str| -> Option<String> { sd.match_exception(ec, out, err) };
+                    let resolved = mapping.resolve(result.exit_code, &stdout, &stderr, Some(&match_fn));
+                    let action = registry.action_for(&resolved.command);
+                    OnFailureState {
+                        exception_key: resolved.exception_key,
+                        command: resolved.command,
+                        action,
+                        max_retries: resolved.max_retries,
+                        retries_remaining: resolved.max_retries,
+                        context_paths: resolved.context_paths,
+                    }
+                })
+        } else {
+            step_def_map
+                .as_ref()
+                .and_then(|defs| defs.get(&step_name))
+                .and_then(|sd| {
+                    let match_fn =
+                        |ec: i64, out: &str, err: &str| -> Option<String> { sd.match_exception(ec, out, err) };
+                    match_fn(result.exit_code, &stdout, &stderr).map(|_| {
+                        let resolved =
+                            sd.exception_mapping()
+                                .resolve(result.exit_code, &stdout, &stderr, Some(&match_fn));
+                        let action = registry.action_for(&resolved.command);
+                        OnFailureState {
+                            exception_key: resolved.exception_key,
+                            command: resolved.command,
+                            action,
+                            max_retries: resolved.max_retries,
+                            retries_remaining: resolved.max_retries,
+                            context_paths: resolved.context_paths,
+                        }
+                    })
+                })
+        };
+        let prev_remaining = state
+            .get_step(&step_name)
+            .and_then(|s| s.on_failure.as_ref())
+            .map(|of| of.retries_remaining);
+        let ss = state
+            .get_step_mut(&step_name)
+            .expect("step must exist in state");
+        ss.on_failure = new_on_failure.map(|mut of| {
+            // Carry over the remaining budget already decremented for this retry.
+            if let Some(rem) = prev_remaining {
+                of.retries_remaining = rem.min(of.max_retries);
+            }
+            of
+        });
     }
 
     // If retried step succeeded, run downstream Skipped steps.
