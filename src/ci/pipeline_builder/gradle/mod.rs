@@ -141,19 +141,18 @@ impl PipelineStrategy for GradleStrategy {
             prev = "checkstyle".into();
         }
 
-        if info.quality_plugins.contains(&"spotbugs".to_string()) {
-            steps.push(Box::new(GradleCachedStep::wrap_with_deps(
-                Box::new(spotbugs_step::SpotbugsStep::new(info)),
-                vec![prev.clone()],
-            )));
-            prev = "spotbugs".into();
+        // SpotBugs always runs — uses standalone CLI regardless of plugin configuration.
+        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+            Box::new(spotbugs_step::SpotbugsStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "spotbugs".into();
 
-            steps.push(Box::new(GradleCachedStep::wrap_with_deps(
-                Box::new(spotbugs_full_step::SpotbugsFullStep::new(info)),
-                vec![prev.clone()],
-            )));
-            prev = "spotbugs_full".into();
-        }
+        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+            Box::new(spotbugs_full_step::SpotbugsFullStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "spotbugs_full".into();
 
         // PMD always runs — uses standalone CLI regardless of plugin configuration.
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
@@ -290,8 +289,18 @@ mod tests {
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
         let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
-        // PMD (+ its full variant) always runs even without lint plugins.
-        assert_eq!(names, vec!["build", "pmd", "pmd_full", "test"]);
+        // SpotBugs + PMD (+ their full variants) always run even without lint plugins.
+        assert_eq!(
+            names,
+            vec![
+                "build",
+                "spotbugs",
+                "spotbugs_full",
+                "pmd",
+                "pmd_full",
+                "test",
+            ]
+        );
         let by_name: std::collections::HashMap<String, Vec<String>> = steps
             .iter()
             .map(|s| {
@@ -299,7 +308,9 @@ mod tests {
                 (c.name, c.depends_on)
             })
             .collect();
-        assert_eq!(by_name["pmd"], vec!["build".to_string()]);
+        assert_eq!(by_name["spotbugs"], vec!["build".to_string()]);
+        assert_eq!(by_name["spotbugs_full"], vec!["spotbugs".to_string()]);
+        assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
         assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
         assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
     }
