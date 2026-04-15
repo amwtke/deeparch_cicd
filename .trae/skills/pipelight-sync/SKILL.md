@@ -192,25 +192,30 @@ Global skills:
 
 If `global-skills/` directory doesn't exist, skip this step silently.
 
-### Step 3: Sync Knowledge Base
+### Step 3: Load Skill Memory
 
-Read the shared knowledge base to restore project context:
+Read every file under the repo's `skill-memory/` directory — these are cross-machine, version-controlled lessons (feedback / project / reference memories) that must shape behavior in this session.
 
-1. Read `docs/README.md` — index of all docs
-2. Read `docs/vision.md` — project vision and AI-native philosophy
-3. Read `docs/architecture.md` — current architecture and planned changes
-4. Read `docs/decisions.md` — technical decisions log
-5. Read `docs/dev-environment.md` — multi-machine setup details
+```bash
+ls skill-memory/ 2>/dev/null
+```
 
-After reading, output a brief summary:
+For each `*.md` file in `skill-memory/`:
+1. Read it in full.
+2. Treat its content with the same authority as an auto-memory entry in `~/.claude/projects/*/memory/` — apply the rule going forward without the user having to repeat it.
+3. If the file's frontmatter `type` is `feedback`, obey the **Why / How to apply** sections when the trigger condition arises.
+
+**Do NOT read `docs/`** during sync — project-docs are reference material, not behavior rules, and have been explicitly excluded from the learn-on-sync path.
+
+Output a brief summary listing each memory file loaded:
 
 ```
-Knowledge base loaded:
-- Vision: AI-native CLI CI/CD tool with Claude integration
-- Architecture: 5 layers, ClaudeExecutor planned
-- Decisions: N decisions recorded, latest: [title]
-- Environment: 3 machines (Mac M1 / Mac Intel / Ubuntu)
+Skill memory loaded:
+- feedback_pipelight_callback_dispatch.md — pipelight JSON: 逐 step dispatch on_failure, 按 action 完整执行
+- <other>.md — <one-line hook from description field>
 ```
+
+If `skill-memory/` doesn't exist, skip this step silently.
 
 ### Step 4: Report
 
@@ -237,8 +242,8 @@ Build:
 Global Skills:
   pipelight-run  OK (installed to ~/.claude/skills/)
 
-Knowledge:
-  docs/        OK (N documents loaded)
+Skill Memory:
+  skill-memory/  OK (N memory files loaded)
 
 Ready to develop!
 ```
