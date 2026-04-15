@@ -5,6 +5,12 @@ description: "Run CI/CD pipeline. Args: --reinit --skip <steps> --step <name> --
 
 # /pipelight-run
 
+## Step 0: Load Skill Memory (MANDATORY)
+
+Before doing anything else, read every `*.md` file under this skill's `memory/` directory (i.e. `<dir-of-this-SKILL.md>/memory/*.md`). Treat each file's contents with the same authority as a user-supplied auto-memory entry — the `feedback` type files encode hard-learned rules that MUST shape how you dispatch callbacks, format reports, and decide when to retry.
+
+If the `memory/` directory is missing or empty, skip this step silently. Never skip it because "I remember what's in there" — memories evolve; read the current version each run.
+
 ## Overview
 
 Pipelight is the project's lightweight CLI CI/CD tool. This skill defines the interaction protocol: run pipeline with JSON output, parse results, auto-fix on retryable failures, and retry until success or exhaustion.

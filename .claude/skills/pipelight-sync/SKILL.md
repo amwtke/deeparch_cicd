@@ -173,7 +173,8 @@ ls global-skills/
 For each subdirectory in `global-skills/`:
 
 ```bash
-# Copy skill to global location (overwrites if exists)
+# Remove any existing install first to avoid nested dirs on reinstall, then copy fresh
+rm -rf ~/.claude/skills/<skill-name>
 cp -r global-skills/<skill-name> ~/.claude/skills/<skill-name>
 ```
 
@@ -194,28 +195,30 @@ If `global-skills/` directory doesn't exist, skip this step silently.
 
 ### Step 3: Load Skill Memory
 
-Read every file under the repo's `skill-memory/` directory — these are cross-machine, version-controlled lessons (feedback / project / reference memories) that must shape behavior in this session.
+Skill-memory files now ship **inside each global skill** under `global-skills/<skill>/memory/*.md`, so Step 2c already deployed them to `~/.claude/skills/<skill>/memory/`. The owning skill is responsible for re-reading its own `memory/` on every invocation (see e.g. pipelight-run's Step 0).
+
+For this sync session, still read every `*.md` under every `global-skills/*/memory/` directory so the rules shape behavior immediately — don't wait for the next skill invocation.
 
 ```bash
-ls skill-memory/ 2>/dev/null
+ls global-skills/*/memory/*.md 2>/dev/null
 ```
 
-For each `*.md` file in `skill-memory/`:
+For each file:
 1. Read it in full.
-2. Treat its content with the same authority as an auto-memory entry in `~/.claude/projects/*/memory/` — apply the rule going forward without the user having to repeat it.
-3. If the file's frontmatter `type` is `feedback`, obey the **Why / How to apply** sections when the trigger condition arises.
+2. Treat its content with the same authority as an auto-memory entry in `~/.claude/projects/*/memory/`.
+3. If the frontmatter `type` is `feedback`, obey the **Why / How to apply** sections when the trigger condition arises.
 
-**Do NOT read `docs/`** during sync — project-docs are reference material, not behavior rules, and have been explicitly excluded from the learn-on-sync path.
+**Do NOT read `docs/`** during sync — project-docs are reference material, not behavior rules.
 
 Output a brief summary listing each memory file loaded:
 
 ```
 Skill memory loaded:
-- feedback_pipelight_callback_dispatch.md — pipelight JSON: 逐 step dispatch on_failure, 按 action 完整执行
-- <other>.md — <one-line hook from description field>
+- pipelight-run/memory/feedback_pipelight_callback_dispatch.md — pipelight JSON: 逐 step dispatch on_failure, 按 action 完整执行
+- <other-skill>/memory/<file>.md — <one-line hook from description field>
 ```
 
-If `skill-memory/` doesn't exist, skip this step silently.
+If no memory files exist, skip this step silently.
 
 ### Step 4: Report
 
@@ -243,7 +246,7 @@ Global Skills:
   pipelight-run  OK (installed to ~/.claude/skills/)
 
 Skill Memory:
-  skill-memory/  OK (N memory files loaded)
+  global-skills/*/memory/  OK (N memory files loaded)
 
 Ready to develop!
 ```
