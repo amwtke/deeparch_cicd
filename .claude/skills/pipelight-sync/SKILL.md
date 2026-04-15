@@ -193,6 +193,32 @@ Global skills:
 
 If `global-skills/` directory doesn't exist, skip this step silently.
 
+### Step 2c2: Sync pipelight-run skill to Trae
+
+If Trae is installed locally, also sync `pipelight-run` into Trae's global skill directory so the same callback protocol works there.
+
+**Detect Trae:**
+
+```bash
+[ -d "$HOME/.trae" ]
+```
+
+- **Not installed** (no `~/.trae` dir) → skip this step silently, report `trae   SKIPPED (not installed)`
+- **Installed** → sync:
+
+```bash
+mkdir -p ~/.trae/skills
+rm -rf ~/.trae/skills/pipelight-run
+cp -r global-skills/pipelight-run ~/.trae/skills/pipelight-run
+```
+
+Report:
+
+```
+Trae skills:
+  pipelight-run   OK (installed to ~/.trae/skills/pipelight-run)
+```
+
 ### Step 3: Load Skill Memory
 
 Skill-memory files now ship **inside each global skill** under `global-skills/<skill>/memory/*.md`, so Step 2c already deployed them to `~/.claude/skills/<skill>/memory/`. The owning skill is responsible for re-reading its own `memory/` on every invocation (see e.g. pipelight-run's Step 0).
@@ -244,6 +270,9 @@ Build:
 
 Global Skills:
   pipelight-run  OK (installed to ~/.claude/skills/)
+
+Trae Skills:
+  pipelight-run  OK (installed to ~/.trae/skills/)  — or SKIPPED (trae not installed)
 
 Skill Memory:
   global-skills/*/memory/  OK (N memory files loaded)
