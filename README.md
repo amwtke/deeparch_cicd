@@ -62,6 +62,73 @@ pipeline 执行 → 成功？ → 报告结果
 
 失败的 step 日志自动保存到 `pipelight-misc/<step>.log`，供 AI 或人工分析。
 
+## Windows 用户
+
+Pipelight 本身是跨平台的 Rust 二进制，但 Docker socket 探测目前只支持 Unix 路径（`src/ci/executor/mod.rs`）。**推荐通过 WSL2 使用，零代码改动，所有 skill 和脚本原样工作。**
+
+### 方案：WSL2 + Docker Desktop（推荐）
+
+#### 一次性准备
+
+1. **启用 WSL2 并安装 Ubuntu**（管理员 PowerShell）
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+   重启后进入 Ubuntu，设置用户名/密码。
+
+2. **安装 Docker Desktop for Windows**
+   - 安装时勾选 "Use WSL 2 instead of Hyper-V"
+   - 安装后打开 Settings → Resources → WSL Integration，为你的 Ubuntu 发行版启用集成
+   - WSL 内的 `docker` 命令和 `/var/run/docker.sock` 将自动可用
+
+3. **在 WSL Ubuntu 内安装依赖**
+   ```bash
+   sudo apt update && sudo apt install -y git build-essential curl pkg-config libssl-dev
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   source $HOME/.cargo/env
+   ```
+
+4. **（可选）安装 Claude Code**
+   ```bash
+   npm i -g @anthropic-ai/claude-code
+   ```
+
+#### 克隆并构建
+
+```bash
+# 必须放在 WSL 原生文件系统下（~/...），不要放 /mnt/c/...
+mkdir -p ~/workshop && cd ~/workshop
+git clone git@github.com:amwtke/deeparch_cicd.git
+cd deeparch_cicd
+```
+
+在 Claude Code 中运行 `/pipelight-sync`（或手动 `cargo build --release && cp target/release/pipelight ~/.cargo/bin/`）。
+
+### 关键注意事项
+
+| 项 | 说明 |
+|---|---|
+| **项目位置** | 必须放 WSL 原生 ext4（`~/...`），不要放 `/mnt/c/...`。跨文件系统 I/O 性能差 10 倍以上，Docker 挂载还会踩权限坑 |
+| **Docker Desktop 须运行** | WSL 内的 `docker` 命令代理到 Windows 上的 Desktop，关闭则 pipelight 无法连接 daemon |
+| **从 Windows 侧编辑代码** | VSCode 装 "WSL" 扩展，在 WSL 目录下 `code .` 开 Remote 窗口——编辑在 Windows、编译运行在 Linux |
+| **终端** | 推荐 Windows Terminal，默认配置选 Ubuntu |
+| **行尾** | `git config --global core.autocrlf input`，避免 CRLF 污染容器内的 shell 脚本 |
+
+### 验证
+
+```bash
+docker info          # 显示 daemon 信息即 OK
+cargo test           # 全部通过
+pipelight --version  # 0.1.0
+```
+
+### 不推荐的方案
+
+- **Windows 原生 + Docker Desktop**：需要修改源码让 `socket_candidates()` 支持命名管道 `\\.\pipe\docker_engine`，且 `pipelight-sync` skill 里的 bash 脚本在 PowerShell 下无法运行。
+- **Git Bash + 原生 Docker**：socket 探测仍然不适配 Windows，体验差。
+
+对 pipelight 而言，WSL2 就是一台标准 Linux 机器，用法与 Mac / 原生 Ubuntu 完全一致。
+
 ## 核心理念：Debug-First CI
 
 传统 CI/CD 工具在构建失败时只做一件事——**把错误日志甩给你**，然后等你手动修复、重新提交、再次触发流水线。这个循环完全依赖人：
