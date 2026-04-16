@@ -2,7 +2,7 @@ use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
-const TOTAL_ROUNDS: u32 = 10;
+const TOTAL_ROUNDS: u32 = 5;
 
 pub struct PingPongStep;
 
@@ -158,7 +158,7 @@ mod tests {
         };
         let resolved =
             step.exception_mapping()
-                .resolve(1, "ping (round 1/10)\n", "", Some(&match_fn));
+                .resolve(1, "ping (round 1/5)\n", "", Some(&match_fn));
         assert_eq!(resolved.command, CallbackCommand::Ping);
         assert_eq!(resolved.max_retries, TOTAL_ROUNDS - 1);
         assert_eq!(resolved.exception_key, "ping");
@@ -170,7 +170,7 @@ mod tests {
         let step = PingPongStep::new();
         let resolved = step
             .exception_mapping()
-            .resolve(1, "ping (round 5/10)\n", "", None);
+            .resolve(1, "ping (round 3/5)\n", "", None);
         assert_eq!(resolved.command, CallbackCommand::Ping);
         assert_eq!(resolved.exception_key, "unrecognized");
     }
@@ -200,7 +200,7 @@ mod tests {
     fn test_match_exception_always_returns_ping() {
         let step = PingPongStep::new();
         assert_eq!(
-            step.match_exception(1, "ping (round 1/10)", ""),
+            step.match_exception(1, "ping (round 1/5)", ""),
             Some("ping".into())
         );
         assert_eq!(
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn test_report_success() {
         let step = PingPongStep::new();
-        let report = step.output_report_str(true, "ping (round 10/10)\n", "");
+        let report = step.output_report_str(true, "ping (round 5/5)\n", "");
         assert_eq!(
             report,
             format!("Ping-pong completed ({} rounds)", TOTAL_ROUNDS)
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn test_report_success_ignores_stderr() {
         let step = PingPongStep::new();
-        let report = step.output_report_str(true, "ping (round 10/10)\n", "some warning\n");
+        let report = step.output_report_str(true, "ping (round 5/5)\n", "some warning\n");
         assert_eq!(
             report,
             format!("Ping-pong completed ({} rounds)", TOTAL_ROUNDS)
@@ -250,30 +250,30 @@ mod tests {
     #[test]
     fn test_report_in_progress_first_round() {
         let step = PingPongStep::new();
-        let report = step.output_report_str(false, "ping (round 1/10)\n", "");
-        assert_eq!(report, "ping (round 1/10)");
+        let report = step.output_report_str(false, "ping (round 1/5)\n", "");
+        assert_eq!(report, "ping (round 1/5)");
     }
 
     #[test]
     fn test_report_in_progress_mid_round() {
         let step = PingPongStep::new();
-        let report = step.output_report_str(false, "ping (round 5/10)\n", "");
-        assert_eq!(report, "ping (round 5/10)");
+        let report = step.output_report_str(false, "ping (round 3/5)\n", "");
+        assert_eq!(report, "ping (round 3/5)");
     }
 
     #[test]
     fn test_report_in_progress_last_retry() {
         let step = PingPongStep::new();
-        let report = step.output_report_str(false, "ping (round 9/10)\n", "");
-        assert_eq!(report, "ping (round 9/10)");
+        let report = step.output_report_str(false, "ping (round 4/5)\n", "");
+        assert_eq!(report, "ping (round 4/5)");
     }
 
     #[test]
     fn test_report_multiline_stdout() {
         let step = PingPongStep::new();
-        let stdout = "5\nping (round 5/10)\n";
+        let stdout = "3\nping (round 3/5)\n";
         let report = step.output_report_str(false, stdout, "");
-        assert_eq!(report, "ping (round 5/10)");
+        assert_eq!(report, "ping (round 3/5)");
     }
 
     #[test]

@@ -428,14 +428,14 @@ mod tests {
         let info = make_rust_info();
         let (pipeline, _step_defs) = generate_pipeline(&info);
 
-        // ping-pong: Ping, 9 retries (first step in pipeline)
+        // ping-pong: Ping, 4 retries (first step in pipeline)
         let ping_pong = pipeline.get_step("ping-pong").unwrap();
         let of = ping_pong
             .on_failure
             .as_ref()
             .expect("ping-pong should have on_failure");
         assert_eq!(of.callback_command, CallbackCommand::Ping);
-        assert_eq!(of.max_retries, 9);
+        assert_eq!(of.max_retries, 4);
         assert!(ping_pong.depends_on.is_empty());
 
         // git-pull: GitFail, no retries (depends on ping-pong)
