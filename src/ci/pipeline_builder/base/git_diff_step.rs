@@ -2,15 +2,16 @@ use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
-/// Reports the three categories of local-but-not-yet-pushed changes:
-/// unstaged working tree edits, staged (uncommitted) changes, and local
-/// commits ahead of `@{upstream}`. Writes each list to its own file under
-/// `pipelight-misc/git-diff-report/` and fires `GitDiffCommand` when any
-/// category is non-empty so the LLM can render a grouped report.
+/// Reports the four categories of local-but-not-yet-pushed changes:
+/// unstaged working tree edits, staged (uncommitted) changes, untracked
+/// (new) files, and local commits ahead of `@{upstream}`. Writes each list
+/// to its own file under `pipelight-misc/git-diff-report/` and fires
+/// `GitDiffCommand` when any category is non-empty so the LLM can render
+/// a grouped report.
 ///
 /// Exits 0 (skipped) when:
 /// - not a git repository
-/// - working tree is clean AND no commits ahead of upstream
+/// - working tree is clean AND no untracked files AND no commits ahead of upstream
 pub struct GitDiffStep;
 
 impl GitDiffStep {
@@ -27,21 +28,25 @@ mkdir -p "$REPORT_DIR"
 UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || true)
 UNSTAGED=$(git diff --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
+UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
 UNPUSHED=""
 if [ -n "$UPSTREAM" ]; then
   UNPUSHED=$(git diff "$UPSTREAM"..HEAD --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
 fi
-printf '%s\n' "$UNSTAGED"  | sed '/^$/d' > "$REPORT_DIR/unstaged.txt"
-printf '%s\n' "$STAGED"    | sed '/^$/d' > "$REPORT_DIR/staged.txt"
-printf '%s\n' "$UNPUSHED"  | sed '/^$/d' > "$REPORT_DIR/unpushed.txt"
-U=$(wc -l < "$REPORT_DIR/unstaged.txt" | tr -d ' ')
-S=$(wc -l < "$REPORT_DIR/staged.txt"   | tr -d ' ')
-P=$(wc -l < "$REPORT_DIR/unpushed.txt" | tr -d ' ')
-TOTAL=$((U + S + P))
+printf '%s\n' "$UNSTAGED"   | sed '/^$/d' > "$REPORT_DIR/unstaged.txt"
+printf '%s\n' "$STAGED"     | sed '/^$/d' > "$REPORT_DIR/staged.txt"
+printf '%s\n' "$UNTRACKED"  | sed '/^$/d' > "$REPORT_DIR/untracked.txt"
+printf '%s\n' "$UNPUSHED"   | sed '/^$/d' > "$REPORT_DIR/unpushed.txt"
+U=$(wc -l < "$REPORT_DIR/unstaged.txt"   | tr -d ' ')
+S=$(wc -l < "$REPORT_DIR/staged.txt"     | tr -d ' ')
+T=$(wc -l < "$REPORT_DIR/untracked.txt"  | tr -d ' ')
+P=$(wc -l < "$REPORT_DIR/unpushed.txt"   | tr -d ' ')
+TOTAL=$((U + S + T + P))
 if [ "$TOTAL" -eq 0 ]; then echo 'git-diff: working tree clean and no unpushed commits — skipping'; exit 0; fi
 echo "git-diff: $TOTAL change record(s) on current branch"
 echo "  unstaged: $U file(s)"
 echo "  staged: $S file(s)"
+echo "  untracked: $T file(s)"
 if [ -n "$UPSTREAM" ]; then echo "  unpushed (ahead of $UPSTREAM): $P file(s)"; else echo "  unpushed: n/a (no upstream configured)"; fi
 exit 1"#;
 
@@ -63,6 +68,7 @@ exit 1"#;
                 context_paths: vec![
                     "pipelight-misc/git-diff-report/unstaged.txt".into(),
                     "pipelight-misc/git-diff-report/staged.txt".into(),
+                    "pipelight-misc/git-diff-report/untracked.txt".into(),
                     "pipelight-misc/git-diff-report/unpushed.txt".into(),
                 ],
             },
@@ -121,7 +127,7 @@ mod tests {
         let of = step.exception_mapping().to_on_failure();
         assert_eq!(of.callback_command, CallbackCommand::GitDiffCommand);
         assert_eq!(of.max_retries, 0);
-        assert_eq!(of.context_paths.len(), 3);
+        assert_eq!(of.context_paths.len(), 4);
     }
 
     #[test]
@@ -170,8 +176,34 @@ mod tests {
     #[test]
     fn test_report_has_changes() {
         let step = GitDiffStep::new();
-        let stdout = "git-diff: 5 change record(s) on current branch\n  unstaged: 2 file(s)\n  staged: 1 file(s)\n  unpushed (ahead of origin/main): 2 file(s)\n";
+        let stdout = "git-diff: 6 change record(s) on current branch\n  unstaged: 2 file(s)\n  staged: 1 file(s)\n  untracked: 1 file(s)\n  unpushed (ahead of origin/main): 2 file(s)\n";
         let r = step.output_report_str(false, stdout, "");
-        assert_eq!(r, "git-diff: 5 change record(s) on current branch");
+        assert_eq!(r, "git-diff: 6 change record(s) on current branch");
+    }
+
+    #[test]
+    fn test_script_detects_untracked_files() {
+        let step = GitDiffStep::new();
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains("git ls-files --others --exclude-standard"),
+            "script should use git ls-files to detect untracked files"
+        );
+        assert!(
+            cmd.contains("untracked.txt"),
+            "script should write untracked files to untracked.txt"
+        );
+    }
+
+    #[test]
+    fn test_context_paths_include_untracked() {
+        let step = GitDiffStep::new();
+        let of = step.exception_mapping().to_on_failure();
+        assert!(
+            of.context_paths
+                .iter()
+                .any(|p| p.contains("untracked.txt")),
+            "context_paths should include untracked.txt"
+        );
     }
 }

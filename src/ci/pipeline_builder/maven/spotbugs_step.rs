@@ -157,6 +157,7 @@ impl StepDef for SpotbugsStep {
                     "pipelight-misc/spotbugs-report/spotbugs-summary.txt".into(),
                     "pipelight-misc/git-diff-report/staged.txt".into(),
                     "pipelight-misc/git-diff-report/unstaged.txt".into(),
+                    "pipelight-misc/git-diff-report/untracked.txt".into(),
                     "pipelight-misc/git-diff-report/unpushed.txt".into(),
                 ],
             },

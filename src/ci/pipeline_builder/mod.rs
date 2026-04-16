@@ -358,8 +358,9 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
 /// `pipelight-misc/git-diff-report/`.
 ///
 /// The git-diff step (which runs before all strategy steps in the DAG) writes
-/// three files: `unstaged.txt`, `staged.txt`, `unpushed.txt`. This function
-/// reads those files, deduplicates, filters by glob, and checks file existence.
+/// four files: `unstaged.txt`, `staged.txt`, `untracked.txt`, `unpushed.txt`.
+/// This function reads those files, deduplicates, filters by glob, and checks
+/// file existence.
 ///
 /// `globs` are file extension patterns (e.g. `["*.java", "*.kt"]`), converted
 /// to a grep regex for filtering.
@@ -396,7 +397,7 @@ pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String
     let report_dir = "/workspace/pipelight-misc/git-diff-report";
     format!(
         "CHANGED_FILES=$( \
-           cat {dir}/unstaged.txt {dir}/staged.txt {dir}/unpushed.txt 2>/dev/null \
+           cat {dir}/unstaged.txt {dir}/staged.txt {dir}/untracked.txt {dir}/unpushed.txt 2>/dev/null \
            | sort -u{sed}{grep} \
            | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
          )",
