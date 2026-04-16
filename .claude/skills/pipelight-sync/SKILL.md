@@ -105,25 +105,39 @@ cargo build --release 2>&1
 
 After a successful release build, copy the binary to a directory on PATH so it can be invoked as `pipelight` from anywhere.
 
-**macOS:**
+**Step 1: Detect existing install location**
 
 ```bash
-# Prefer /usr/local/bin (no sudo needed on most macOS setups)
-cp target/release/pipelight /usr/local/bin/pipelight
+EXISTING=$(which pipelight 2>/dev/null || true)
 ```
 
-If `/usr/local/bin` is not writable, fall back to `~/.cargo/bin/` (which is already on PATH if Rust is installed via rustup):
+If `EXISTING` is non-empty, the binary is already installed somewhere on PATH. **Always install to that same path** to avoid PATH-priority conflicts (e.g. `~/.local/bin` shadowing `~/.cargo/bin`).
+
+**Step 2: Install**
 
 ```bash
-cp target/release/pipelight ~/.cargo/bin/pipelight
-```
+BINARY=target/release/pipelight
 
-**Linux:**
-
-```bash
-# Try /usr/local/bin first (may need sudo)
-sudo cp target/release/pipelight /usr/local/bin/pipelight 2>/dev/null \
-  || cp target/release/pipelight ~/.cargo/bin/pipelight
+if [ -n "$EXISTING" ]; then
+  # Overwrite existing location — try direct copy, fall back to sudo
+  cp "$BINARY" "$EXISTING" 2>/dev/null || sudo cp "$BINARY" "$EXISTING"
+  INSTALL_PATH="$EXISTING"
+else
+  # Fresh install — pick a directory on PATH
+  # Priority: ~/.local/bin (user-local, no sudo) > ~/.cargo/bin > /usr/local/bin
+  if [ -d "$HOME/.local/bin" ]; then
+    cp "$BINARY" "$HOME/.local/bin/pipelight"
+    INSTALL_PATH="$HOME/.local/bin/pipelight"
+  elif [ -d "$HOME/.cargo/bin" ]; then
+    cp "$BINARY" "$HOME/.cargo/bin/pipelight"
+    INSTALL_PATH="$HOME/.cargo/bin/pipelight"
+  else
+    # /usr/local/bin as last resort (may need sudo on Linux)
+    cp "$BINARY" /usr/local/bin/pipelight 2>/dev/null \
+      || sudo cp "$BINARY" /usr/local/bin/pipelight
+    INSTALL_PATH="/usr/local/bin/pipelight"
+  fi
+fi
 ```
 
 **Write marker after successful install:**
@@ -143,10 +157,11 @@ git rev-parse HEAD > ~/.pipelight/build-commit
 
 ```bash
 pipelight --version
+which pipelight
 ```
 
-- **Works** → `OK: pipelight 0.1.0 (installed to /usr/local/bin/pipelight)`
-- **Not found** → warn user to add `~/.cargo/bin` to PATH
+- **Works** → `OK: pipelight 0.1.0 (installed to $INSTALL_PATH)`
+- **Not found** → warn user to add `~/.local/bin` or `~/.cargo/bin` to PATH
 
 ### Step 2b2: Run Unit Tests
 
