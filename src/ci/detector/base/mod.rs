@@ -29,6 +29,7 @@ pub struct ProjectInfo {
     /// Warnings to show the user
     pub warnings: Vec<String>,
     /// Detected quality/defect analysis plugins (e.g., "spotbugs", "pmd")
+    #[allow(dead_code)]
     pub quality_plugins: Vec<String>,
     /// Subdirectory where the project was detected (None if root)
     pub subdir: Option<String>,

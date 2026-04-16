@@ -200,9 +200,7 @@ mod tests {
         let step = GitDiffStep::new();
         let of = step.exception_mapping().to_on_failure();
         assert!(
-            of.context_paths
-                .iter()
-                .any(|p| p.contains("untracked.txt")),
+            of.context_paths.iter().any(|p| p.contains("untracked.txt")),
             "context_paths should include untracked.txt"
         );
     }

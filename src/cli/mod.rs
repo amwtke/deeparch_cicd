@@ -1012,7 +1012,11 @@ async fn cmd_retry(
             // Check if all dependencies are Success
             let ps = pipeline.get_step(skipped_name);
             let deps_satisfied = ps
-                .map(|s| s.depends_on.iter().all(|dep| cascade_dep_satisfied(&state, &pipeline, dep)))
+                .map(|s| {
+                    s.depends_on
+                        .iter()
+                        .all(|dep| cascade_dep_satisfied(&state, &pipeline, dep))
+                })
                 .unwrap_or(true);
 
             if !deps_satisfied {
@@ -1811,7 +1815,9 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
             quality_plugins: vec![],
             subdir: None,
         };
-        Box::new(crate::ci::pipeline_builder::maven::pmd_step::PmdStep::new(&info))
+        Box::new(crate::ci::pipeline_builder::maven::pmd_step::PmdStep::new(
+            &info,
+        ))
     }
 
     #[test]
@@ -1952,8 +1958,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
     #[test]
     fn test_cascade_dep_satisfied_success_dep() {
         let pipeline = make_pipeline_with_dep_chain();
-        let state =
-            make_state_with(vec![make_step_state("pmd_full", StepStatus::Success)]);
+        let state = make_state_with(vec![make_step_state("pmd_full", StepStatus::Success)]);
         assert!(cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
     }
 
@@ -1962,8 +1967,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
         // Regression: test.depends_on = [pmd_full]; pmd_full is inactive and
         // therefore Skipped. Must NOT block the cascade.
         let pipeline = make_pipeline_with_dep_chain();
-        let state =
-            make_state_with(vec![make_step_state("pmd_full", StepStatus::Skipped)]);
+        let state = make_state_with(vec![make_step_state("pmd_full", StepStatus::Skipped)]);
         assert!(cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
     }
 
@@ -1979,8 +1983,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
     #[test]
     fn test_cascade_dep_satisfied_failed_dep_blocks() {
         let pipeline = make_pipeline_with_dep_chain();
-        let state =
-            make_state_with(vec![make_step_state("pmd_full", StepStatus::Failed)]);
+        let state = make_state_with(vec![make_step_state("pmd_full", StepStatus::Failed)]);
         assert!(!cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
     }
 
@@ -2095,10 +2098,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
         let mut state = RunState::new("incr-5", "test-pipeline");
 
         for i in 0..5 {
-            state.add_step(make_step_state(
-                &format!("step-{i}"),
-                StepStatus::Success,
-            ));
+            state.add_step(make_step_state(&format!("step-{i}"), StepStatus::Success));
             state.save(base).unwrap();
 
             // Read raw file and verify it's valid JSON

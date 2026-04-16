@@ -374,19 +374,13 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
 /// will be empty and callers should self-skip.
 pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String {
     // Convert glob patterns like "*.java", "*.kt" into grep -E regex: "\.(java|kt)$"
-    let extensions: Vec<&str> = globs
-        .iter()
-        .filter_map(|g| g.strip_prefix("*."))
-        .collect();
+    let extensions: Vec<&str> = globs.iter().filter_map(|g| g.strip_prefix("*.")).collect();
     let grep_filter = if extensions.is_empty() {
         String::new()
     } else if extensions.len() == 1 {
         format!(" | grep -E '\\.{}$'", extensions[0])
     } else {
-        format!(
-            " | grep -E '\\.({})$'",
-            extensions.join("|")
-        )
+        format!(" | grep -E '\\.({})$'", extensions.join("|"))
     };
 
     let sed_strip = match subdir {
