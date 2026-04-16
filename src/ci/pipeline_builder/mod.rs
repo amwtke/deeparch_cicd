@@ -353,37 +353,56 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
     log_path
 }
 
-/// Shell snippet that sets `CHANGED_FILES` to the newline-separated list of files
-/// changed on the current branch but not yet pushed.
+/// Shell snippet that sets `CHANGED_FILES` to the newline-separated list of
+/// changed files, read from the git-diff step's report files under
+/// `pipelight-misc/git-diff-report/`.
 ///
-/// Combines three git diffs (all relative to cwd):
-/// - unstaged working tree edits
-/// - staged (uncommitted) changes
-/// - local commits ahead of `@{upstream}` (if upstream is configured)
+/// The git-diff step (which runs before all strategy steps in the DAG) writes
+/// three files: `unstaged.txt`, `staged.txt`, `unpushed.txt`. This function
+/// reads those files, deduplicates, filters by glob, and checks file existence.
 ///
-/// Only files that currently exist on disk are kept. Caller decides what to do
-/// when `$CHANGED_FILES` is empty (typically print a "skipping" message and `exit 0`).
+/// `globs` are file extension patterns (e.g. `["*.java", "*.kt"]`), converted
+/// to a grep regex for filtering.
 ///
-/// `globs` are pathspec patterns passed to `git diff -- <globs>` (e.g. `["*.java", "*.kt"]`).
-/// Callers must have already verified that the cwd is a git repo
-/// (e.g. `git rev-parse --git-dir >/dev/null 2>&1`).
-pub fn git_changed_files_snippet(globs: &[&str]) -> String {
-    let globs_arg = globs
+/// `subdir` — for projects detected in a subdirectory, the git-diff report
+/// contains repo-root-relative paths (e.g. `subdir/src/Main.java`). Passing
+/// `Some("subdir")` strips that prefix so callers get CWD-relative paths
+/// (e.g. `src/Main.java`).
+///
+/// If the report files don't exist (e.g. git-diff was skipped), `$CHANGED_FILES`
+/// will be empty and callers should self-skip.
+pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String {
+    // Convert glob patterns like "*.java", "*.kt" into grep -E regex: "\.(java|kt)$"
+    let extensions: Vec<&str> = globs
         .iter()
-        .map(|g| format!("'{}'", g))
-        .collect::<Vec<_>>()
-        .join(" ");
+        .filter_map(|g| g.strip_prefix("*."))
+        .collect();
+    let grep_filter = if extensions.is_empty() {
+        String::new()
+    } else if extensions.len() == 1 {
+        format!(" | grep -E '\\.{}$'", extensions[0])
+    } else {
+        format!(
+            " | grep -E '\\.({})$'",
+            extensions.join("|")
+        )
+    };
+
+    let sed_strip = match subdir {
+        Some(sd) => format!(" | sed 's|^{}/||'", sd),
+        None => String::new(),
+    };
+
+    let report_dir = "/workspace/pipelight-misc/git-diff-report";
     format!(
-        "UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{{upstream}} 2>/dev/null || true) && \
-         CHANGED_FILES=$( \
-           {{ git diff --relative --name-only --diff-filter=ACMR -- {globs} 2>/dev/null; \
-              git diff --cached --relative --name-only --diff-filter=ACMR -- {globs} 2>/dev/null; \
-              if [ -n \"$UPSTREAM\" ]; then \
-                git diff \"$UPSTREAM\"..HEAD --relative --name-only --diff-filter=ACMR -- {globs} 2>/dev/null; \
-              fi; \
-           }} | sort -u | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
+        "CHANGED_FILES=$( \
+           cat {dir}/unstaged.txt {dir}/staged.txt {dir}/unpushed.txt 2>/dev/null \
+           | sort -u{sed}{grep} \
+           | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
          )",
-        globs = globs_arg
+        dir = report_dir,
+        sed = sed_strip,
+        grep = grep_filter,
     )
 }
 

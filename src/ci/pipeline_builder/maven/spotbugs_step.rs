@@ -133,7 +133,7 @@ impl StepDef for SpotbugsStep {
              if [ \"$BUGS\" -gt 0 ]; then exit 1; fi; \
              exit 0",
             cd = cd_prefix,
-            changed_files = git_changed_files_snippet(&["*.java"])
+            changed_files = git_changed_files_snippet(&["*.java"], self.subdir.as_deref())
         );
         StepConfig {
             name: "spotbugs".into(),

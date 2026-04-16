@@ -91,7 +91,7 @@ impl StepDef for PmdStep {
              exit $PMD_RC",
             cd = cd_prefix,
             pmd_ver = PMD_CLI_VERSION,
-            changed_files = git_changed_files_snippet(&["*.java", "*.kt"])
+            changed_files = git_changed_files_snippet(&["*.java", "*.kt"], self.subdir.as_deref())
         );
         StepConfig {
             name: "pmd".into(),

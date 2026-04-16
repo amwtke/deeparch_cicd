@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pmd_incremental_scan_uses_git_diff() {
+    fn test_pmd_incremental_scan_uses_git_diff_report() {
         let info = make_gradle_info_with_lint();
         let strategy = GradleStrategy;
         let steps = strategy.steps(&info);
@@ -606,11 +606,12 @@ mod tests {
             .unwrap()
             .config();
         let cmd = &pmd_cfg.commands[0];
-        assert!(cmd.contains("git diff --relative --name-only"));
-        assert!(cmd.contains("git diff --cached --relative --name-only"));
-        assert!(cmd.contains("\"$UPSTREAM\"..HEAD"));
-        assert!(cmd.contains("'*.java' '*.kt'"));
-        assert!(cmd.contains("@{upstream}"));
+        // Now reads from git-diff step's report files instead of running git diff
+        assert!(cmd.contains("pipelight-misc/git-diff-report/unstaged.txt"));
+        assert!(cmd.contains("pipelight-misc/git-diff-report/staged.txt"));
+        assert!(cmd.contains("pipelight-misc/git-diff-report/unpushed.txt"));
+        assert!(cmd.contains("grep -E"));
+        assert!(cmd.contains("java|kt"));
         assert!(cmd.contains("no changed source files"));
         assert!(
             cmd.contains("not a git repository"),
