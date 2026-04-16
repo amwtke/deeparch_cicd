@@ -44,10 +44,6 @@ impl StepDef for SpotbugsStep {
              if [ -z \"$CLASS_DIRS\" ]; then \
                echo 'No compiled classes found (build/classes). Run build step first.' >&2; exit 1; \
              fi && \
-             if ! git rev-parse --git-dir >/dev/null 2>&1; then \
-               echo 'SpotBugs: not a git repository — skipping (use spotbugs_full for full scan)'; \
-               exit 0; \
-             fi && \
              {changed_files} && \
              if [ -z \"$CHANGED_FILES\" ]; then \
                echo 'SpotBugs: no changed java files on current branch — skipping'; \
@@ -154,9 +150,6 @@ impl StepDef for SpotbugsStep {
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
         let output = format!("{}{}", stdout, stderr);
-        if output.contains("not a git repository") {
-            return "spotbugs: skipped (no git repo)".into();
-        }
         if output.contains("no changed java files")
             || output.contains("changed java files have no matching compiled classes")
         {

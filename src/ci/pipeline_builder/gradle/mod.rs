@@ -614,10 +614,6 @@ mod tests {
         assert!(cmd.contains("grep -E"));
         assert!(cmd.contains("java|kt"));
         assert!(cmd.contains("no changed source files"));
-        assert!(
-            cmd.contains("not a git repository"),
-            "incremental step should skip when no git repo (full scan lives in pmd_full)"
-        );
     }
 
     #[test]

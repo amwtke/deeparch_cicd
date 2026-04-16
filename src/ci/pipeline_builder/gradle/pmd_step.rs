@@ -34,11 +34,7 @@ impl StepDef for PmdStep {
             None => String::new(),
         };
         let cmd = format!(
-            "{cd}if ! git rev-parse --git-dir >/dev/null 2>&1; then \
-               echo 'PMD: not a git repository — skipping (use pmd_full for full scan)'; \
-               exit 0; \
-             fi && \
-             {changed_files} && \
+            "{cd}{changed_files} && \
              if [ -z \"$CHANGED_FILES\" ]; then \
                echo 'PMD: no changed source files on current branch — skipping'; \
                exit 0; \
@@ -157,9 +153,6 @@ impl StepDef for PmdStep {
         let output = format!("{}{}", stdout, stderr);
         if output.contains("PIPELIGHT_CALLBACK:auto_gen_pmd_ruleset") {
             return "pmd: ruleset not found (callback)".into();
-        }
-        if output.contains("not a git repository") {
-            return "pmd: skipped (no git repo)".into();
         }
         if output.contains("no changed source files") {
             return "pmd: skipped (no changed files)".into();
