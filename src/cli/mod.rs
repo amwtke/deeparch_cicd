@@ -257,6 +257,7 @@ async fn cmd_run(
 
     let run_id = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()[..8].to_string());
     let mut state = RunState::new(&run_id, &pipeline.name);
+    let state_base = RunState::default_base_dir();
     state.full_report_only = full_report_only;
     let pipeline_start = std::time::Instant::now();
 
@@ -340,6 +341,7 @@ async fn cmd_run(
                     report_summary: None,
                     report_path: None,
                 });
+                let _ = state.save(&state_base);
                 if let Some(ref progress) = progress {
                     progress.lock().unwrap().start_step(step_name);
                     progress.lock().unwrap().finish_step(
@@ -584,6 +586,7 @@ async fn cmd_run(
                 report_summary: Some(report_summary),
                 report_path: Some(report_path_str),
             });
+            let _ = state.save(&state_base);
 
             // Handle failure
             let allow_failure = pipeline_step.map(|s| s.allow_failure).unwrap_or(false);
@@ -990,6 +993,7 @@ async fn cmd_retry(
             .expect("step must exist in state");
         ss.on_failure = new_on_failure;
     }
+    let _ = state.save(&base);
 
     // If retried step succeeded, run downstream Skipped steps.
     // Only cascade to steps that are truly "held back by upstream" — exclude
@@ -1083,6 +1087,7 @@ async fn cmd_retry(
                     ss.test_summary = step_test_summary;
                 }
             }
+            let _ = state.save(&base);
 
             // If this step failed, stop based on its strategy
             if !sr.success {
@@ -1984,6 +1989,126 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
         let pipeline = make_pipeline_with_dep_chain();
         let state = make_state_with(vec![]);
         assert!(!cascade_dep_satisfied(&state, &pipeline, "pmd_full"));
+    }
+
+    // ── incremental state.save() ──────────────────────────────────
+    //
+    // Verifies that status.json is written after each step completes,
+    // not only at the end of the pipeline. External tools (e.g. the
+    // pipelight-run skill) can monitor this file to track progress
+    // without waiting for the full pipeline to finish.
+
+    #[test]
+    fn test_incremental_save_after_add_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let mut state = RunState::new("incr-1", "test-pipeline");
+
+        // Simulate first step completing and saving
+        state.add_step(make_step_state("build", StepStatus::Success));
+        state.save(base).unwrap();
+
+        let loaded = RunState::load(base, "incr-1").unwrap();
+        assert_eq!(loaded.steps.len(), 1);
+        assert_eq!(loaded.steps[0].name, "build");
+        assert_eq!(loaded.steps[0].status, StepStatus::Success);
+        assert_eq!(loaded.status, PipelineStatus::Running);
+
+        // Simulate second step completing and saving
+        state.add_step(make_step_state("test", StepStatus::Failed));
+        state.save(base).unwrap();
+
+        let loaded = RunState::load(base, "incr-1").unwrap();
+        assert_eq!(loaded.steps.len(), 2);
+        assert_eq!(loaded.steps[1].name, "test");
+        assert_eq!(loaded.steps[1].status, StepStatus::Failed);
+        // Pipeline status still Running (not finalized yet)
+        assert_eq!(loaded.status, PipelineStatus::Running);
+    }
+
+    #[test]
+    fn test_incremental_save_skipped_step_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let mut state = RunState::new("incr-2", "test-pipeline");
+
+        state.add_step(make_step_state("ping-pong", StepStatus::Skipped));
+        state.save(base).unwrap();
+
+        let loaded = RunState::load(base, "incr-2").unwrap();
+        assert_eq!(loaded.steps.len(), 1);
+        assert_eq!(loaded.steps[0].status, StepStatus::Skipped);
+    }
+
+    #[test]
+    fn test_incremental_save_overwrites_previous() {
+        // Each save overwrites the file — the last save contains all steps
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let mut state = RunState::new("incr-3", "test-pipeline");
+
+        state.add_step(make_step_state("build", StepStatus::Success));
+        state.save(base).unwrap();
+
+        state.add_step(make_step_state("test", StepStatus::Success));
+        state.save(base).unwrap();
+
+        state.add_step(make_step_state("lint", StepStatus::Success));
+        state.save(base).unwrap();
+
+        // Only one file, contains all 3 steps
+        let loaded = RunState::load(base, "incr-3").unwrap();
+        assert_eq!(loaded.steps.len(), 3);
+        let names: Vec<&str> = loaded.steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["build", "test", "lint"]);
+    }
+
+    #[test]
+    fn test_incremental_save_retry_updates_existing_step() {
+        // Simulates what cmd_retry does: mutate an existing step then save
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let mut state = RunState::new("incr-4", "test-pipeline");
+
+        state.add_step(make_step_state("build", StepStatus::Failed));
+        state.save(base).unwrap();
+
+        // Retry: update the failed step to success
+        let ss = state.get_step_mut("build").unwrap();
+        ss.status = StepStatus::Success;
+        ss.exit_code = Some(0);
+        ss.duration_ms = Some(1234);
+        state.save(base).unwrap();
+
+        let loaded = RunState::load(base, "incr-4").unwrap();
+        assert_eq!(loaded.steps.len(), 1);
+        assert_eq!(loaded.steps[0].status, StepStatus::Success);
+        assert_eq!(loaded.steps[0].exit_code, Some(0));
+        assert_eq!(loaded.steps[0].duration_ms, Some(1234));
+    }
+
+    #[test]
+    fn test_incremental_save_file_readable_as_valid_json() {
+        // Ensures the file is always valid JSON (not corrupted by partial writes)
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let mut state = RunState::new("incr-5", "test-pipeline");
+
+        for i in 0..5 {
+            state.add_step(make_step_state(
+                &format!("step-{i}"),
+                StepStatus::Success,
+            ));
+            state.save(base).unwrap();
+
+            // Read raw file and verify it's valid JSON
+            let path = base.join("incr-5").join("status.json");
+            let content = std::fs::read_to_string(&path).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&content)
+                .expect("status.json must be valid JSON after each incremental save");
+            let steps = parsed["steps"].as_array().unwrap();
+            assert_eq!(steps.len(), i + 1);
+        }
     }
 
     #[test]
