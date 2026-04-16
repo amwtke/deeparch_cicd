@@ -28,7 +28,9 @@ impl StepDef for SpotbugsStep {
             None => String::new(),
         };
         let cmd = format!(
-            "{cd}SB_VER=4.8.6 && \
+            "{cd}echo 'Recompiling before SpotBugs scan...' && \
+             {compile_cmd} && \
+             SB_VER=4.8.6 && \
              SB_CACHE=$HOME/.pipelight/cache && \
              SB_DIR=$SB_CACHE/spotbugs-$SB_VER && \
              if [ ! -f $SB_DIR/lib/spotbugs.jar ]; then \
@@ -109,6 +111,7 @@ impl StepDef for SpotbugsStep {
              if [ \"$BUGS\" -gt 0 ]; then exit 1; fi; \
              exit 0",
             cd = cd_prefix,
+            compile_cmd = "./gradlew classes -q",
             changed_files = git_changed_files_snippet(&["*.java"], self.subdir.as_deref())
         );
         StepConfig {

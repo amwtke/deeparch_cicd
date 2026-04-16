@@ -33,7 +33,9 @@ impl StepDef for SpotbugsStep {
             None => String::new(),
         };
         let cmd = format!(
-            "{cd}SB_VER=4.8.6 && \
+            "{cd}echo 'Recompiling before SpotBugs scan...' && \
+             mvn compile -q && \
+             SB_VER=4.8.6 && \
              SB_CACHE=$HOME/.pipelight/cache && \
              SB_DIR=$SB_CACHE/spotbugs-$SB_VER && \
              if [ ! -f $SB_DIR/lib/spotbugs.jar ]; then \
