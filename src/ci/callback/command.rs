@@ -17,6 +17,8 @@ pub enum CallbackCommand {
     PmdPrintCommand,
     SpotbugsPrintCommand,
     GitDiffCommand,
+    AutoGenJacocoConfig,
+    JacocoPrintCommand,
 }
 
 pub struct CallbackCommandDef {
@@ -127,6 +129,24 @@ impl CallbackCommandRegistry {
                         .into(),
             },
         );
+        registry.register(
+            CallbackCommand::AutoGenJacocoConfig,
+            CallbackCommandDef {
+                action: CallbackCommandAction::Retry,
+                description:
+                    "LLM searches project for existing test conventions and source file patterns, generates pipelight-misc/jacoco-config.yml with threshold + exclude globs, then retries."
+                        .into(),
+            },
+        );
+        registry.register(
+            CallbackCommand::JacocoPrintCommand,
+            CallbackCommandDef {
+                action: CallbackCommandAction::JacocoPrint,
+                description:
+                    "JaCoCo scan found files below the LINE coverage threshold (report-only for full variant). LLM parses the JaCoCo XML report and prints a grouped-by-package coverage table. Pipeline continues."
+                        .into(),
+            },
+        );
         registry
     }
 
@@ -171,6 +191,14 @@ mod tests {
                 "\"spotbugs_print_command\"",
             ),
             (CallbackCommand::GitDiffCommand, "\"git_diff_command\""),
+            (
+                CallbackCommand::AutoGenJacocoConfig,
+                "\"auto_gen_jacoco_config\"",
+            ),
+            (
+                CallbackCommand::JacocoPrintCommand,
+                "\"jacoco_print_command\"",
+            ),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected_str);
@@ -265,5 +293,24 @@ mod tests {
         let registry = CallbackCommandRegistry::new();
         let def = registry.get(&CallbackCommand::Ping).unwrap();
         assert!(def.description.contains("Ping-pong"));
+    }
+
+    #[test]
+    fn test_registry_jacoco_commands_registered() {
+        let registry = CallbackCommandRegistry::new();
+        assert_eq!(
+            registry.action_for(&CallbackCommand::AutoGenJacocoConfig),
+            CallbackCommandAction::Retry
+        );
+        assert_eq!(
+            registry.action_for(&CallbackCommand::JacocoPrintCommand),
+            CallbackCommandAction::JacocoPrint
+        );
+        assert!(registry
+            .get(&CallbackCommand::AutoGenJacocoConfig)
+            .is_some());
+        assert!(registry
+            .get(&CallbackCommand::JacocoPrintCommand)
+            .is_some());
     }
 }
