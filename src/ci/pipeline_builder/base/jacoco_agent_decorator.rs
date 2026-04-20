@@ -40,8 +40,47 @@ impl JacocoAgentTestStep {
 
 impl StepDef for JacocoAgentTestStep {
     fn config(&self) -> StepConfig {
-        // Implemented in the next tasks.
-        self.inner.config()
+        let mut cfg = self.inner.config();
+        match self.mode {
+            JacocoMode::None => {}
+            JacocoMode::Standalone => {
+                let is_gradle = cfg.image.contains("gradle");
+                let agent_env = if is_gradle {
+                    "JAVA_TOOL_OPTIONS"
+                } else {
+                    "MAVEN_OPTS"
+                };
+                let agent_jar = format!(
+                    "$HOME/.pipelight/cache/jacoco-{ver}/lib/jacocoagent.jar",
+                    ver = JACOCO_VERSION
+                );
+                let destfile = "/workspace/pipelight-misc/jacoco-report/jacoco.exec";
+                let prepare = format!(
+                    "JACOCO_CACHE=$HOME/.pipelight/cache && \
+                     JACOCO_DIR=$JACOCO_CACHE/jacoco-{ver} && \
+                     if [ ! -f {agent} ]; then \
+                       echo 'Downloading JaCoCo {ver} ...' && \
+                       mkdir -p $JACOCO_DIR && \
+                       curl -sL https://repo1.maven.org/maven2/org/jacoco/jacoco/{ver}/jacoco-{ver}.zip \
+                         -o /tmp/jacoco.zip && \
+                       (cd $JACOCO_DIR && jar xf /tmp/jacoco.zip || unzip -o /tmp/jacoco.zip) && \
+                       rm -f /tmp/jacoco.zip; \
+                     fi && \
+                     mkdir -p /workspace/pipelight-misc/jacoco-report && \
+                     export {env}=\"-javaagent:{agent}=destfile={destfile},append=false\"",
+                    ver = JACOCO_VERSION,
+                    agent = agent_jar,
+                    env = agent_env,
+                    destfile = destfile,
+                );
+                let joined_original = cfg.commands.join(" && ");
+                cfg.commands = vec![format!("{prepare} && {joined_original}")];
+            }
+            JacocoMode::MavenPlugin | JacocoMode::GradlePlugin => {
+                // Implemented in later tasks.
+            }
+        }
+        cfg
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
@@ -87,5 +126,65 @@ mod tests {
         let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::None);
         let cfg = decorator.config();
         assert_eq!(cfg.commands, vec!["mvn test".to_string()]);
+    }
+
+    #[test]
+    fn test_standalone_mode_maven_injects_javaagent() {
+        let inner = TestStep::new(&make_info("mvn test", "maven:3.9-eclipse-temurin-17"));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::Standalone);
+        let cfg = decorator.config();
+        let combined = cfg.commands.join(" && ");
+        assert!(
+            combined.contains("jacoco-0.8.12"),
+            "expected pinned JaCoCo version in command, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("MAVEN_OPTS"),
+            "expected MAVEN_OPTS env var, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("-javaagent:"),
+            "expected -javaagent injection, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("destfile=/workspace/pipelight-misc/jacoco-report/jacoco.exec"),
+            "expected destfile in pipelight-misc, got: {}",
+            combined
+        );
+        assert!(combined.contains("mvn test"));
+    }
+
+    #[test]
+    fn test_standalone_mode_gradle_injects_java_tool_options() {
+        let inner = TestStep::new(&make_info("./gradlew test", "gradle:8-jdk17"));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::Standalone);
+        let cfg = decorator.config();
+        let combined = cfg.commands.join(" && ");
+        assert!(
+            combined.contains("JAVA_TOOL_OPTIONS"),
+            "expected JAVA_TOOL_OPTIONS env var for Gradle, got: {}",
+            combined
+        );
+        assert!(combined.contains("-javaagent:"));
+        assert!(combined.contains("./gradlew test"));
+    }
+
+    #[test]
+    fn test_standalone_mode_downloads_agent_if_missing() {
+        let inner = TestStep::new(&make_info("mvn test", "maven:3.9-eclipse-temurin-17"));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::Standalone);
+        let cfg = decorator.config();
+        let combined = cfg.commands.join(" && ");
+        assert!(
+            combined.contains("jacoco-0.8.12.zip") || combined.contains("jacoco-0.8.12-bin"),
+            "expected agent download logic, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("~/.pipelight/cache") || combined.contains("$HOME/.pipelight/cache")
+        );
     }
 }
