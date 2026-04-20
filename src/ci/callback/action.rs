@@ -17,6 +17,9 @@ pub enum CallbackCommandAction {
     /// LLM parses the SpotBugs XML report and prints a grouped-by-category
     /// bugs table. Pipeline flow unaffected.
     SpotbugsPrint,
+    /// LLM parses the JaCoCo XML report and prints a grouped-by-package
+    /// coverage table. Pipeline flow unaffected.
+    JacocoPrint,
     /// LLM reads the three per-category file lists produced by the git-diff
     /// step and prints them grouped (unstaged / staged / unpushed) to the
     /// terminal. Pipeline flow unaffected.
@@ -37,6 +40,7 @@ mod tests {
             (CallbackCommandAction::TestPrint, "\"test_print\""),
             (CallbackCommandAction::PmdPrint, "\"pmd_print\""),
             (CallbackCommandAction::SpotbugsPrint, "\"spotbugs_print\""),
+            (CallbackCommandAction::JacocoPrint, "\"jacoco_print\""),
             (CallbackCommandAction::GitDiffReport, "\"git_diff_report\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
