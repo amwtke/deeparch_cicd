@@ -309,8 +309,6 @@ mod tests {
         assert!(registry
             .get(&CallbackCommand::AutoGenJacocoConfig)
             .is_some());
-        assert!(registry
-            .get(&CallbackCommand::JacocoPrintCommand)
-            .is_some());
+        assert!(registry.get(&CallbackCommand::JacocoPrintCommand).is_some());
     }
 }

@@ -1,7 +1,7 @@
 use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::base::{JacocoMode, JACOCO_VERSION};
+use crate::ci::pipeline_builder::base::JACOCO_VERSION;
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
 /// Full-repo JaCoCo scan (tag = "full").
@@ -13,18 +13,14 @@ use crate::ci::pipeline_builder::{StepConfig, StepDef};
 /// pipeline is not blocked (`allow_failure: true`).
 pub struct MavenJacocoFullStep {
     image: String,
-    source_paths: Vec<String>,
     subdir: Option<String>,
-    mode: JacocoMode,
 }
 
 impl MavenJacocoFullStep {
-    pub fn new(info: &ProjectInfo, mode: JacocoMode) -> Self {
+    pub fn new(info: &ProjectInfo) -> Self {
         Self {
             image: info.image.clone(),
-            source_paths: info.source_paths.clone(),
             subdir: info.subdir.clone(),
-            mode,
         }
     }
 }
@@ -163,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_full_step_config() {
-        let step = MavenJacocoFullStep::new(&make_info(), JacocoMode::Standalone);
+        let step = MavenJacocoFullStep::new(&make_info());
         let cfg = step.config();
         assert_eq!(cfg.name, "jacoco_full");
         assert_eq!(cfg.depends_on, vec!["jacoco".to_string()]);
@@ -174,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_full_step_uses_print_command() {
-        let step = MavenJacocoFullStep::new(&make_info(), JacocoMode::Standalone);
+        let step = MavenJacocoFullStep::new(&make_info());
         let resolved = step.exception_mapping().resolve(
             1,
             "JaCoCo Total: 5 files below 70%",
@@ -187,14 +183,14 @@ mod tests {
 
     #[test]
     fn test_full_step_reports_to_full_report_dir() {
-        let step = MavenJacocoFullStep::new(&make_info(), JacocoMode::Standalone);
+        let step = MavenJacocoFullStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(cmd.contains("pipelight-misc/jacoco-full-report"));
     }
 
     #[test]
     fn test_full_step_total_marker() {
-        let step = MavenJacocoFullStep::new(&make_info(), JacocoMode::Standalone);
+        let step = MavenJacocoFullStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(cmd.contains("JaCoCo Total:"));
     }

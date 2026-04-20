@@ -202,7 +202,7 @@ impl PipelineStrategy for MavenStrategy {
         };
         let wrapped_test = crate::ci::pipeline_builder::base::JacocoAgentTestStep::new(
             Box::new(test_step_inner),
-            jacoco_mode.clone(),
+            jacoco_mode,
         );
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
             Box::new(wrapped_test),
@@ -212,16 +212,13 @@ impl PipelineStrategy for MavenStrategy {
 
         // JaCoCo incremental + full
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
-            Box::new(jacoco_step::MavenJacocoStep::new(info, jacoco_mode.clone())),
+            Box::new(jacoco_step::MavenJacocoStep::new(info)),
             vec![prev.clone()],
         )));
         prev = "jacoco".into();
 
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
-            Box::new(jacoco_full_step::MavenJacocoFullStep::new(
-                info,
-                jacoco_mode,
-            )),
+            Box::new(jacoco_full_step::MavenJacocoFullStep::new(info)),
             vec![prev.clone()],
         )));
         prev = "jacoco_full".into();

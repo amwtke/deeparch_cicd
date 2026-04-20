@@ -1,7 +1,7 @@
 use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::detector::ProjectInfo;
-use crate::ci::pipeline_builder::base::{JacocoMode, JACOCO_VERSION};
+use crate::ci::pipeline_builder::base::JACOCO_VERSION;
 use crate::ci::pipeline_builder::{git_changed_files_snippet, StepConfig, StepDef};
 
 /// Incremental JaCoCo coverage check (tag = "non-full").
@@ -17,16 +17,14 @@ pub struct GradleJacocoStep {
     image: String,
     source_paths: Vec<String>,
     subdir: Option<String>,
-    mode: JacocoMode,
 }
 
 impl GradleJacocoStep {
-    pub fn new(info: &ProjectInfo, mode: JacocoMode) -> Self {
+    pub fn new(info: &ProjectInfo) -> Self {
         Self {
             image: info.image.clone(),
             source_paths: info.source_paths.clone(),
             subdir: info.subdir.clone(),
-            mode,
         }
     }
 }
@@ -239,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_basic_step_config() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cfg = step.config();
         assert_eq!(cfg.name, "jacoco");
         assert_eq!(cfg.depends_on, vec!["test".to_string()]);
@@ -250,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_command_emits_auto_gen_config_callback_when_missing() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("PIPELIGHT_CALLBACK:auto_gen_jacoco_config"),
@@ -266,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_command_reads_git_diff_report() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(cmd.contains("pipelight-misc/git-diff-report/unstaged.txt"));
         assert!(cmd.contains("pipelight-misc/git-diff-report/staged.txt"));
@@ -277,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_command_skips_when_no_changed_java_files() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("no changed java/kt files"),
@@ -288,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_command_applies_exclude_patterns_from_config() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("jacoco-config.yml") && cmd.contains("exclude"),
@@ -299,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_command_skips_when_all_files_excluded() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("all changed files excluded"),
@@ -310,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_command_handles_missing_exec_file() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("no exec file"),
@@ -321,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_command_downloads_jacococli_in_standalone_mode() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("jacococli.jar"),
@@ -333,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_command_generates_xml_report_in_standalone_mode() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("report") && cmd.contains("--xml"),
@@ -345,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_command_parses_xml_for_line_coverage() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("sourcefile") && cmd.contains("LINE"),
@@ -356,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_command_reads_threshold_from_config() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("threshold"),
@@ -367,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_command_writes_three_report_files() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(cmd.contains("jacoco-summary.txt"));
         assert!(cmd.contains("uncovered.txt"));
@@ -376,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_command_emits_total_marker_and_exits_1_on_failure() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("JaCoCo Total:"),
@@ -387,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_coverage_below_triggers_auto_fix() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let resolved = step.exception_mapping().resolve(
             1,
             "JaCoCo Total: 3 files below 70%",
@@ -401,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_config_not_found_triggers_auto_gen() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let resolved = step.exception_mapping().resolve(
             1,
             "",
@@ -414,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_to_on_failure_has_expected_exceptions() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let of = step.exception_mapping().to_on_failure();
         assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
         assert!(of.exceptions.contains_key("coverage_below_threshold"));
@@ -434,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_report_str_skip_no_changed_files() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let r = step.output_report_str(
             true,
             "jacoco: no changed java/kt files on current branch — skipping",
@@ -445,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_report_str_skip_all_excluded() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let r = step.output_report_str(
             true,
             "jacoco: all changed files excluded by jacoco-config.yml — skipping",
@@ -456,14 +454,14 @@ mod tests {
 
     #[test]
     fn test_report_str_config_not_found() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let r = step.output_report_str(false, "", "PIPELIGHT_CALLBACK:auto_gen_jacoco_config ...");
         assert_eq!(r, "jacoco: config not found (callback)");
     }
 
     #[test]
     fn test_report_str_total_line() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let r = step.output_report_str(
             false,
             "some prefix\nJaCoCo Total: 2 files below 70%\nextra",
@@ -474,14 +472,14 @@ mod tests {
 
     #[test]
     fn test_report_str_success_default() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let r = step.output_report_str(true, "JaCoCo Total: 0 files below 70%", "");
         assert_eq!(r, "JaCoCo Total: 0 files below 70%");
     }
 
     #[test]
     fn test_report_str_skip_no_exec() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let r = step.output_report_str(
             true,
             "jacoco: no exec file at pipelight-misc/jacoco-report/jacoco.exec ... skipping",
@@ -492,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_command_uses_gradle_build_dirs() {
-        let step = GradleJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(
             cmd.contains("build/classes/java/main"),

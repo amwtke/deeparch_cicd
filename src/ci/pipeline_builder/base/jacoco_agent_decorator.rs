@@ -15,6 +15,7 @@ use regex::Regex;
 ///   downstream jacoco step finds them in a predictable location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JacocoMode {
+    #[allow(dead_code)] // reserved for non-Java pipelines
     None,
     Standalone,
     MavenPlugin,
@@ -84,14 +85,12 @@ impl StepDef for JacocoAgentTestStep {
                 let mvn_test_re = Regex::new(r"\bmvn\s+test(\s|$)").unwrap();
                 let any_rewritten = cfg.commands.iter().any(|c| mvn_test_re.is_match(c));
                 if any_rewritten {
-                    let replacement = format!("mvn jacoco:prepare-agent test$1");
+                    let replacement = "mvn jacoco:prepare-agent test$1";
                     let rewritten: Vec<String> = cfg
                         .commands
                         .iter()
                         .map(|c| {
-                            let replaced = mvn_test_re
-                                .replace_all(c, replacement.as_str())
-                                .into_owned();
+                            let replaced = mvn_test_re.replace_all(c, replacement).into_owned();
                             // Now inject the destFile property at the end of "test"
                             replaced.replace(
                                 "mvn jacoco:prepare-agent test",

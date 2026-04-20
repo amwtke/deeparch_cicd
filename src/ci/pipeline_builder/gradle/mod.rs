@@ -206,7 +206,7 @@ impl PipelineStrategy for GradleStrategy {
         };
         let wrapped_test = crate::ci::pipeline_builder::base::JacocoAgentTestStep::new(
             Box::new(test_step),
-            jacoco_mode.clone(),
+            jacoco_mode,
         );
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
             Box::new(wrapped_test),
@@ -216,19 +216,13 @@ impl PipelineStrategy for GradleStrategy {
 
         // JaCoCo incremental + full
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
-            Box::new(jacoco_step::GradleJacocoStep::new(
-                info,
-                jacoco_mode.clone(),
-            )),
+            Box::new(jacoco_step::GradleJacocoStep::new(info)),
             vec![prev.clone()],
         )));
         prev = "jacoco".into();
 
         steps.push(Box::new(GradleCachedStep::wrap_with_deps(
-            Box::new(jacoco_full_step::GradleJacocoFullStep::new(
-                info,
-                jacoco_mode,
-            )),
+            Box::new(jacoco_full_step::GradleJacocoFullStep::new(info)),
             vec![prev.clone()],
         )));
 
