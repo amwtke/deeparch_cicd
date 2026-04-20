@@ -109,7 +109,22 @@ impl StepDef for JacocoAgentTestStep {
                 // else: nothing to rewrite — leave commands untouched.
             }
             JacocoMode::GradlePlugin => {
-                // Implemented in Task 8.
+                let rewritten: Vec<String> = cfg
+                    .commands
+                    .iter()
+                    .map(|c| {
+                        if c.contains("./gradlew") && !c.contains("jacocoTestReport") {
+                            format!("{c} jacocoTestReport")
+                        } else {
+                            c.clone()
+                        }
+                    })
+                    .collect();
+                let joined = rewritten.join(" && ");
+                let copy_cmd = "mkdir -p /workspace/pipelight-misc/jacoco-report && \
+                     cp build/jacoco/test.exec /workspace/pipelight-misc/jacoco-report/jacoco.exec 2>/dev/null || true && \
+                     cp build/reports/jacoco/test/jacocoTestReport.xml /workspace/pipelight-misc/jacoco-report/jacoco.xml 2>/dev/null || true";
+                cfg.commands = vec![format!("{joined} && {copy_cmd}")];
             }
         }
         cfg
@@ -261,5 +276,46 @@ mod tests {
         let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::MavenPlugin);
         let cfg = decorator.config();
         assert_eq!(cfg.commands, vec!["mvn test-compile".to_string()]);
+    }
+
+    #[test]
+    fn test_gradle_plugin_mode_appends_jacoco_test_report() {
+        let inner = TestStep::new(&make_info("./gradlew test --continue", "gradle:8-jdk17"));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::GradlePlugin);
+        let cfg = decorator.config();
+        let combined = cfg.commands.join(" && ");
+        assert!(
+            combined.contains("jacocoTestReport"),
+            "expected jacocoTestReport task appended, got: {}",
+            combined
+        );
+        assert!(combined.contains("--continue"), "must preserve --continue");
+    }
+
+    #[test]
+    fn test_gradle_plugin_mode_copies_outputs_to_pipelight_misc() {
+        let inner = TestStep::new(&make_info("./gradlew test", "gradle:8-jdk17"));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::GradlePlugin);
+        let cfg = decorator.config();
+        let combined = cfg.commands.join(" && ");
+        assert!(
+            combined.contains("cp build/jacoco/test.exec"),
+            "expected cp fallback for exec, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("jacocoTestReport.xml"),
+            "expected cp fallback for xml, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("pipelight-misc/jacoco-report"),
+            "expected destination path, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("|| true"),
+            "copy must be tolerant of missing files (|| true)"
+        );
     }
 }
