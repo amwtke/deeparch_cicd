@@ -81,6 +81,11 @@ impl MavenDetector {
         content.contains("maven-pmd-plugin")
     }
 
+    /// Check if pom.xml contains the jacoco-maven-plugin
+    fn has_jacoco(content: &str) -> bool {
+        content.contains("jacoco-maven-plugin")
+    }
+
     /// Map JDK version string to the nearest supported Docker image.
     fn jdk_to_image(version: &str) -> String {
         let v: u32 = version.parse().unwrap_or(17);
@@ -139,6 +144,9 @@ impl ProjectDetector for MavenDetector {
         }
         if Self::has_pmd(&content) {
             quality_plugins.push("pmd".to_string());
+        }
+        if Self::has_jacoco(&content) {
+            quality_plugins.push("jacoco".to_string());
         }
 
         Ok(ProjectInfo {
@@ -295,5 +303,31 @@ mod tests {
         let detector = MavenDetector;
         let info = detector.analyze(dir.path()).unwrap();
         assert!(info.lint_cmd.is_some());
+    }
+
+    #[test]
+    fn test_jacoco_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let pom = r#"
+<project>
+  <properties><java.version>17</java.version></properties>
+  <build><plugins><plugin>
+    <groupId>org.jacoco</groupId>
+    <artifactId>jacoco-maven-plugin</artifactId>
+    <version>0.8.12</version>
+  </plugin></plugins></build>
+</project>"#;
+        fs::write(dir.path().join("pom.xml"), pom).unwrap();
+        let info = MavenDetector.analyze(dir.path()).unwrap();
+        assert!(info.quality_plugins.contains(&"jacoco".to_string()));
+    }
+
+    #[test]
+    fn test_jacoco_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let pom = r#"<project><modelVersion>4.0.0</modelVersion></project>"#;
+        fs::write(dir.path().join("pom.xml"), pom).unwrap();
+        let info = MavenDetector.analyze(dir.path()).unwrap();
+        assert!(!info.quality_plugins.contains(&"jacoco".to_string()));
     }
 }
