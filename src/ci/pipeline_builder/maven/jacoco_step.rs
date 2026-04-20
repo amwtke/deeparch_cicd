@@ -68,7 +68,6 @@ impl StepDef for MavenJacocoStep {
                echo 'jacoco: no exec file at pipelight-misc/jacoco-report/jacoco.exec (test step may have crashed or jacoco plugin output path was customised) — skipping'; \
                exit 0; \
              fi && \
-             JACOCO_VER={ver} && \
              JACOCO_CACHE=$HOME/.pipelight/cache && \
              JACOCO_DIR=$JACOCO_CACHE/jacoco-{ver} && \
              if [ ! -f /workspace/pipelight-misc/jacoco-report/jacoco.xml ]; then \
@@ -87,7 +86,54 @@ impl StepDef for MavenJacocoStep {
                  $CLASSFILES_ARGS $SOURCES_ARGS \
                  --xml /workspace/pipelight-misc/jacoco-report/jacoco.xml; \
              fi && \
-             true",
+             THRESHOLD=$(awk '/^threshold:/{{print $2; exit}}' /workspace/pipelight-misc/jacoco-config.yml) && \
+             THRESHOLD=${{THRESHOLD:-70}} && \
+             REPORT=/workspace/pipelight-misc/jacoco-report && \
+             : > $REPORT/jacoco-summary.txt && \
+             : > $REPORT/uncovered.txt && \
+             : > $REPORT/threshold-fail.txt && \
+             awk -v threshold=\"$THRESHOLD\" \
+                 -v summary=\"$REPORT/jacoco-summary.txt\" \
+                 -v failed=\"$REPORT/threshold-fail.txt\" \
+                 -v uncovered=\"$REPORT/uncovered.txt\" \
+                 -v filtered_list=\"$FILTERED\" '\
+               BEGIN {{ \
+                 n=split(filtered_list, files, \"\\n\"); \
+                 for (i=1;i<=n;i++) {{ if (files[i]!=\"\") keep[files[i]]=1 }}; \
+                 IGNORECASE=1 \
+               }} \
+               /<package/ {{ match($0, /name=\"[^\"]*\"/); pkg=substr($0, RSTART+6, RLENGTH-7) }} \
+               /<sourcefile/ {{ match($0, /name=\"[^\"]*\"/); current=substr($0, RSTART+6, RLENGTH-7); have_line=0 }} \
+               /<line.*mi=/ && current!=\"\" && have_line==0 {{ \
+                 if (match($0, /nr=\"[0-9]+\"/)) {{ nr=substr($0, RSTART+4, RLENGTH-5); \
+                   if (match($0, /mi=\"[0-9]+\"/)) {{ mi=substr($0, RSTART+4, RLENGTH-5); if (mi+0>0) uncov[current]=uncov[current] nr \",\" }} \
+                 }} \
+               }} \
+               /<counter type=\"LINE\"/ && current!=\"\" {{ \
+                 if (have_line==1) next; have_line=1; \
+                 match($0,/missed=\"[0-9]+\"/); m=substr($0,RSTART+8,RLENGTH-9)+0; \
+                 match($0,/covered=\"[0-9]+\"/); c=substr($0,RSTART+9,RLENGTH-10)+0; \
+                 t=m+c; pct=(t==0)?100:int((c*1000)/t)/10; \
+                 rel=(pkg==\"\")?current:pkg\"/\"current; \
+                 matched=\"\"; for (f in keep) if (index(f, rel)>0) {{ matched=f; break }}; \
+                 if (matched!=\"\") {{ \
+                   printf(\"%s %.1f%%\\n\", matched, pct) >> summary; \
+                   if (pct<threshold) {{ \
+                     printf(\"%s %.1f%%\\n\", matched, pct) >> failed; \
+                     printf(\"%s: missed lines %s\\n\", matched, uncov[current]) >> uncovered; \
+                   }} \
+                 }} \
+                 current=\"\"; \
+               }} \
+             ' $REPORT/jacoco.xml && \
+             FAIL_COUNT=$(wc -l < $REPORT/threshold-fail.txt | tr -d ' ') && \
+             echo \"\" && \
+             echo \"JaCoCo Total: $FAIL_COUNT files below $THRESHOLD%\" && \
+             if [ \"$FAIL_COUNT\" -gt 0 ]; then \
+               echo \"\" && echo \"=== Files Below Threshold ===\" && cat $REPORT/threshold-fail.txt && \
+               exit 1; \
+             fi && \
+             exit 0",
             cd = cd_prefix,
             ver = JACOCO_VERSION,
             changed_files = changed_files,
@@ -248,5 +294,47 @@ mod tests {
             cmd
         );
         assert!(cmd.contains("pipelight-misc/jacoco-report/jacoco.xml"));
+    }
+
+    #[test]
+    fn test_command_parses_xml_for_line_coverage() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("sourcefile") && cmd.contains("LINE"),
+            "command must scan sourcefile + LINE counters (first 300 chars): {}",
+            &cmd.chars().take(300).collect::<String>()
+        );
+    }
+
+    #[test]
+    fn test_command_reads_threshold_from_config() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("threshold"),
+            "command must read threshold from config, got first 500 chars: {}",
+            &cmd.chars().take(500).collect::<String>()
+        );
+    }
+
+    #[test]
+    fn test_command_writes_three_report_files() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(cmd.contains("jacoco-summary.txt"));
+        assert!(cmd.contains("uncovered.txt"));
+        assert!(cmd.contains("threshold-fail.txt"));
+    }
+
+    #[test]
+    fn test_command_emits_total_marker_and_exits_1_on_failure() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("JaCoCo Total:"),
+            "command must emit 'JaCoCo Total:' marker for match_exception"
+        );
+        assert!(cmd.contains("exit 1"));
     }
 }
