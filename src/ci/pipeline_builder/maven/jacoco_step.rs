@@ -37,13 +37,36 @@ impl StepDef for MavenJacocoStep {
             Some(subdir) => format!("cd {} && ", subdir),
             None => String::new(),
         };
+        let changed_files = git_changed_files_snippet(&["*.java", "*.kt"], self.subdir.as_deref());
         let cmd = format!(
             "{cd}if [ ! -f /workspace/pipelight-misc/jacoco-config.yml ]; then \
                echo 'PIPELIGHT_CALLBACK:auto_gen_jacoco_config - No jacoco-config.yml found in pipelight-misc/. LLM should generate one with threshold (default 70) and exclude globs (DTO/Config/Exception/Application at minimum).' >&2; \
                exit 1; \
              fi && \
+             {changed_files} && \
+             if [ -z \"$CHANGED_FILES\" ]; then \
+               echo 'jacoco: no changed java/kt files on current branch — skipping'; \
+               exit 0; \
+             fi && \
+             EXCLUDES=$(awk '/^exclude:/{{flag=1; next}} flag && /^[[:space:]]*-/ {{gsub(/^[[:space:]]*-[[:space:]]*\"?/,\"\"); gsub(/\"?[[:space:]]*$/,\"\"); print}} flag && /^[^[:space:]-]/ {{flag=0}}' /workspace/pipelight-misc/jacoco-config.yml) && \
+             FILTERED=\"\" && \
+             while IFS= read -r f; do \
+               [ -z \"$f\" ] && continue; \
+               skip=0; \
+               for pat in $EXCLUDES; do \
+                 case \"$f\" in $pat) skip=1; break;; esac; \
+               done; \
+               [ \"$skip\" -eq 0 ] && FILTERED=\"$FILTERED$f\\n\"; \
+             done <<< \"$CHANGED_FILES\" && \
+             FILTERED=$(printf '%b' \"$FILTERED\" | sed '/^$/d') && \
+             if [ -z \"$FILTERED\" ]; then \
+               echo 'jacoco: all changed files excluded by jacoco-config.yml — skipping'; \
+               exit 0; \
+             fi && \
+             echo \"jacoco: checking coverage for $(echo \\\"$FILTERED\\\" | wc -l | tr -d ' ') changed file(s)\" && \
              true",
             cd = cd_prefix,
+            changed_files = changed_files,
         );
         StepConfig {
             name: "jacoco".into(),
@@ -120,6 +143,50 @@ mod tests {
         assert!(
             cmd.contains("pipelight-misc/jacoco-config.yml"),
             "command must reference config file path, got: {}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_command_reads_git_diff_report() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(cmd.contains("pipelight-misc/git-diff-report/unstaged.txt"));
+        assert!(cmd.contains("pipelight-misc/git-diff-report/staged.txt"));
+        assert!(cmd.contains("pipelight-misc/git-diff-report/untracked.txt"));
+        assert!(cmd.contains("pipelight-misc/git-diff-report/unpushed.txt"));
+        assert!(cmd.contains("java|kt"));
+    }
+
+    #[test]
+    fn test_command_skips_when_no_changed_java_files() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("no changed java/kt files"),
+            "command must self-skip when no changes, got: {}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_command_applies_exclude_patterns_from_config() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("jacoco-config.yml") && cmd.contains("exclude"),
+            "command must consult exclude patterns, got: {}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_command_skips_when_all_files_excluded() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("all changed files excluded"),
+            "command must self-skip when filter empties the list, got: {}",
             cmd
         );
     }
