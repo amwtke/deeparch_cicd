@@ -219,6 +219,8 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 | `pmd_print_command` | pmd_print | 见下方 **`pmd_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `spotbugs_print_command` | spotbugs_print | 见下方 **`spotbugs_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_diff_command` | git_diff_report | 见下方 **`git_diff_report` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `auto_gen_jacoco_config` | retry | 在 `pipelight-misc/` 下生成 `jacoco-config.yml`（含 `threshold: 70` 和排除 glob 列表），然后 retry 该 step | step 通过 | 见下方 **`auto_gen_jacoco_config` 详细流程** |
+| `jacoco_print_command` | jacoco_print | 解析 `pipelight-misc/jacoco-full-report/jacoco.xml`，按 package 分组打印每个 source file 的 LINE 覆盖率百分比 + 总结统计（≥70% / <70% 数量） | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
@@ -303,6 +305,66 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 **两轮都找不到** → 立即 skip PMD：新起 pipeline `pipelight run -f pipeline.yml --output json --run-id <new-id> --skip pmd`。**禁止 LLM 在没有找到任何已有配置或编码规范文档的情况下凭空生成 ruleset 文件。**
 
 **注意：`pipelight-misc/` 必须位于目标项目根目录下**（即 `pipeline.yml` 所在目录），而非 pipelight 工具自身的目录。
+
+#### `auto_gen_jacoco_config` 详细流程
+
+1. **读上下文**：LLM 读 `on_failure.context_paths` 指向的 source_paths（项目源码目录），判断项目规模和框架类型。
+
+2. **识别项目约定**：扫描 `src/main/java/`（或 kotlin）下的文件命名模式，找出常见的 DTO/Config/Exception/Entity 类。典型模式：
+   - `*Dto.java` / `*DTO.java`（数据传输对象，仅 getter/setter，无业务逻辑）
+   - `*Config.java` / `*Configuration.java`（Spring 配置类）
+   - `*Exception.java`（异常类，仅构造器）
+   - `*Application.java`（Spring Boot 入口类）
+   - `**/generated/**`（构建时生成的代码）
+   - 可根据项目实际加入更多模式（如 `*Mapper.java`、`*Enum.java`、`*Controller.java`）
+
+3. **写配置**：生成 `pipelight-misc/jacoco-config.yml`，默认模板：
+
+   ```yaml
+   # JaCoCo 覆盖率检查配置
+   # 被 pipelight 的 jacoco / jacoco_full step 读取
+
+   # 每个文件的 LINE 覆盖率下限（百分比）
+   threshold: 70
+
+   # 排除在覆盖率检查外的文件 glob（相对项目根）
+   exclude:
+     - "**/*Dto.java"
+     - "**/*DTO.java"
+     - "**/*Config.java"
+     - "**/*Configuration.java"
+     - "**/*Exception.java"
+     - "**/*Application.java"
+     - "**/generated/**"
+   ```
+
+4. **LLM 打印**：`Generated pipelight-misc/jacoco-config.yml (threshold=70, N excludes).`
+
+5. **retry**：`pipelight retry --step jacoco`。
+
+#### `jacoco_print_command` 详细流程
+
+触发于 `jacoco_full` step（`--full-report-only` 模式），全仓扫描发现有文件 LINE 覆盖率 < threshold 时。report-only：不修代码、不 retry。
+
+1. **读 XML**：`pipelight-misc/jacoco-full-report/jacoco.xml`。
+2. **读 summary 文本**：`jacoco-summary.txt`（每行 `path X.Y%`）和 `threshold-fail.txt`（未达标文件）。
+3. **按 package 分组打印**：每行格式 `  <file>  <pct>%`，未达标的加 `⚠ below threshold` 标记。末尾给出汇总：总文件数、达标数、未达标数、平均覆盖率。
+
+示例输出：
+
+```
+=== JaCoCo Full Report (threshold=70%) ===
+
+com.foo.user:
+  UserService.java          82.5%
+  UserController.java       91.2%
+
+com.foo.order:
+  OrderService.java         63.1%  ⚠ below threshold
+  OrderRepository.java      95.0%
+
+Total: 4 files — 3 pass, 1 fail — avg 82.9%
+```
 
 #### `test_print` 详细流程
 
