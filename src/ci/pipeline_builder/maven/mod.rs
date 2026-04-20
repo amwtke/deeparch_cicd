@@ -1,4 +1,5 @@
 pub mod checkstyle_step;
+pub mod jacoco_full_step;
 pub mod jacoco_step;
 pub mod package_step;
 pub mod pmd_full_step;
