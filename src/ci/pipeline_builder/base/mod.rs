@@ -53,6 +53,7 @@ impl BaseStrategy {
             "fmt-check" | "typecheck" | "mypy" => Self::report_check(success, step_name, &output),
             "spotbugs" | "spotbugs_full" => Self::report_spotbugs(step_name, success, &output),
             "pmd" | "pmd_full" => Self::report_pmd(step_name, success, &output),
+            "jacoco" | "jacoco_full" => Self::report_jacoco(step_name, success, &output),
             "package" => Self::report_package(success, &output),
             _ => {
                 if success {
@@ -202,6 +203,29 @@ impl BaseStrategy {
             format!("{}: {} violations", step_name, violation_count)
         } else {
             format!("{}: no violations", step_name)
+        }
+    }
+
+    fn report_jacoco(step_name: &str, success: bool, output: &str) -> String {
+        if output.contains("PIPELIGHT_CALLBACK:auto_gen_jacoco_config") {
+            return format!("{}: config not found (callback)", step_name);
+        }
+        if output.contains("no changed java/kt files") {
+            return format!("{}: skipped (no changed files)", step_name);
+        }
+        if output.contains("all changed files excluded") {
+            return format!("{}: skipped (all excluded)", step_name);
+        }
+        if output.contains("no exec file") {
+            return format!("{}: skipped (no exec file)", step_name);
+        }
+        if let Some(line) = output.lines().find(|l| l.contains("JaCoCo Total:")) {
+            return line.trim().to_string();
+        }
+        if !success {
+            format!("{}: failed", step_name)
+        } else {
+            format!("{}: ok", step_name)
         }
     }
 
