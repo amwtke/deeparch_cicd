@@ -1,5 +1,6 @@
 use crate::ci::callback::exception::ExceptionMapping;
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
+use regex::Regex;
 
 /// JaCoCo execution mode selected by the strategy at pipeline-build time.
 ///
@@ -76,8 +77,39 @@ impl StepDef for JacocoAgentTestStep {
                 let joined_original = cfg.commands.join(" && ");
                 cfg.commands = vec![format!("{prepare} && {joined_original}")];
             }
-            JacocoMode::MavenPlugin | JacocoMode::GradlePlugin => {
-                // Implemented in later tasks.
+            JacocoMode::MavenPlugin => {
+                let destfile = "/workspace/pipelight-misc/jacoco-report/jacoco.exec";
+                // Word-boundary regex avoids false positives like `mvn test-compile`.
+                // Match "mvn test" only when followed by space, dash from flag, or end-of-string.
+                let mvn_test_re = Regex::new(r"\bmvn\s+test(\s|$)").unwrap();
+                let any_rewritten = cfg.commands.iter().any(|c| mvn_test_re.is_match(c));
+                if any_rewritten {
+                    let replacement = format!("mvn jacoco:prepare-agent test$1");
+                    let rewritten: Vec<String> = cfg
+                        .commands
+                        .iter()
+                        .map(|c| {
+                            let replaced = mvn_test_re
+                                .replace_all(c, replacement.as_str())
+                                .into_owned();
+                            // Now inject the destFile property at the end of "test"
+                            replaced.replace(
+                                "mvn jacoco:prepare-agent test",
+                                &format!(
+                                    "mvn jacoco:prepare-agent test -Djacoco.destFile={destfile}"
+                                ),
+                            )
+                        })
+                        .collect();
+                    let joined = rewritten.join(" && ");
+                    cfg.commands = vec![format!(
+                        "mkdir -p /workspace/pipelight-misc/jacoco-report && {joined}"
+                    )];
+                }
+                // else: nothing to rewrite — leave commands untouched.
+            }
+            JacocoMode::GradlePlugin => {
+                // Implemented in Task 8.
             }
         }
         cfg
@@ -186,5 +218,48 @@ mod tests {
         assert!(
             combined.contains("~/.pipelight/cache") || combined.contains("$HOME/.pipelight/cache")
         );
+    }
+
+    #[test]
+    fn test_maven_plugin_mode_injects_prepare_agent() {
+        let inner = TestStep::new(&make_info(
+            "mvn test --fail-at-end",
+            "maven:3.9-eclipse-temurin-17",
+        ));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::MavenPlugin);
+        let cfg = decorator.config();
+        let combined = cfg.commands.join(" && ");
+        assert!(
+            combined.contains("jacoco:prepare-agent"),
+            "expected jacoco:prepare-agent goal inserted, got: {}",
+            combined
+        );
+        assert!(
+            combined
+                .contains("-Djacoco.destFile=/workspace/pipelight-misc/jacoco-report/jacoco.exec"),
+            "expected destFile system property, got: {}",
+            combined
+        );
+        assert!(combined.contains("--fail-at-end"));
+    }
+
+    #[test]
+    fn test_maven_plugin_mode_leaves_non_mvn_untouched() {
+        let inner = TestStep::new(&make_info("echo hi", "maven:3.9-eclipse-temurin-17"));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::MavenPlugin);
+        let cfg = decorator.config();
+        assert_eq!(cfg.commands, vec!["echo hi".to_string()]);
+    }
+
+    #[test]
+    fn test_maven_plugin_mode_does_not_match_test_compile() {
+        // False-positive guard: "mvn test-compile" must not be rewritten.
+        let inner = TestStep::new(&make_info(
+            "mvn test-compile",
+            "maven:3.9-eclipse-temurin-17",
+        ));
+        let decorator = JacocoAgentTestStep::new(Box::new(inner), JacocoMode::MavenPlugin);
+        let cfg = decorator.config();
+        assert_eq!(cfg.commands, vec!["mvn test-compile".to_string()]);
     }
 }
