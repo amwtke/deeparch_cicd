@@ -150,12 +150,43 @@ impl StepDef for MavenJacocoStep {
     }
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        // Filled in Task 14.
         ExceptionMapping::new(CallbackCommand::RuntimeError)
+            .add(
+                "coverage_below_threshold",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoFix,
+                    max_retries: 9,
+                    context_paths: vec![
+                        "pipelight-misc/jacoco-report/jacoco.xml".into(),
+                        "pipelight-misc/jacoco-report/uncovered.txt".into(),
+                        "pipelight-misc/jacoco-report/jacoco-summary.txt".into(),
+                        "pipelight-misc/jacoco-report/threshold-fail.txt".into(),
+                        "pipelight-misc/jacoco-config.yml".into(),
+                        "pipelight-misc/git-diff-report/staged.txt".into(),
+                        "pipelight-misc/git-diff-report/unstaged.txt".into(),
+                        "pipelight-misc/git-diff-report/untracked.txt".into(),
+                        "pipelight-misc/git-diff-report/unpushed.txt".into(),
+                    ],
+                },
+            )
+            .add(
+                "config_not_found",
+                ExceptionEntry {
+                    command: CallbackCommand::AutoGenJacocoConfig,
+                    max_retries: 9,
+                    context_paths: self.source_paths.clone(),
+                },
+            )
     }
 
-    fn match_exception(&self, _exit_code: i64, _stdout: &str, _stderr: &str) -> Option<String> {
-        None
+    fn match_exception(&self, _exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
+        if stderr.contains("PIPELIGHT_CALLBACK:auto_gen_jacoco_config") {
+            Some("config_not_found".into())
+        } else if stdout.contains("JaCoCo Total:") {
+            Some("coverage_below_threshold".into())
+        } else {
+            None
+        }
     }
 
     fn output_report_str(&self, success: bool, _stdout: &str, _stderr: &str) -> String {
@@ -336,5 +367,52 @@ mod tests {
             "command must emit 'JaCoCo Total:' marker for match_exception"
         );
         assert!(cmd.contains("exit 1"));
+    }
+
+    #[test]
+    fn test_coverage_below_triggers_auto_fix() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "JaCoCo Total: 3 files below 70%",
+            "",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::AutoFix);
+        assert_eq!(resolved.max_retries, 9);
+        assert_eq!(resolved.exception_key, "coverage_below_threshold");
+    }
+
+    #[test]
+    fn test_config_not_found_triggers_auto_gen() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "",
+            "PIPELIGHT_CALLBACK:auto_gen_jacoco_config",
+            Some(&|ec, out, err| step.match_exception(ec, out, err)),
+        );
+        assert_eq!(resolved.command, CallbackCommand::AutoGenJacocoConfig);
+        assert_eq!(resolved.max_retries, 9);
+    }
+
+    #[test]
+    fn test_to_on_failure_has_expected_exceptions() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let of = step.exception_mapping().to_on_failure();
+        assert_eq!(of.callback_command, CallbackCommand::RuntimeError);
+        assert!(of.exceptions.contains_key("coverage_below_threshold"));
+        assert!(of.exceptions.contains_key("config_not_found"));
+        let cov = &of.exceptions["coverage_below_threshold"];
+        assert_eq!(cov.command, CallbackCommand::AutoFix);
+        assert_eq!(cov.max_retries, 9);
+        assert!(cov
+            .context_paths
+            .iter()
+            .any(|p| p.contains("jacoco-report/jacoco.xml")));
+        assert!(cov
+            .context_paths
+            .iter()
+            .any(|p| p.contains("uncovered.txt")));
     }
 }
