@@ -64,8 +64,32 @@ impl StepDef for MavenJacocoStep {
                exit 0; \
              fi && \
              echo \"jacoco: checking coverage for $(echo \\\"$FILTERED\\\" | wc -l | tr -d ' ') changed file(s)\" && \
+             if [ ! -f /workspace/pipelight-misc/jacoco-report/jacoco.exec ]; then \
+               echo 'jacoco: no exec file at pipelight-misc/jacoco-report/jacoco.exec (test step may have crashed or jacoco plugin output path was customised) — skipping'; \
+               exit 0; \
+             fi && \
+             JACOCO_VER={ver} && \
+             JACOCO_CACHE=$HOME/.pipelight/cache && \
+             JACOCO_DIR=$JACOCO_CACHE/jacoco-{ver} && \
+             if [ ! -f /workspace/pipelight-misc/jacoco-report/jacoco.xml ]; then \
+               if [ ! -f $JACOCO_DIR/lib/jacococli.jar ]; then \
+                 echo 'Downloading JaCoCo CLI...' && \
+                 mkdir -p $JACOCO_DIR && \
+                 curl -sL https://repo1.maven.org/maven2/org/jacoco/jacoco/{ver}/jacoco-{ver}.zip -o /tmp/jacoco.zip && \
+                 (cd $JACOCO_DIR && jar xf /tmp/jacoco.zip || unzip -o /tmp/jacoco.zip) && rm -f /tmp/jacoco.zip; \
+               fi && \
+               CLASS_DIRS=$(find . -path '*/target/classes' -type d 2>/dev/null | tr '\\n' ' ') && \
+               SRC_DIRS=$(find . -path '*/src/main/java' -type d 2>/dev/null | tr '\\n' ' ') && \
+               CLASSFILES_ARGS=$(for d in $CLASS_DIRS; do echo -n \"--classfiles $d \"; done) && \
+               SOURCES_ARGS=$(for d in $SRC_DIRS; do echo -n \"--sourcefiles $d \"; done) && \
+               java -jar $JACOCO_DIR/lib/jacococli.jar report \
+                 /workspace/pipelight-misc/jacoco-report/jacoco.exec \
+                 $CLASSFILES_ARGS $SOURCES_ARGS \
+                 --xml /workspace/pipelight-misc/jacoco-report/jacoco.xml; \
+             fi && \
              true",
             cd = cd_prefix,
+            ver = JACOCO_VERSION,
             changed_files = changed_files,
         );
         StepConfig {
@@ -189,5 +213,40 @@ mod tests {
             "command must self-skip when filter empties the list, got: {}",
             cmd
         );
+    }
+
+    #[test]
+    fn test_command_handles_missing_exec_file() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("no exec file"),
+            "command must handle missing exec gracefully, got: {}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_command_downloads_jacococli_in_standalone_mode() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("jacococli.jar"),
+            "standalone mode must download/use jacococli, got: {}",
+            cmd
+        );
+        assert!(cmd.contains("jacoco-0.8.12"));
+    }
+
+    #[test]
+    fn test_command_generates_xml_report_in_standalone_mode() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("report") && cmd.contains("--xml"),
+            "standalone mode must run `jacococli report --xml`, got: {}",
+            cmd
+        );
+        assert!(cmd.contains("pipelight-misc/jacoco-report/jacoco.xml"));
     }
 }
