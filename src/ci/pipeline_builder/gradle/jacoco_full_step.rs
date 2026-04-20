@@ -77,7 +77,9 @@ impl StepDef for GradleJacocoFullStep {
                }} \
              ' $REPORT/jacoco.xml && \
              FAIL_COUNT=$(wc -l < $REPORT/threshold-fail.txt | tr -d ' ') && \
-             echo \"\" && echo \"JaCoCo Total: $FAIL_COUNT files below $THRESHOLD%\" && \
+             if [ \"$FAIL_COUNT\" -gt 0 ]; then \
+               echo \"\" && echo \"JaCoCo Total: $FAIL_COUNT files below $THRESHOLD%\"; \
+             fi && \
              echo \"jacoco_full: report at /workspace/pipelight-misc/jacoco-full-report/\" && \
              exit 0",
             cd = cd_prefix,

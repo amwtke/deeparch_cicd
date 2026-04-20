@@ -125,12 +125,14 @@ impl StepDef for MavenJacocoStep {
                }} \
              ' $REPORT/jacoco.xml && \
              FAIL_COUNT=$(wc -l < $REPORT/threshold-fail.txt | tr -d ' ') && \
-             echo \"\" && \
-             echo \"JaCoCo Total: $FAIL_COUNT files below $THRESHOLD%\" && \
              if [ \"$FAIL_COUNT\" -gt 0 ]; then \
+               echo \"\" && \
+               echo \"JaCoCo Total: $FAIL_COUNT files below $THRESHOLD%\" && \
                echo \"\" && echo \"=== Files Below Threshold ===\" && cat $REPORT/threshold-fail.txt && \
                exit 1; \
              fi && \
+             CHECKED=$(wc -l < $REPORT/jacoco-summary.txt | tr -d ' ') && \
+             echo \"\" && echo \"jacoco: all $CHECKED changed file(s) meet $THRESHOLD% threshold\" && \
              exit 0",
             cd = cd_prefix,
             ver = JACOCO_VERSION,
@@ -202,6 +204,12 @@ impl StepDef for MavenJacocoStep {
             return "jacoco: skipped (no exec file)".into();
         }
         if let Some(line) = output.lines().find(|l| l.contains("JaCoCo Total:")) {
+            return line.trim().to_string();
+        }
+        if let Some(line) = output
+            .lines()
+            .find(|l| l.contains("jacoco: all") && l.contains("meet"))
+        {
             return line.trim().to_string();
         }
         if success {
@@ -473,8 +481,9 @@ mod tests {
     #[test]
     fn test_report_str_success_default() {
         let step = MavenJacocoStep::new(&make_info());
-        let r = step.output_report_str(true, "JaCoCo Total: 0 files below 70%", "");
-        assert_eq!(r, "JaCoCo Total: 0 files below 70%");
+        let r =
+            step.output_report_str(true, "jacoco: all 5 changed file(s) meet 70% threshold", "");
+        assert_eq!(r, "jacoco: all 5 changed file(s) meet 70% threshold");
     }
 
     #[test]
