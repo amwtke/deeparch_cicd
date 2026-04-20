@@ -189,7 +189,23 @@ impl StepDef for MavenJacocoStep {
         }
     }
 
-    fn output_report_str(&self, success: bool, _stdout: &str, _stderr: &str) -> String {
+    fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
+        let output = format!("{}{}", stdout, stderr);
+        if output.contains("PIPELIGHT_CALLBACK:auto_gen_jacoco_config") {
+            return "jacoco: config not found (callback)".into();
+        }
+        if output.contains("no changed java/kt files") {
+            return "jacoco: skipped (no changed files)".into();
+        }
+        if output.contains("all changed files excluded") {
+            return "jacoco: skipped (all excluded)".into();
+        }
+        if output.contains("no exec file") {
+            return "jacoco: skipped (no exec file)".into();
+        }
+        if let Some(line) = output.lines().find(|l| l.contains("JaCoCo Total:")) {
+            return line.trim().to_string();
+        }
         if success {
             "jacoco: ok".into()
         } else {
@@ -414,5 +430,63 @@ mod tests {
             .context_paths
             .iter()
             .any(|p| p.contains("uncovered.txt")));
+    }
+
+    #[test]
+    fn test_report_str_skip_no_changed_files() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let r = step.output_report_str(
+            true,
+            "jacoco: no changed java/kt files on current branch — skipping",
+            "",
+        );
+        assert_eq!(r, "jacoco: skipped (no changed files)");
+    }
+
+    #[test]
+    fn test_report_str_skip_all_excluded() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let r = step.output_report_str(
+            true,
+            "jacoco: all changed files excluded by jacoco-config.yml — skipping",
+            "",
+        );
+        assert_eq!(r, "jacoco: skipped (all excluded)");
+    }
+
+    #[test]
+    fn test_report_str_config_not_found() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let r = step.output_report_str(false, "", "PIPELIGHT_CALLBACK:auto_gen_jacoco_config ...");
+        assert_eq!(r, "jacoco: config not found (callback)");
+    }
+
+    #[test]
+    fn test_report_str_total_line() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let r = step.output_report_str(
+            false,
+            "some prefix\nJaCoCo Total: 2 files below 70%\nextra",
+            "",
+        );
+        assert_eq!(r, "JaCoCo Total: 2 files below 70%");
+    }
+
+    #[test]
+    fn test_report_str_success_default() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let r = step.output_report_str(true, "JaCoCo Total: 0 files below 70%", "");
+        assert_eq!(r, "JaCoCo Total: 0 files below 70%");
+    }
+
+    #[test]
+    fn test_report_str_skip_no_exec() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let r = step.output_report_str(
+            true,
+            "jacoco: no exec file at pipelight-misc/jacoco-report/jacoco.exec ... skipping",
+            "",
+        );
+        assert_eq!(r, "jacoco: skipped (no exec file)");
     }
 }
