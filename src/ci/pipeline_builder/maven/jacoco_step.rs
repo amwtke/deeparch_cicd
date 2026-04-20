@@ -33,10 +33,22 @@ impl MavenJacocoStep {
 
 impl StepDef for MavenJacocoStep {
     fn config(&self) -> StepConfig {
+        let cd_prefix = match &self.subdir {
+            Some(subdir) => format!("cd {} && ", subdir),
+            None => String::new(),
+        };
+        let cmd = format!(
+            "{cd}if [ ! -f /workspace/pipelight-misc/jacoco-config.yml ]; then \
+               echo 'PIPELIGHT_CALLBACK:auto_gen_jacoco_config - No jacoco-config.yml found in pipelight-misc/. LLM should generate one with threshold (default 70) and exclude globs (DTO/Config/Exception/Application at minimum).' >&2; \
+               exit 1; \
+             fi && \
+             true",
+            cd = cd_prefix,
+        );
         StepConfig {
             name: "jacoco".into(),
             image: self.image.clone(),
-            commands: vec!["true".into()], // placeholder; filled in next tasks
+            commands: vec![cmd],
             depends_on: vec!["test".into()],
             allow_failure: false,
             tag: "non-full".into(),
@@ -94,5 +106,21 @@ mod tests {
         assert_eq!(cfg.tag, "non-full");
         assert!(!cfg.allow_failure);
         assert!(cfg.active);
+    }
+
+    #[test]
+    fn test_command_emits_auto_gen_config_callback_when_missing() {
+        let step = MavenJacocoStep::new(&make_info(), JacocoMode::Standalone);
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("PIPELIGHT_CALLBACK:auto_gen_jacoco_config"),
+            "command must emit the auto-gen-config callback when config missing, got: {}",
+            cmd
+        );
+        assert!(
+            cmd.contains("pipelight-misc/jacoco-config.yml"),
+            "command must reference config file path, got: {}",
+            cmd
+        );
     }
 }
