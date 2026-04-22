@@ -153,10 +153,7 @@ impl StepDef for SpotbugsStep {
                 context_paths: vec![
                     "pipelight-misc/spotbugs-report/spotbugs-result.xml".into(),
                     "pipelight-misc/spotbugs-report/spotbugs-summary.txt".into(),
-                    "pipelight-misc/git-diff-report/staged.txt".into(),
-                    "pipelight-misc/git-diff-report/unstaged.txt".into(),
-                    "pipelight-misc/git-diff-report/untracked.txt".into(),
-                    "pipelight-misc/git-diff-report/unpushed.txt".into(),
+                    "pipelight-misc/git-diff-report/diff.txt".into(),
                 ],
             },
         )

@@ -162,10 +162,7 @@ impl StepDef for GradleJacocoStep {
                         "pipelight-misc/jacoco-report/jacoco-summary.txt".into(),
                         "pipelight-misc/jacoco-report/threshold-fail.txt".into(),
                         "pipelight-misc/jacoco-config.yml".into(),
-                        "pipelight-misc/git-diff-report/staged.txt".into(),
-                        "pipelight-misc/git-diff-report/unstaged.txt".into(),
-                        "pipelight-misc/git-diff-report/untracked.txt".into(),
-                        "pipelight-misc/git-diff-report/unpushed.txt".into(),
+                        "pipelight-misc/git-diff-report/diff.txt".into(),
                     ],
                 },
             )
@@ -274,10 +271,7 @@ mod tests {
     fn test_command_reads_git_diff_report() {
         let step = GradleJacocoStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
-        assert!(cmd.contains("pipelight-misc/git-diff-report/unstaged.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/staged.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/untracked.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/unpushed.txt"));
+        assert!(cmd.contains("pipelight-misc/git-diff-report/diff.txt"));
         assert!(cmd.contains("java|kt"));
     }
 

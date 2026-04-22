@@ -354,13 +354,14 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
 }
 
 /// Shell snippet that sets `CHANGED_FILES` to the newline-separated list of
-/// changed files, read from the git-diff step's report files under
-/// `pipelight-misc/git-diff-report/`.
+/// changed files, read from the git-diff step's unified report file at
+/// `pipelight-misc/git-diff-report/diff.txt`.
 ///
 /// The git-diff step (which runs before all strategy steps in the DAG) writes
-/// four files: `unstaged.txt`, `staged.txt`, `untracked.txt`, `unpushed.txt`.
-/// This function reads those files, deduplicates, filters by glob, and checks
-/// file existence.
+/// a single pre-sorted, deduplicated `diff.txt` containing the union of
+/// unstaged, staged, untracked, and unpushed changes. This function reads that
+/// file, optionally strips a subdir prefix, filters by glob, and checks file
+/// existence.
 ///
 /// `globs` are file extension patterns (e.g. `["*.java", "*.kt"]`), converted
 /// to a grep regex for filtering.
@@ -370,7 +371,7 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
 /// `Some("subdir")` strips that prefix so callers get CWD-relative paths
 /// (e.g. `src/Main.java`).
 ///
-/// If the report files don't exist (e.g. git-diff was skipped), `$CHANGED_FILES`
+/// If `diff.txt` doesn't exist (e.g. git-diff was skipped), `$CHANGED_FILES`
 /// will be empty and callers should self-skip.
 pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String {
     // Convert glob patterns like "*.java", "*.kt" into grep -E regex: "\.(java|kt)$"
@@ -388,14 +389,14 @@ pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String
         None => String::new(),
     };
 
-    let report_dir = "/workspace/pipelight-misc/git-diff-report";
+    let report_file = "/workspace/pipelight-misc/git-diff-report/diff.txt";
     format!(
         "CHANGED_FILES=$( \
-           cat {dir}/unstaged.txt {dir}/staged.txt {dir}/untracked.txt {dir}/unpushed.txt 2>/dev/null \
-           | sort -u{sed}{grep} \
+           cat {file} 2>/dev/null\
+           {sed}{grep} \
            | while read f; do [ -f \"$f\" ] && echo \"$f\"; done \
          )",
-        dir = report_dir,
+        file = report_file,
         sed = sed_strip,
         grep = grep_filter,
     )
@@ -535,5 +536,49 @@ mod tests {
         // Root strategy steps now depend on git-diff instead of git-pull
         let build = pipeline.get_step("build").unwrap();
         assert!(build.depends_on.contains(&"git-diff".to_string()));
+    }
+
+    #[test]
+    fn test_snippet_reads_single_diff_txt() {
+        let snippet = git_changed_files_snippet(&["*.java"], None);
+        assert!(
+            snippet.contains("/workspace/pipelight-misc/git-diff-report/diff.txt"),
+            "snippet must cat the unified diff.txt; got:\n{snippet}"
+        );
+        assert!(
+            !snippet.contains("unstaged.txt")
+                && !snippet.contains("staged.txt")
+                && !snippet.contains("untracked.txt")
+                && !snippet.contains("unpushed.txt"),
+            "snippet must not reference legacy per-category files; got:\n{snippet}"
+        );
+    }
+
+    #[test]
+    fn test_snippet_drops_redundant_sort_u() {
+        let snippet = git_changed_files_snippet(&["*.java"], None);
+        // diff.txt is already sort -u; downstream snippet shouldn't re-sort.
+        assert!(
+            !snippet.contains("| sort -u"),
+            "snippet should drop its own sort -u since diff.txt is pre-sorted; got:\n{snippet}"
+        );
+    }
+
+    #[test]
+    fn test_snippet_preserves_subdir_strip() {
+        let snippet = git_changed_files_snippet(&["*.java"], Some("backend"));
+        assert!(
+            snippet.contains("sed 's|^backend/||'"),
+            "snippet must still strip subdir prefix; got:\n{snippet}"
+        );
+    }
+
+    #[test]
+    fn test_snippet_preserves_multi_ext_filter() {
+        let snippet = git_changed_files_snippet(&["*.java", "*.kt"], None);
+        assert!(
+            snippet.contains("grep -E '\\.(java|kt)$'"),
+            "snippet must preserve multi-ext filter; got:\n{snippet}"
+        );
     }
 }

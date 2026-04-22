@@ -110,10 +110,7 @@ impl StepDef for PmdStep {
                     context_paths: vec![
                         "pipelight-misc/pmd-report/pmd-result.xml".into(),
                         "pipelight-misc/pmd-report/pmd-summary.txt".into(),
-                        "pipelight-misc/git-diff-report/staged.txt".into(),
-                        "pipelight-misc/git-diff-report/unstaged.txt".into(),
-                        "pipelight-misc/git-diff-report/untracked.txt".into(),
-                        "pipelight-misc/git-diff-report/unpushed.txt".into(),
+                        "pipelight-misc/git-diff-report/diff.txt".into(),
                     ],
                 },
             )

@@ -639,11 +639,8 @@ mod tests {
             .unwrap()
             .config();
         let cmd = &pmd_cfg.commands[0];
-        // Now reads from git-diff step's report files instead of running git diff
-        assert!(cmd.contains("pipelight-misc/git-diff-report/unstaged.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/staged.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/untracked.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/unpushed.txt"));
+        // Now reads from git-diff step's unified diff.txt instead of running git diff
+        assert!(cmd.contains("pipelight-misc/git-diff-report/diff.txt"));
         assert!(cmd.contains("grep -E"));
         assert!(cmd.contains("java|kt"));
         assert!(cmd.contains("no changed source files"));
