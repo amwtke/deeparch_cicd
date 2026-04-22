@@ -263,8 +263,10 @@ mod tests {
             "script should redirect unified output to diff.txt; got:\n{cmd}"
         );
         assert!(
-            !cmd.contains("unstaged.txt") && !cmd.contains("staged.txt")
-                && !cmd.contains("untracked.txt") && !cmd.contains("unpushed.txt"),
+            !cmd.contains("unstaged.txt")
+                && !cmd.contains("staged.txt")
+                && !cmd.contains("untracked.txt")
+                && !cmd.contains("unpushed.txt"),
             "script must not write legacy per-category files; got:\n{cmd}"
         );
     }
