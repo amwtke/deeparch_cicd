@@ -137,16 +137,27 @@ exit 1"#;
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
-        // TEMPORARY — Task 5 tightens up the match strings; leave flexible for now.
         let output = format!("{}{}", stdout, stderr);
-        if output.contains("not a git repository") { return "git-diff: skipped (no git repo)".into(); }
-        if output.contains("working tree clean") { return "git-diff: skipped (tree clean)".into(); }
-        if let Some(line) = output.lines().find(|l|
-            l.contains("change record(s) on current branch")
-            || l.contains("unique file(s) changed on current branch")) {
+        if output.contains("not a git repository") {
+            return "git-diff: skipped (no git repo)".into();
+        }
+        if output.contains("working tree clean") {
+            return "git-diff: skipped (tree clean)".into();
+        }
+        if output.contains("base ref") && output.contains("not found") {
+            return "git-diff: base ref not found".into();
+        }
+        if let Some(line) = output
+            .lines()
+            .find(|l| l.contains("unique file(s) changed on current branch"))
+        {
             return line.trim().to_string();
         }
-        if success { "git-diff: ok".into() } else { "git-diff: failed".into() }
+        if success {
+            "git-diff: ok".into()
+        } else {
+            "git-diff: failed".into()
+        }
     }
 }
 
@@ -367,5 +378,26 @@ mod tests {
             registry.action_for(&CallbackCommand::RuntimeError),
             CallbackCommandAction::RuntimeError
         );
+    }
+
+    #[test]
+    fn test_match_exception_no_longer_matches_legacy_string() {
+        let step = GitDiffStep::new();
+        // The legacy "change record(s)" phrasing must NOT match anymore —
+        // no real script produces it, and matcher must only key off the new text.
+        let out = "git-diff: 3 change record(s) on current branch\n";
+        let key = step.match_exception(1, out, "");
+        assert_eq!(key, None, "legacy marker should no longer match");
+    }
+
+    #[test]
+    fn test_output_report_str_base_not_found() {
+        let step = GitDiffStep::new();
+        let r = step.output_report_str(
+            false,
+            "",
+            "git-diff: base ref 'origin/foo' not found — run 'git fetch' first\n",
+        );
+        assert_eq!(r, "git-diff: base ref not found");
     }
 }
