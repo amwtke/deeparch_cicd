@@ -365,6 +365,46 @@ class TestOversizeDiff(unittest.TestCase):
             # The 600KB of "xxx...xxx" content must NOT appear in the HTML
             self.assertNotIn("x" * 10000, html_out)
 
+    def test_diff_below_threshold_renders_normally(self):
+        # A small diff must NOT trigger the oversize branch — hunks render normally.
+        fake_diff = (
+            "diff --git a/small.txt b/small.txt\n"
+            "--- a/small.txt\n"
+            "+++ b/small.txt\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "diff.txt").write_text("small.txt\n")
+            (tmp / "base-ref.txt").write_text("origin/main\n")
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=0, stdout="small.txt\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            self.assertNotIn("diff too large", html_out)
+            self.assertIn("@@ -1,1 +1,1 @@", html_out)
+            self.assertIn('class="line add"', html_out)
+            self.assertIn('class="line del"', html_out)
+
 
 if __name__ == "__main__":
     unittest.main()
