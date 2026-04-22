@@ -164,6 +164,11 @@ BINARY_MARKER = "Binary files "
 
 
 def is_binary_diff(diff_text: str) -> bool:
+    """True iff git emitted a 'Binary files X and Y differ' line and no hunk headers.
+
+    The `@@` guard prevents false positives when a text file's content includes
+    the marker phrase — a real text diff always has parseable hunks.
+    """
     return BINARY_MARKER in diff_text and "@@" not in diff_text
 
 
