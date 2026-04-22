@@ -143,6 +143,13 @@ def highlight_content(content: str, lexer, formatter) -> str:
 
 
 def count_file_lines(path: str, cwd: Path) -> int:
+    """Count newline-terminated lines in `cwd/path` for display in the HTML summary.
+
+    Returns 0 when the file is absent, not a regular file, or unreadable — these
+    cases are silently collapsed because the count is a display-only hint and
+    not load-bearing. For binary files, the returned count is an approximation
+    (byte-split on \\n with errors=replace); acceptable for display.
+    """
     fp = cwd / path
     if not fp.exists() or not fp.is_file():
         return 0

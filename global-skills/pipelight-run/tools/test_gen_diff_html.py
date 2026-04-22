@@ -256,6 +256,9 @@ class TestUntrackedFile(unittest.TestCase):
                 if cmd[:2] == ["git", "ls-files"]:
                     # file is NOT tracked
                     return SimpleNamespace(returncode=1, stdout="", stderr="error: pathspec")
+                # default rc=1: cat-file, cat-file -e, or any other command →
+                # "not found". Ensures is_tracked's base_ref check (from Task 4 fix)
+                # correctly falls through to the untracked branch.
                 return SimpleNamespace(returncode=1, stdout="", stderr="")
 
             with patch("subprocess.run", side_effect=fake_run):
