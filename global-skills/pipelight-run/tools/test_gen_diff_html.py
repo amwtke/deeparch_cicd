@@ -242,5 +242,44 @@ class TestTrackedFileRender(unittest.TestCase):
             self.assertIn("bbb", html_out)
 
 
+class TestUntrackedFile(unittest.TestCase):
+    def test_untracked_file_renders_summary_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "diff.txt").write_text("new_file.txt\n")
+            (tmp / "base-ref.txt").write_text("origin/main\n")
+            # Simulate a working-tree file so line-count works:
+            (tmp / "new_file.txt").write_text("line1\nline2\nline3\n")
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    # file is NOT tracked
+                    return SimpleNamespace(returncode=1, stdout="", stderr="error: pathspec")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            # TOC badge
+            self.assertIn('class="stat badge-new"', html_out)
+            # Summary text with line count
+            self.assertIn("+3 lines (new file)", html_out)
+            # No diff-body
+            block_start = html_out.index('<details id="f-new-file-txt"')
+            block_end = html_out.index("</details>", block_start)
+            block = html_out[block_start:block_end]
+            self.assertNotIn("diff-body", block, "untracked block must not have diff body")
+
+
 if __name__ == "__main__":
     unittest.main()

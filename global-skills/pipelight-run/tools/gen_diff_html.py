@@ -142,6 +142,17 @@ def highlight_content(content: str, lexer, formatter) -> str:
     return highlight(content, lexer, formatter).rstrip("\n")
 
 
+def count_file_lines(path: str, cwd: Path) -> int:
+    fp = cwd / path
+    if not fp.exists() or not fp.is_file():
+        return 0
+    try:
+        with fp.open("r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
+
+
 def render_tracked_body(path: str, hunks: list[dict]) -> str:
     lexer = pick_lexer(path)
     formatter = HtmlFormatter(nowrap=True)
@@ -197,12 +208,16 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
             f'</details>'
         )
         return toc, det
-    # Untracked, binary, oversize branches come in later tasks. For now,
-    # fall through to an untracked-style placeholder so Task 4 is self-consistent.
-    toc = f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a></li>'
+    # Untracked: summary-only block with line count.
+    line_count = count_file_lines(path, cwd)
+    toc = (
+        f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '
+        f'<span class="stat badge-new">new</span></li>'
+    )
     det = (
         f'<details id="{html.escape(anchor)}">'
-        f'<summary><span class="path">{html.escape(path)}</span></summary>'
+        f'<summary><span class="path">{html.escape(path)}</span>'
+        f' <span class="stat badge-new">+{line_count} lines (new file)</span></summary>'
         f'</details>'
     )
     return toc, det
