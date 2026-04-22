@@ -105,26 +105,35 @@ exit 1"#;
     // Task 4 + Task 5 update them.
 
     fn exception_mapping(&self) -> ExceptionMapping {
-        // TEMPORARY — rewritten in Task 4; leave single legacy entry so the
-        // compile succeeds and Task 3 tests can run.
-        ExceptionMapping::new(CallbackCommand::GitDiffCommand).add(
-            "git_diff_changes_found",
-            ExceptionEntry {
-                command: CallbackCommand::GitDiffCommand,
-                max_retries: 0,
-                context_paths: vec!["pipelight-misc/git-diff-report/diff.txt".into()],
-            },
-        )
+        ExceptionMapping::new(CallbackCommand::GitDiffCommand)
+            .add(
+                "git_diff_changes_found",
+                ExceptionEntry {
+                    command: CallbackCommand::GitDiffCommand,
+                    max_retries: 0,
+                    context_paths: vec!["pipelight-misc/git-diff-report/diff.txt".into()],
+                },
+            )
+            .add(
+                "git_diff_base_not_found",
+                ExceptionEntry {
+                    command: CallbackCommand::RuntimeError,
+                    max_retries: 0,
+                    context_paths: vec![],
+                },
+            )
     }
 
-    fn match_exception(&self, _exit_code: i64, stdout: &str, _stderr: &str) -> Option<String> {
-        if stdout.contains("change record(s) on current branch")
-            || stdout.contains("unique file(s) changed on current branch")
-        {
-            Some("git_diff_changes_found".into())
-        } else {
-            None
+    fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
+        // Priority 1: explicit base ref missing (only when exit code is 2).
+        if exit_code == 2 && stderr.contains("base ref") && stderr.contains("not found") {
+            return Some("git_diff_base_not_found".into());
         }
+        // Priority 2: normal "changes found" path.
+        if stdout.contains("unique file(s) changed on current branch") {
+            return Some("git_diff_changes_found".into());
+        }
+        None
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
@@ -300,6 +309,63 @@ mod tests {
         assert!(
             cmd.contains("git ls-files --others --exclude-standard"),
             "script should still use git ls-files for untracked detection"
+        );
+    }
+
+    #[test]
+    fn test_exception_mapping_base_not_found_entry_exists() {
+        let step = GitDiffStep::new();
+        let mapping = step.exception_mapping();
+        // Resolve an exception that matches "git_diff_base_not_found" via the
+        // match_exception hook; assert the command is RuntimeError.
+        let match_fn = |code: i64, out: &str, err: &str| -> Option<String> {
+            step.match_exception(code, out, err)
+        };
+        let resolved = mapping.resolve(
+            2,
+            "",
+            "git-diff: base ref 'origin/main' not found — run 'git fetch' first\n",
+            Some(&match_fn),
+        );
+        assert_eq!(resolved.command, CallbackCommand::RuntimeError);
+        assert_eq!(resolved.exception_key, "git_diff_base_not_found");
+        assert_eq!(resolved.context_paths.len(), 0);
+        assert_eq!(resolved.max_retries, 0);
+    }
+
+    #[test]
+    fn test_match_exception_base_not_found_priority() {
+        let step = GitDiffStep::new();
+        // Even if stdout also has a "unique file(s) changed" line, an exit code
+        // of 2 with the stderr marker must win and return base_not_found.
+        let out = "git-diff: 1 unique file(s) changed on current branch\n";
+        let err = "git-diff: base ref 'origin/foo' not found — run 'git fetch' first\n";
+        let key = step.match_exception(2, out, err);
+        assert_eq!(key.as_deref(), Some("git_diff_base_not_found"));
+    }
+
+    #[test]
+    fn test_match_exception_changes_found_on_exit_1() {
+        let step = GitDiffStep::new();
+        let out = "git-diff: 3 unique file(s) changed on current branch\n";
+        let key = step.match_exception(1, out, "");
+        assert_eq!(key.as_deref(), Some("git_diff_changes_found"));
+    }
+
+    #[test]
+    fn test_match_exception_no_match_on_clean() {
+        let step = GitDiffStep::new();
+        let out = "git-diff: working tree clean and no branch-ahead commits — skipping\n";
+        let key = step.match_exception(0, out, "");
+        assert_eq!(key, None);
+    }
+
+    #[test]
+    fn test_registry_action_for_base_not_found_is_runtime_error() {
+        let registry = CallbackCommandRegistry::new();
+        assert_eq!(
+            registry.action_for(&CallbackCommand::RuntimeError),
+            CallbackCommandAction::RuntimeError
         );
     }
 }
