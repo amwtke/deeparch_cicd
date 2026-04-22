@@ -873,18 +873,46 @@ pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String
 Run: `cargo test -p pipelight ci::pipeline_builder::tests::test_snippet_reads_single_diff_txt ci::pipeline_builder::tests::test_snippet_drops_redundant_sort_u ci::pipeline_builder::tests::test_snippet_preserves_subdir_strip ci::pipeline_builder::tests::test_snippet_preserves_multi_ext_filter`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Run full pipeline_builder suite + downstream steps**
+- [ ] **Step 5: Update downstream consumers' `context_paths` to single `diff.txt`**
 
-Run: `cargo test -p pipelight ci::pipeline_builder`
-Expected: all tests pass. If any PMD/SpotBugs/JaCoCo step test asserts on the exact text of the shell snippet, update that test to match the new single-file form (e.g. search for tests that grep for `unstaged.txt` in step scripts).
+The Task 3 code reviewer confirmed that 6 consumer step files + `gradle/mod.rs` each list the four legacy paths in their `exception_mapping().context_paths` (and associated tests). Each of these must be updated to reference only `pipelight-misc/git-diff-report/diff.txt`.
 
-- [ ] **Step 6: Commit**
+Files to update (occurrences of legacy names):
+
+- `src/ci/pipeline_builder/maven/pmd_step.rs` (4 occurrences in a single `context_paths` vec)
+- `src/ci/pipeline_builder/maven/spotbugs_step.rs` (4)
+- `src/ci/pipeline_builder/maven/jacoco_step.rs` (8 — two separate `context_paths` vecs, one per exception key)
+- `src/ci/pipeline_builder/gradle/pmd_step.rs` (4)
+- `src/ci/pipeline_builder/gradle/spotbugs_step.rs` (4)
+- `src/ci/pipeline_builder/gradle/jacoco_step.rs` (8)
+- `src/ci/pipeline_builder/gradle/mod.rs` (4 — likely a shared test fixture or strategy assertion)
+
+Strategy: locate each `context_paths: vec![ ... staged.txt ... unstaged.txt ... untracked.txt ... unpushed.txt ... ]` block and replace the four `pipelight-misc/git-diff-report/{category}.txt` lines with a single `"pipelight-misc/git-diff-report/diff.txt".into()` line. Preserve any sibling paths (e.g. `pmd-result.xml`) unchanged.
+
+Verify after each file:
 
 ```bash
-git add src/ci/pipeline_builder/mod.rs
-# Include any downstream step test updates if needed:
-# git add src/ci/pipeline_builder/{maven,gradle}/*_step.rs
-git commit -m "refactor(pipeline_builder): read single diff.txt in git_changed_files_snippet"
+grep -nE 'unstaged\.txt|staged\.txt|untracked\.txt|unpushed\.txt' src/ci/pipeline_builder/
+```
+Expected: only the two negative-assertion lines in `git_diff_step.rs` (`!cmd.contains("unstaged.txt") ...`) remain.
+
+Then update any tests in these files that assert on the old paths (e.g. `context_paths.len() == 4` or `context_paths.iter().any(|p| p.contains("unpushed.txt"))` — change to `context_paths.len() == 1` and `contains("diff.txt")` respectively, or just delete if obsolete).
+
+- [ ] **Step 6: Run full pipeline_builder suite**
+
+Run: `cargo test -p pipelight ci::pipeline_builder`
+Expected: all tests pass.
+
+- [ ] **Step 7: Final sweep for legacy file references**
+
+Run: `grep -nrE 'unstaged\.txt|staged\.txt|untracked\.txt|unpushed\.txt' src/`
+Expected: ONLY the two negative-assertion lines in `git_diff_step.rs` test module remain.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/ci/pipeline_builder/
+git commit -m "refactor(pipeline_builder): unify downstream consumers on single diff.txt"
 ```
 
 ---
@@ -967,15 +995,29 @@ async fn cmd_run(
 ) -> Result<i32> {
 ```
 
-- [ ] **Step 5: Rewrite the git-diff step `commands[0]` when the flag is set**
+- [ ] **Step 5: Validate the ref value & rewrite the git-diff step `commands[0]` when the flag is set**
+
+Because the ref value is interpolated into the shell script via `format!`, we must reject values that could break out of the quoting. Git itself rejects most exotic chars via `git check-ref-format`, but we do a conservative character-class check at the CLI boundary.
 
 Inside `cmd_run`, *right after* the `full_report_only` tag-activation block (around line 236) and *before* `let project_dir = ...` (around line 239), insert:
 
 ```rust
-    // If --git-diff-from-remote-branch is set, overwrite the git-diff step's
-    // script with the literal-base-ref variant. Falls through silently if the
-    // pipeline has no "git-diff" step (e.g. init templates without it).
+    // If --git-diff-from-remote-branch is set, validate the ref value then
+    // overwrite the git-diff step's script with the literal-base-ref variant.
+    // Validation is a conservative ASCII whitelist (alnum + `/ _ . -`) —
+    // sufficient for `origin/main`, `origin/release/v1.2`, etc., and rejects
+    // chars like `"`, `` ` ``, `$`, `\` that would break shell quoting.
     if let Some(ref base) = git_diff_from_remote_branch {
+        let is_safe = !base.is_empty()
+            && base
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c));
+        if !is_safe {
+            anyhow::bail!(
+                "--git-diff-from-remote-branch: invalid ref '{}' — must contain only ASCII alphanumerics and /_.-",
+                base
+            );
+        }
         if let Some(step) = pipeline.steps.iter_mut().find(|s| s.name == "git-diff") {
             let new_cfg = crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(
                 Some(base.clone()),
@@ -985,6 +1027,47 @@ Inside `cmd_run`, *right after* the `full_report_only` tag-activation block (aro
         }
     }
 ```
+
+Also add a unit test (append to the test module near the other `test_cli_*` tests):
+
+```rust
+#[test]
+fn test_cli_git_diff_flag_validation_rejects_unsafe_ref() {
+    // Drive via the public cmd_run surface. Since cmd_run is async, we
+    // spin a minimal tokio runtime. Unsafe refs must cause bail!().
+    use tokio::runtime::Runtime;
+    let rt = Runtime::new().unwrap();
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        tmp.path(),
+        "name: validation-test\nsteps: []\n",
+    )
+    .unwrap();
+    let result = rt.block_on(cmd_run(
+        tmp.path().to_path_buf(),
+        None,
+        vec![],
+        true, // dry_run — avoid actually executing
+        None,
+        None,
+        false,
+        false,
+        false,
+        Some("origin/main;rm -rf /".into()),
+    ));
+    assert!(
+        result.is_err(),
+        "should reject refs with shell metachars"
+    );
+    let err = format!("{}", result.unwrap_err());
+    assert!(
+        err.contains("invalid ref"),
+        "error should mention invalid ref; got: {err}"
+    );
+}
+```
+
+Note: if `tempfile` isn't already a dev-dependency, either add it to `Cargo.toml` under `[dev-dependencies]` (check first with `grep tempfile Cargo.toml`) or simplify the test to just call the validation logic directly (refactor the whitelist check into a small `fn is_safe_ref(r: &str) -> bool` helper and test that helper).
 
 - [ ] **Step 6: Persist the flag into `RunState`**
 
@@ -998,6 +1081,12 @@ Where `cmd_run` currently sets `state.full_report_only = full_report_only;` (aro
 - [ ] **Step 7: Import path check**
 
 The line in Step 5 uses `crate::ci::pipeline_builder::base::GitDiffStep`. Verify this path resolves: scan the top of `src/cli/mod.rs` for existing imports. If `crate::ci::pipeline_builder::base` is not already in scope, the fully-qualified path works as written (no `use` change required).
+
+- [ ] **Step 7a: Remove the transitional `#[allow(dead_code)]` on `with_base_ref`**
+
+Task 3 added `#[allow(dead_code)]` to `GitDiffStep::with_base_ref` (in `src/ci/pipeline_builder/base/git_diff_step.rs`) so clippy `-D warnings` would pass before the CLI consumer existed. Now that `cmd_run` consumes it, the attribute is no longer needed.
+
+Open `src/ci/pipeline_builder/base/git_diff_step.rs` and delete the `#[allow(dead_code)]` line above `pub fn with_base_ref(...)`. Verify `cargo clippy -p pipelight --all-targets -- -D warnings` still passes.
 
 - [ ] **Step 8: Build + run full test suite**
 
