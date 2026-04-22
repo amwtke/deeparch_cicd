@@ -1200,14 +1200,28 @@ async fn cmd_retry(
 ) -> Result<i32> {
 ```
 
-- [ ] **Step 4: Reconcile override vs. persisted state**
+- [ ] **Step 4: Reconcile override vs. persisted state (with validation)**
 
-Near the top of `cmd_retry`, right after `let mut state = RunState::load(&base, &run_id)?;` (around line 850), add:
+Task 7 added a private `is_safe_ref` helper at the top of `src/cli/mod.rs`. First, promote its visibility so the retry path can reuse the same validation:
 
 ```rust
-    // Resolve effective base ref: explicit retry flag > persisted state value.
-    if git_diff_from_remote_branch_override.is_some() {
-        state.git_diff_base = git_diff_from_remote_branch_override.clone();
+pub(crate) fn is_safe_ref(r: &str) -> bool { ... }   // was: fn is_safe_ref
+```
+
+Then near the top of `cmd_retry`, right after `let mut state = RunState::load(&base, &run_id)?;` (around line 850), add:
+
+```rust
+    // If the user passed an explicit override on the retry command, validate it
+    // through the same whitelist `cmd_run` uses; otherwise reuse the value
+    // persisted in run_state from the original run.
+    if let Some(ref override_base) = git_diff_from_remote_branch_override {
+        if !is_safe_ref(override_base) {
+            anyhow::bail!(
+                "--git-diff-from-remote-branch: invalid ref '{}' — must contain only ASCII alphanumerics and /_.-",
+                override_base
+            );
+        }
+        state.git_diff_base = Some(override_base.clone());
     }
     let effective_git_diff_base = state.git_diff_base.clone();
 ```
