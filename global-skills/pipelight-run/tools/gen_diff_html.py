@@ -82,15 +82,20 @@ def git_output(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
 
 
 def is_tracked(path: str, base_ref: str, cwd: Path) -> bool:
-    """True if git knows this path at HEAD or in the base ref."""
-    rc, out, _ = git_output(["git", "ls-files", "--error-unmatch", "--", path], cwd)
+    """True if this path has a diffable state — present at HEAD/index or at base_ref.
+
+    Files truly absent from both (pure untracked / net-new) return False.
+    """
+    rc, _, _ = git_output(["git", "ls-files", "--error-unmatch", "--", path], cwd)
+    if rc == 0:
+        return True
+    rc, _, _ = git_output(["git", "cat-file", "-e", f"{base_ref}:{path}"], cwd)
     return rc == 0
 
 
-def get_diff(path: str, base_ref: str, cwd: Path) -> tuple[str, str]:
-    """Return (stdout, stderr) from `git diff <base> -- <path>`."""
-    _rc, out, err = git_output(["git", "diff", base_ref, "--", path], cwd)
-    return out, err
+def get_diff(path: str, base_ref: str, cwd: Path) -> tuple[int, str, str]:
+    """Return (rc, stdout, stderr) from `git diff <base> -- <path>`."""
+    return git_output(["git", "diff", base_ref, "--", path], cwd)
 
 
 def parse_unified_diff(diff_text: str) -> list[dict]:
@@ -108,6 +113,9 @@ def parse_unified_diff(diff_text: str) -> list[dict]:
             continue
         if current is None:
             # Skip diff --git / index / --- / +++ headers
+            continue
+        if line.startswith("\\"):
+            # "\ No newline at end of file" sentinel — skip
             continue
         if line.startswith("+"):
             current["lines"].append(("add", line[1:]))
@@ -149,7 +157,20 @@ def render_tracked_body(hunks: list[dict]) -> str:
 def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple[str, str]:
     """Return (toc_li_html, details_block_html) for one file."""
     if is_tracked(path, base_ref, cwd):
-        diff_text, _err = get_diff(path, base_ref, cwd)
+        rc, diff_text, err = get_diff(path, base_ref, cwd)
+        if rc != 0:
+            toc = (
+                f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '
+                f'<span class="stat">error</span></li>'
+            )
+            det = (
+                f'<details id="{html.escape(anchor)}">'
+                f'<summary><span class="path">{html.escape(path)}</span>'
+                f' <span class="stat">error</span></summary>'
+                f'<div class="diff-body"><div class="error">git diff failed: {html.escape(err.strip() or "(no stderr)")}</div></div>'
+                f'</details>'
+            )
+            return toc, det
         hunks = parse_unified_diff(diff_text)
         add, dele = count_stats(hunks)
         body = render_tracked_body(hunks)
@@ -178,7 +199,7 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
 
 def render_html(base_ref: str, paths: list[str], cwd: Path) -> str:
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    # Anchor collision handling will be added in Task 9; for now, slug-only.
+    # Collision dedup: suffix -2, -3, … on repeated slug.
     seen = {}
     files = []
     for p in paths:

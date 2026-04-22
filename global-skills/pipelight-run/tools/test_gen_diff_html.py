@@ -113,7 +113,7 @@ class TestTrackedFileRender(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout="src/foo.py\n", stderr="")
                 if cmd[:2] == ["git", "diff"]:
                     return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
 
             with patch("subprocess.run", side_effect=fake_run):
                 import importlib
@@ -135,6 +135,35 @@ class TestTrackedFileRender(unittest.TestCase):
             self.assertIn('class="line add"', html_out)
             self.assertIn('class="line del"', html_out)
             self.assertIn('class="line ctx"', html_out)
+
+
+    def test_git_diff_failure_renders_error_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._make_tmp(tmp, ["src/broken.py"])
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=0, stdout="src/broken.py\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=128, stdout="", stderr="fatal: bad revision\n")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0, "git diff failure should be non-fatal")
+            html_out = (tmp / "diff.html").read_text()
+            self.assertIn('class="error"', html_out)
+            self.assertIn("git diff failed", html_out)
+            self.assertIn("fatal: bad revision", html_out)
 
 
 if __name__ == "__main__":
