@@ -9,6 +9,7 @@ use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::ci::output::{json, plain};
 use crate::ci::output::{resolve_output_mode, OutputMode};
 use crate::ci::parser::{Pipeline, Step};
+use crate::ci::pipeline_builder::StepDef;
 use crate::ci::scheduler::Scheduler;
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 
@@ -67,6 +68,14 @@ pub enum Command {
         /// Bypasses incremental git-diff scanning; violations do not trigger auto_fix.
         #[arg(long = "full-report-only")]
         full_report_only: bool,
+
+        /// Use the given remote ref (e.g. `origin/main`) as the branch-ahead base
+        /// for the git-diff step, replacing `@{upstream}`. Lets incremental
+        /// code-quality scans cover ALL files changed since the branch was cut
+        /// from a mainline branch. If the ref is not present locally, the pipeline
+        /// exits with a RuntimeError asking you to `git fetch` first.
+        #[arg(long = "git-diff-from-remote-branch", value_name = "REMOTE_BRANCH")]
+        git_diff_from_remote_branch: Option<String>,
     },
 
     /// Validate pipeline config
@@ -165,6 +174,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             verbose,
             ping_pong,
             full_report_only,
+            git_diff_from_remote_branch,
         } => {
             cmd_run(
                 file,
@@ -176,6 +186,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
                 verbose,
                 ping_pong,
                 full_report_only,
+                git_diff_from_remote_branch,
             )
             .await
         }
@@ -201,6 +212,18 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
     }
 }
 
+/// Conservative ASCII whitelist for a git ref value supplied via
+/// `--git-diff-from-remote-branch`. Permits only alphanumerics plus
+/// `/`, `_`, `.`, `-` — sufficient for common refs like `origin/main`
+/// or `origin/release/v1.2.3`, and blocks shell metacharacters that
+/// would otherwise break out of the `format!`-interpolated script
+/// (quotes, backticks, `$`, `\`, `;`, etc.).
+fn is_safe_ref(r: &str) -> bool {
+    !r.is_empty()
+        && r.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn cmd_run(
     file: PathBuf,
@@ -212,6 +235,7 @@ async fn cmd_run(
     verbose: bool,
     ping_pong: bool,
     full_report_only: bool,
+    git_diff_from_remote_branch: Option<String>,
 ) -> Result<i32> {
     let mode = resolve_output_mode(output);
 
@@ -232,6 +256,26 @@ async fn cmd_run(
             "full" => step.active = full_report_only,
             "non-full" => step.active = !full_report_only,
             _ => {}
+        }
+    }
+
+    // If --git-diff-from-remote-branch is set, validate the ref value then
+    // overwrite the git-diff step's script with the literal-base-ref variant.
+    // Validation is a conservative ASCII whitelist (alnum + `/ _ . -`) —
+    // sufficient for `origin/main`, `origin/release/v1.2`, etc., and rejects
+    // chars like `"`, `` ` ``, `$`, `\` that would break shell quoting.
+    if let Some(ref base) = git_diff_from_remote_branch {
+        if !is_safe_ref(base) {
+            anyhow::bail!(
+                "--git-diff-from-remote-branch: invalid ref '{}' — must contain only ASCII alphanumerics and /_.-",
+                base
+            );
+        }
+        if let Some(step) = pipeline.steps.iter_mut().find(|s| s.name == "git-diff") {
+            let new_cfg =
+                crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(Some(base.clone()))
+                    .config();
+            step.commands = new_cfg.commands;
         }
     }
 
@@ -259,6 +303,7 @@ async fn cmd_run(
     let mut state = RunState::new(&run_id, &pipeline.name);
     let state_base = RunState::default_base_dir();
     state.full_report_only = full_report_only;
+    state.git_diff_base = git_diff_from_remote_branch.clone();
     let pipeline_start = std::time::Instant::now();
 
     // Clear logs and report directories in pipelight-misc/, but preserve config files
@@ -2128,5 +2173,55 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
         .unwrap();
         assert_eq!(of.exception_key, "ruleset_invalid");
         assert_eq!(of.command, CallbackCommand::AutoGenPmdRuleset);
+    }
+
+    // ── --git-diff-from-remote-branch flag ───────────────────────
+
+    #[test]
+    fn test_cli_parses_git_diff_from_remote_branch_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "pipelight",
+            "run",
+            "--git-diff-from-remote-branch=origin/main",
+        ])
+        .expect("should parse");
+        match cli.command {
+            Some(Command::Run {
+                git_diff_from_remote_branch,
+                ..
+            }) => assert_eq!(git_diff_from_remote_branch.as_deref(), Some("origin/main")),
+            _ => panic!("expected Run subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_git_diff_flag_defaults_to_none() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from(["pipelight", "run"]).expect("should parse");
+        match cli.command {
+            Some(Command::Run {
+                git_diff_from_remote_branch,
+                ..
+            }) => assert_eq!(git_diff_from_remote_branch, None),
+            _ => panic!("expected Run subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_is_safe_ref_accepts_typical_remote_branches() {
+        assert!(is_safe_ref("origin/main"));
+        assert!(is_safe_ref("origin/release/v1.2.3"));
+        assert!(is_safe_ref("upstream/feature_branch-42"));
+    }
+
+    #[test]
+    fn test_is_safe_ref_rejects_shell_metachars() {
+        assert!(!is_safe_ref("origin/main;rm -rf /"));
+        assert!(!is_safe_ref("origin/`whoami`"));
+        assert!(!is_safe_ref("origin/$(pwd)"));
+        assert!(!is_safe_ref("\"origin/main\""));
+        assert!(!is_safe_ref("origin/main\\"));
+        assert!(!is_safe_ref("")); // empty rejected
     }
 }

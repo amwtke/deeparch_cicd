@@ -23,8 +23,6 @@ impl GitDiffStep {
         Self { base_ref: None }
     }
 
-    // Used by Task 7+ CLI plumbing; callers tests cover it today.
-    #[allow(dead_code)]
     pub fn with_base_ref(base_ref: Option<String>) -> Self {
         Self { base_ref }
     }
