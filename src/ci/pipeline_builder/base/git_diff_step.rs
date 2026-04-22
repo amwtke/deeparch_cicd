@@ -26,7 +26,18 @@ impl GitDiffStep {
         Self { base_ref: None }
     }
 
+    /// The given ref (when `Some`) is interpolated directly into the shell
+    /// script's `BASE="{ref}"` line — callers MUST pre-validate via
+    /// `crate::cli::is_safe_ref` (or equivalent ASCII whitelist) to prevent
+    /// shell injection. CLI is the only current caller and it validates.
     pub fn with_base_ref(base_ref: Option<String>) -> Self {
+        if let Some(ref r) = base_ref {
+            debug_assert!(
+                !r.is_empty()
+                    && r.chars().all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c)),
+                "with_base_ref: unsafe ref '{r}' — must be ASCII alphanumeric + /_.-",
+            );
+        }
         Self { base_ref }
     }
 }
