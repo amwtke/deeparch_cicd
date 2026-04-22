@@ -665,12 +665,18 @@ git commit -m "feat(git-diff): add git_diff_base_not_found exception mapping to 
 
 ---
 
-## Task 5: Tighten `output_report_str` + remove transitional leniency
+## Task 5: Tighten `output_report_str` + add regression guard for match_exception
+
+**Context:** Task 4's implementer already removed the legacy `"change record(s)"` OR-branch from `match_exception` (one step ahead of schedule). So Task 5 reduces to:
+
+1. Add a regression test confirming `match_exception` rejects the legacy marker.
+2. Tighten `output_report_str` (which still has the legacy OR-branch).
+3. Add a test for the base-not-found report string.
 
 **Files:**
-- Modify: `src/ci/pipeline_builder/base/git_diff_step.rs` — replace transitional `output_report_str` and `match_exception` with strict final versions.
+- Modify: `src/ci/pipeline_builder/base/git_diff_step.rs` — tighten `output_report_str`; add tests.
 
-- [ ] **Step 1: Write a failing test for the tightened match_exception**
+- [ ] **Step 1: Add a regression test for the tightened match_exception**
 
 Append to the test module:
 
@@ -678,22 +684,22 @@ Append to the test module:
 #[test]
 fn test_match_exception_no_longer_matches_legacy_string() {
     let step = GitDiffStep::new();
-    // After Task 5 we drop the legacy "change record(s)" phrasing. No real
-    // script produces it anymore; make sure matcher only keys off the new text.
+    // The legacy "change record(s)" phrasing must NOT match anymore —
+    // no real script produces it, and matcher must only key off the new text.
     let out = "git-diff: 3 change record(s) on current branch\n";
     let key = step.match_exception(1, out, "");
     assert_eq!(key, None, "legacy marker should no longer match");
 }
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [ ] **Step 2: Verify it already passes**
 
 Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_longer_matches_legacy_string`
-Expected: FAIL — Task 3's `match_exception` still accepts the legacy string.
+Expected: PASS (Task 4 already tightened `match_exception`). This test acts as a regression guard.
 
-- [ ] **Step 3: Tighten `match_exception`**
+- [ ] **Step 3: (Optional, if Task 4 hadn't tightened it)**
 
-Remove the `change record(s) on current branch` OR-branch added in Task 3:
+If the above test somehow fails, `match_exception` still has a legacy branch. Remove it:
 
 ```rust
 fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<String> {
@@ -706,8 +712,6 @@ fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<
     None
 }
 ```
-
-*(This already matches what Task 4 wrote. If Task 4's version was already strict, this step is a no-op — verify the OR-branch is gone.)*
 
 - [ ] **Step 4: Tighten `output_report_str`**
 
