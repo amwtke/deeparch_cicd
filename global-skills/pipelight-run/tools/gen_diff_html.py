@@ -12,6 +12,8 @@ Reads:
 Writes:
   --output         pipelight-misc/git-diff-report/diff.html (single file)
 """
+from __future__ import annotations
+
 import argparse
 import html
 import re
@@ -68,6 +70,11 @@ def read_diff_paths(path: Path) -> list[str]:
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _make_anchor(path: str) -> str:
+    """Convert a file path to a stable HTML anchor id."""
+    return "f-" + re.sub(r"[^A-Za-z0-9]+", "-", path).strip("-").lower()
+
+
 def render_html(base_ref: str, files: list[dict]) -> str:
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     # Minimal skeleton for Task 3; later tasks fill in CSS, TOC, file blocks.
@@ -107,13 +114,12 @@ def main(argv=None) -> int:
     output_path = Path(args.output)
     cwd = Path(args.cwd)  # noqa: F841 — used by later tasks
 
-    if not input_path.exists():
-        die(f"diff.txt not found at {input_path}")
     base_ref = read_base_ref(base_ref_path)
     paths = read_diff_paths(input_path)
 
     # Task 3 scope: just produce a skeleton with TOC of paths, no file bodies.
-    files = [{"path": p, "anchor": "f-" + re.sub(r"[^A-Za-z0-9]+", "-", p).strip("-").lower()} for p in paths]
+    files = [{"path": p, "anchor": _make_anchor(p)} for p in paths]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_html(base_ref, files), encoding="utf-8")
     return 0
 

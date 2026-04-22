@@ -1,11 +1,10 @@
 """Tests for gen_diff_html. Run with: python3 -m unittest test_gen_diff_html"""
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch  # noqa: F401
 
 HERE = Path(__file__).parent
 TOOL = HERE / "gen_diff_html.py"
@@ -82,6 +81,7 @@ class TestSkeleton(unittest.TestCase):
             self.assertIn("<!DOCTYPE html>", html)
             self.assertIn("origin/main", html)
             self.assertIn('class="toc"', html)
+            self.assertNotIn("<li>", html)
 
 
 if __name__ == "__main__":
