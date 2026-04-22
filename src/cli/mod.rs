@@ -113,6 +113,12 @@ pub enum Command {
         /// Show full container output
         #[arg(long)]
         verbose: bool,
+
+        /// Override the branch-ahead base ref used by the git-diff step. If omitted
+        /// on retry, the base ref persisted in the run state from the original run
+        /// is reused.
+        #[arg(long = "git-diff-from-remote-branch", value_name = "REMOTE_BRANCH")]
+        git_diff_from_remote_branch: Option<String>,
     },
 
     /// Auto-detect project type and generate pipeline.yml
@@ -199,9 +205,18 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
             output,
             file,
             verbose,
+            git_diff_from_remote_branch,
         } => {
             let mode = resolve_output_mode(output);
-            cmd_retry(run_id, step, mode, file, verbose).await
+            cmd_retry(
+                run_id,
+                step,
+                mode,
+                file,
+                verbose,
+                git_diff_from_remote_branch,
+            )
+            .await
         }
         Command::Status { run_id, output } => {
             let mode = resolve_output_mode(output);
@@ -218,7 +233,7 @@ pub async fn dispatch(cli: Cli) -> Result<i32> {
 /// or `origin/release/v1.2.3`, and blocks shell metacharacters that
 /// would otherwise break out of the `format!`-interpolated script
 /// (quotes, backticks, `$`, `\`, `;`, etc.).
-fn is_safe_ref(r: &str) -> bool {
+pub(crate) fn is_safe_ref(r: &str) -> bool {
     !r.is_empty()
         && r.chars()
             .all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c))
@@ -888,11 +903,29 @@ async fn cmd_retry(
     mode: OutputMode,
     file: PathBuf,
     _verbose: bool,
+    git_diff_from_remote_branch_override: Option<String>,
 ) -> Result<i32> {
     let step_name = step.ok_or_else(|| anyhow::anyhow!("--step is required for retry command"))?;
 
     let base = RunState::default_base_dir();
     let mut state = RunState::load(&base, &run_id)?;
+
+    // If the user passed an explicit override on the retry command, validate it
+    // through the same whitelist `cmd_run` uses; otherwise reuse the value
+    // persisted in run_state from the original run.
+    if let Some(ref override_base) = git_diff_from_remote_branch_override {
+        if !is_safe_ref(override_base) {
+            anyhow::bail!(
+                "--git-diff-from-remote-branch: invalid ref '{}' — must contain only ASCII alphanumerics and /_.-",
+                override_base
+            );
+        }
+        state.git_diff_base = Some(override_base.clone());
+        // Persist immediately so the new base ref is durable even if a later
+        // step in cmd_retry errors out before reaching the post-execution save.
+        state.save(&base)?;
+    }
+    let effective_git_diff_base = state.git_diff_base.clone();
 
     // Validate step exists and is Failed
     {
@@ -941,6 +974,19 @@ async fn cmd_retry(
         .get_step(&step_name)
         .ok_or_else(|| anyhow::anyhow!("Step '{}' not found in pipeline config", step_name))?
         .clone();
+
+    // If retrying the git-diff step and a base ref is in effect (either from
+    // this invocation's override or persisted from the original run), rewrite
+    // the step's commands to use the literal-base-ref variant. Downstream
+    // quality steps need no rewrite because they just read `diff.txt`.
+    if retry_step.name == "git-diff" {
+        if let Some(ref base) = effective_git_diff_base {
+            let new_cfg =
+                crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(Some(base.clone()))
+                    .config();
+            retry_step.commands = new_cfg.commands;
+        }
+    }
 
     // Inject git credentials if configured
     if step_name == "git-pull" {
@@ -2223,5 +2269,42 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
         assert!(!is_safe_ref("\"origin/main\""));
         assert!(!is_safe_ref("origin/main\\"));
         assert!(!is_safe_ref("")); // empty rejected
+    }
+
+    #[test]
+    fn test_cli_retry_parses_git_diff_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "pipelight",
+            "retry",
+            "--run-id=abc",
+            "--step=git-diff",
+            "--git-diff-from-remote-branch=origin/develop",
+        ])
+        .expect("should parse");
+        match cli.command {
+            Some(Command::Retry {
+                git_diff_from_remote_branch,
+                ..
+            }) => assert_eq!(
+                git_diff_from_remote_branch.as_deref(),
+                Some("origin/develop")
+            ),
+            _ => panic!("expected Retry subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_retry_without_git_diff_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from(["pipelight", "retry", "--run-id=abc", "--step=pmd"])
+            .expect("should parse");
+        match cli.command {
+            Some(Command::Retry {
+                git_diff_from_remote_branch,
+                ..
+            }) => assert_eq!(git_diff_from_remote_branch, None),
+            _ => panic!("expected Retry subcommand"),
+        }
     }
 }
