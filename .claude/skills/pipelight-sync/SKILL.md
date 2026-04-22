@@ -62,6 +62,8 @@ docker --version     # Container runtime
 docker info          # Docker daemon running?
 git --version        # Git
 claude --version     # Claude Code CLI (optional)
+python3 --version     # Python runtime (required by gen_diff_html.py)
+python3 -c "import pygments, sys; sys.stdout.write(pygments.__version__)"   # Pygments
 ```
 
 **For each tool:**
@@ -70,6 +72,17 @@ claude --version     # Claude Code CLI (optional)
   - Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
   - Others: print install instructions
 - **Installed but not running** (Docker daemon) → warn user to start Docker
+
+- **python3**:
+  - **Installed** → `OK: Python 3.x.y`
+  - **Not installed** → print install hint for the platform (`apt install python3` / `brew install python3`); do NOT auto-install (Python is typically pre-installed; auto-install is fragile cross-platform).
+
+- **pygments**:
+  - **Installed** → `OK: pygments x.y`
+  - **Not installed** → auto-install with the ladder below. Abort the ladder on first success.
+    1. `python3 -m pip install --user pygments`
+    2. If step 1 fails with "externally-managed-environment" (PEP 668): `python3 -m pip install --user --break-system-packages pygments`
+    3. If step 2 also fails: print a red error telling the user to install manually (e.g. `apt install python3-pygments` / `brew install pygments`) and continue the sync — pygments is only blocking when the user later runs `pipelight run --git-diff-from-remote-branch`.
 
 After environment check, check whether a rebuild is needed before compiling.
 
@@ -277,6 +290,8 @@ Environment:
   docker       OK 27.x.x (daemon running)
   git          OK 2.x.x
   claude       OK 1.x.x (optional)
+  python3      OK 3.x.y
+  pygments     OK x.y   — or INSTALLED (via pip --user) — or FAILED (manual install required)
 
 Build:
   cargo build  OK (release, N warnings)  — or SKIPPED (no code changes since last build)

@@ -452,13 +452,11 @@ Total: 4 files — 3 pass, 1 fail — avg 82.9%
 
 若 step 因 "not a git repository" 或 "working tree clean and no branch-ahead commits" 而 skipped，`on_failure` 仍为 null（不会触发本 action）。
 
-1. 从 `on_failure.context_paths` 读单一清单（每行一个路径）：
-   - `pipelight-misc/git-diff-report/diff.txt` — 单一汇总文档，包含当前分支所有变更文件
-     的去重路径列表（`sort -u` 后），是 unstaged / staged / untracked / branch-ahead
-     四类变更的并集。LLM 阅读该文件即可了解本次扫描目标集合。
-2. step stdout 仍会打印分类统计（unstaged / staged / untracked / branch-ahead）供人类
-   阅读，LLM 可直接引用 stdout 的数字；`diff.txt` 本身不带分类标注。
-3. 打印一段文件清单，示例：
+1. 从 `on_failure.context_paths` 读文件清单：
+   - `pipelight-misc/git-diff-report/diff.txt` — 单一汇总文档，当前分支所有变更文件的去重路径列表
+   - `pipelight-misc/git-diff-report/base-ref.txt`（**可选**）— 当用户传了 `--git-diff-from-remote-branch=<ref>` 时出现；单行写入本次使用的 base ref。
+2. step stdout 仍会打印分类统计（unstaged / staged / untracked / branch-ahead）供人类阅读。
+3. **终端打印 markdown 清单**（始终执行，无论 base-ref.txt 是否存在）：
 
 ```markdown
 ### git-diff: 5 unique file(s) changed on current branch
@@ -471,11 +469,26 @@ Total: 4 files — 3 pass, 1 fail — avg 82.9%
 **Files:**
 - src/foo.rs
 - src/bar.rs
-- src/baz.rs
-- src/quux.rs
-- Cargo.toml
+- ...
 ```
-4. **不修代码、不 retry**，打印完继续下一 step 的分发。
+
+4. **HTML 报告生成**（**仅当 context_paths 含 base-ref.txt 时**执行）：
+
+   运行 bundled 工具生成一份独立 HTML review artifact：
+
+```bash
+python3 ~/.claude/skills/pipelight-run/tools/gen_diff_html.py \
+    --input pipelight-misc/git-diff-report/diff.txt \
+    --base-ref-file pipelight-misc/git-diff-report/base-ref.txt \
+    --output pipelight-misc/git-diff-report/diff.html \
+    --cwd <repo-root>
+```
+
+   - 成功（退出 0）→ 打印一行提示，如 `HTML report: pipelight-misc/git-diff-report/diff.html (open in browser for review)`
+   - 失败（退出非 0）→ 把 stderr 打印到终端；注明 `HTML report failed; Markdown list above is the complete output`；**不 retry pipelight、不 abort pipeline**（HTML 是人工 review 附加品，不影响 CI 判定）
+   - Pygments 未安装导致的失败 → 提示用户跑 `/pipelight-sync` 或手动 `python3 -m pip install --user pygments`
+
+5. **不修代码、不 retry**，打印完继续下一 step 的分发。
 
 ### Success Report (after retries)
 

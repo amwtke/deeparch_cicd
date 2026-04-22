@@ -95,6 +95,8 @@ if [ "$BRANCH_AHEAD_ERR" = "1" ]; then exit 2; fi
 
 if [ "$TOTAL" -eq 0 ]; then echo 'git-diff: working tree clean and no branch-ahead commits — skipping'; exit 0; fi
 
+__BASE_REF_SIDECAR__
+
 echo "git-diff: $TOTAL unique file(s) changed on current branch"
 echo "  unstaged: $U"
 echo "  staged: $S"
@@ -103,6 +105,11 @@ if [ -n "$BASE" ]; then echo "  branch-ahead (vs $BASE_LABEL): $B"; else echo " 
 exit 1"#;
 
         let script = body.replace("__BASE_PREFIX__", &base_prefix);
+        let sidecar = match &self.base_ref {
+            None => String::new(),
+            Some(_) => r#"echo "$BASE" > "$REPORT_DIR/base-ref.txt""#.to_string(),
+        };
+        let script = script.replace("__BASE_REF_SIDECAR__", &sidecar);
 
         StepConfig {
             name: "git-diff".into(),
@@ -117,13 +124,17 @@ exit 1"#;
     // Task 4 + Task 5 update them.
 
     fn exception_mapping(&self) -> ExceptionMapping {
+        let mut context_paths = vec!["pipelight-misc/git-diff-report/diff.txt".to_string()];
+        if self.base_ref.is_some() {
+            context_paths.push("pipelight-misc/git-diff-report/base-ref.txt".into());
+        }
         ExceptionMapping::new(CallbackCommand::GitDiffCommand)
             .add(
                 "git_diff_changes_found",
                 ExceptionEntry {
                     command: CallbackCommand::GitDiffCommand,
                     max_retries: 0,
-                    context_paths: vec!["pipelight-misc/git-diff-report/diff.txt".into()],
+                    context_paths,
                 },
             )
             .add(
@@ -413,5 +424,75 @@ mod tests {
             "git-diff: base ref 'origin/foo' not found — run 'git fetch' first\n",
         );
         assert_eq!(r, "git-diff: base ref not found");
+    }
+
+    #[test]
+    fn test_script_writes_base_ref_file_when_some() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains(r#"echo "$BASE" > "$REPORT_DIR/base-ref.txt""#),
+            "literal variant must write base-ref.txt; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_does_not_write_base_ref_file_when_none() {
+        let step = GitDiffStep::new();
+        let cmd = &step.config().commands[0];
+        assert!(
+            !cmd.contains("base-ref.txt"),
+            "default variant must NOT mention base-ref.txt; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_base_ref_file_written_after_branch_ahead_err_guard() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let cmd = &step.config().commands[0];
+        let guard_idx = cmd
+            .find(r#"if [ "$BRANCH_AHEAD_ERR" = "1" ]; then exit 2; fi"#)
+            .expect("BRANCH_AHEAD_ERR guard must be present");
+        let sidecar_idx = cmd
+            .find(r#"echo "$BASE" > "$REPORT_DIR/base-ref.txt""#)
+            .expect("sidecar write must be present for Some(ref)");
+        assert!(
+            sidecar_idx > guard_idx,
+            "sidecar write (idx={sidecar_idx}) must come AFTER BRANCH_AHEAD_ERR guard (idx={guard_idx})"
+        );
+    }
+
+    #[test]
+    fn test_context_paths_one_path_when_none() {
+        let step = GitDiffStep::new();
+        let of = step.exception_mapping().to_on_failure();
+        assert_eq!(
+            of.context_paths,
+            vec!["pipelight-misc/git-diff-report/diff.txt"],
+            "None variant must carry only diff.txt"
+        );
+    }
+
+    #[test]
+    fn test_context_paths_includes_base_ref_file_when_some() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let match_fn = |code: i64, out: &str, err: &str| -> Option<String> {
+            step.match_exception(code, out, err)
+        };
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "git-diff: 3 unique file(s) changed on current branch\n",
+            "",
+            Some(&match_fn),
+        );
+        assert_eq!(resolved.exception_key, "git_diff_changes_found");
+        assert_eq!(
+            resolved.context_paths,
+            vec![
+                "pipelight-misc/git-diff-report/diff.txt".to_string(),
+                "pipelight-misc/git-diff-report/base-ref.txt".to_string(),
+            ],
+            "Some variant must carry both diff.txt and base-ref.txt in that order"
+        );
     }
 }

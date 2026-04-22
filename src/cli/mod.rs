@@ -287,10 +287,11 @@ async fn cmd_run(
             );
         }
         if let Some(step) = pipeline.steps.iter_mut().find(|s| s.name == "git-diff") {
-            let new_cfg =
-                crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(Some(base.clone()))
-                    .config();
-            step.commands = new_cfg.commands;
+            use crate::ci::pipeline_builder::StepDef;
+            let gd =
+                crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(Some(base.clone()));
+            step.commands = gd.config().commands;
+            step.on_failure = Some(gd.exception_mapping().to_on_failure());
         }
     }
 
@@ -981,10 +982,11 @@ async fn cmd_retry(
     // quality steps need no rewrite because they just read `diff.txt`.
     if retry_step.name == "git-diff" {
         if let Some(ref base) = effective_git_diff_base {
-            let new_cfg =
-                crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(Some(base.clone()))
-                    .config();
-            retry_step.commands = new_cfg.commands;
+            use crate::ci::pipeline_builder::StepDef;
+            let gd =
+                crate::ci::pipeline_builder::base::GitDiffStep::with_base_ref(Some(base.clone()));
+            retry_step.commands = gd.config().commands;
+            retry_step.on_failure = Some(gd.exception_mapping().to_on_failure());
         }
     }
 

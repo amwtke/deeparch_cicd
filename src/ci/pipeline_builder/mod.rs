@@ -236,7 +236,31 @@ pub fn step_defs_for_pipeline(pipeline: &Pipeline) -> Option<HashMap<String, Box
 
     let step_defs = strategy.steps_from_pipeline(&info, pipeline);
     let git_pull = base::GitPullStep::new();
-    let git_diff = base::GitDiffStep::new();
+
+    // Reconstruct GitDiffStep with the correct base_ref variant so runtime
+    // exception resolution matches the actual shell script in use. When the
+    // CLI rewrote the script via --git-diff-from-remote-branch=<ref>, the
+    // first command line contains `BASE="<ref>"` (literal form). Absent
+    // that, the default form uses `BASE=$(git rev-parse ... @{upstream})`.
+    let git_diff = {
+        let extracted = pipeline.get_step("git-diff").and_then(|s| {
+            s.commands.first().and_then(|cmd| {
+                // Match `BASE="<safe-ref>"` — whitelist mirrors the CLI's
+                // is_safe_ref ASCII allow-list so we never echo injected chars.
+                let marker = "\nBASE=\"";
+                cmd.find(marker).and_then(|start| {
+                    let rest = &cmd[start + marker.len()..];
+                    rest.find('"').map(|end| rest[..end].to_string())
+                })
+            })
+        });
+        match extracted {
+            Some(ref base) if !base.is_empty() => {
+                base::GitDiffStep::with_base_ref(Some(base.clone()))
+            }
+            _ => base::GitDiffStep::new(),
+        }
+    };
 
     let mut map: HashMap<String, Box<dyn StepDef>> = HashMap::new();
     let ping_pong = base::PingPongStep::new();
@@ -517,6 +541,62 @@ mod tests {
         assert!(defs.contains_key("test"));
         assert!(defs.contains_key("clippy"));
         assert!(defs.contains_key("fmt-check"));
+    }
+
+    #[test]
+    fn test_step_defs_reconstructs_git_diff_base_ref_from_script() {
+        // Simulates the CLI rewrite: after `--git-diff-from-remote-branch=origin/main`
+        // patches the git-diff commands in-memory, `step_defs_for_pipeline` must
+        // reconstruct a GitDiffStep with base_ref=Some so the runtime exception
+        // mapping emits both `diff.txt` and `base-ref.txt` in context_paths.
+        let info = make_rust_info();
+        let (mut pipeline, _) = generate_pipeline(&info);
+
+        // Replace the git-diff step's commands with the literal-base-ref variant
+        // (mirrors what cli::cmd_run does when the flag is set).
+        {
+            let gd = base::GitDiffStep::with_base_ref(Some("origin/main".into()));
+            let step = pipeline
+                .steps
+                .iter_mut()
+                .find(|s| s.name == "git-diff")
+                .expect("git-diff must exist");
+            step.commands = gd.config().commands;
+        }
+
+        // Reconstructed step_def must now advertise both context paths.
+        let defs = step_defs_for_pipeline(&pipeline).expect("rust strategy");
+        let gd_sd = defs.get("git-diff").expect("git-diff step def");
+        let of = gd_sd.exception_mapping().to_on_failure();
+        assert!(
+            of.context_paths
+                .contains(&"pipelight-misc/git-diff-report/base-ref.txt".to_string()),
+            "reconstructed git-diff step must advertise base-ref.txt after CLI rewrite; got: {:?}",
+            of.context_paths
+        );
+        assert!(
+            of.context_paths
+                .contains(&"pipelight-misc/git-diff-report/diff.txt".to_string()),
+            "diff.txt must remain in context_paths; got: {:?}",
+            of.context_paths
+        );
+    }
+
+    #[test]
+    fn test_step_defs_default_git_diff_has_no_base_ref_file() {
+        // Regression guard: when the flag is NOT set, pipeline.yml's default
+        // git-diff commands do NOT contain `\nBASE="<ref>"`, and the reconstruction
+        // must fall back to GitDiffStep::new() — context_paths should be 1 entry.
+        let info = make_rust_info();
+        let (pipeline, _) = generate_pipeline(&info);
+        let defs = step_defs_for_pipeline(&pipeline).expect("rust strategy");
+        let gd_sd = defs.get("git-diff").expect("git-diff step def");
+        let of = gd_sd.exception_mapping().to_on_failure();
+        assert_eq!(
+            of.context_paths,
+            vec!["pipelight-misc/git-diff-report/diff.txt".to_string()],
+            "default variant (no flag) must only advertise diff.txt"
+        );
     }
 
     #[test]
