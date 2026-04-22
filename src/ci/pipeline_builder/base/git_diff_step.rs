@@ -95,6 +95,8 @@ if [ "$BRANCH_AHEAD_ERR" = "1" ]; then exit 2; fi
 
 if [ "$TOTAL" -eq 0 ]; then echo 'git-diff: working tree clean and no branch-ahead commits — skipping'; exit 0; fi
 
+__BASE_REF_SIDECAR__
+
 echo "git-diff: $TOTAL unique file(s) changed on current branch"
 echo "  unstaged: $U"
 echo "  staged: $S"
@@ -103,6 +105,11 @@ if [ -n "$BASE" ]; then echo "  branch-ahead (vs $BASE_LABEL): $B"; else echo " 
 exit 1"#;
 
         let script = body.replace("__BASE_PREFIX__", &base_prefix);
+        let sidecar = match &self.base_ref {
+            None => String::new(),
+            Some(_) => r#"echo "$BASE" > "$REPORT_DIR/base-ref.txt""#.to_string(),
+        };
+        let script = script.replace("__BASE_REF_SIDECAR__", &sidecar);
 
         StepConfig {
             name: "git-diff".into(),
@@ -413,5 +420,41 @@ mod tests {
             "git-diff: base ref 'origin/foo' not found — run 'git fetch' first\n",
         );
         assert_eq!(r, "git-diff: base ref not found");
+    }
+
+    #[test]
+    fn test_script_writes_base_ref_file_when_some() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains(r#"echo "$BASE" > "$REPORT_DIR/base-ref.txt""#),
+            "literal variant must write base-ref.txt; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_does_not_write_base_ref_file_when_none() {
+        let step = GitDiffStep::new();
+        let cmd = &step.config().commands[0];
+        assert!(
+            !cmd.contains("base-ref.txt"),
+            "default variant must NOT mention base-ref.txt; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_base_ref_file_written_after_branch_ahead_err_guard() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let cmd = &step.config().commands[0];
+        let guard_idx = cmd
+            .find(r#"if [ "$BRANCH_AHEAD_ERR" = "1" ]; then exit 2; fi"#)
+            .expect("BRANCH_AHEAD_ERR guard must be present");
+        let sidecar_idx = cmd
+            .find(r#"echo "$BASE" > "$REPORT_DIR/base-ref.txt""#)
+            .expect("sidecar write must be present for Some(ref)");
+        assert!(
+            sidecar_idx > guard_idx,
+            "sidecar write (idx={sidecar_idx}) must come AFTER BRANCH_AHEAD_ERR guard (idx={guard_idx})"
+        );
     }
 }
