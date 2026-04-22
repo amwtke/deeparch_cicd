@@ -124,13 +124,17 @@ exit 1"#;
     // Task 4 + Task 5 update them.
 
     fn exception_mapping(&self) -> ExceptionMapping {
+        let mut context_paths = vec!["pipelight-misc/git-diff-report/diff.txt".to_string()];
+        if self.base_ref.is_some() {
+            context_paths.push("pipelight-misc/git-diff-report/base-ref.txt".into());
+        }
         ExceptionMapping::new(CallbackCommand::GitDiffCommand)
             .add(
                 "git_diff_changes_found",
                 ExceptionEntry {
                     command: CallbackCommand::GitDiffCommand,
                     max_retries: 0,
-                    context_paths: vec!["pipelight-misc/git-diff-report/diff.txt".into()],
+                    context_paths,
                 },
             )
             .add(
@@ -455,6 +459,37 @@ mod tests {
         assert!(
             sidecar_idx > guard_idx,
             "sidecar write (idx={sidecar_idx}) must come AFTER BRANCH_AHEAD_ERR guard (idx={guard_idx})"
+        );
+    }
+
+    #[test]
+    fn test_context_paths_one_path_when_none() {
+        let step = GitDiffStep::new();
+        let of = step.exception_mapping().to_on_failure();
+        assert_eq!(of.context_paths.len(), 1, "None variant must carry only diff.txt");
+        assert_eq!(of.context_paths[0], "pipelight-misc/git-diff-report/diff.txt");
+    }
+
+    #[test]
+    fn test_context_paths_includes_base_ref_file_when_some() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let match_fn = |code: i64, out: &str, err: &str| -> Option<String> {
+            step.match_exception(code, out, err)
+        };
+        let resolved = step.exception_mapping().resolve(
+            1,
+            "git-diff: 3 unique file(s) changed on current branch\n",
+            "",
+            Some(&match_fn),
+        );
+        assert_eq!(resolved.exception_key, "git_diff_changes_found");
+        assert_eq!(
+            resolved.context_paths,
+            vec![
+                "pipelight-misc/git-diff-report/diff.txt".to_string(),
+                "pipelight-misc/git-diff-report/base-ref.txt".to_string(),
+            ],
+            "Some variant must carry both diff.txt and base-ref.txt in that order"
         );
     }
 }

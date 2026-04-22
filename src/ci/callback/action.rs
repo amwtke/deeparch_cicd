@@ -20,9 +20,12 @@ pub enum CallbackCommandAction {
     /// LLM parses the JaCoCo XML report and prints a grouped-by-package
     /// coverage table. Pipeline flow unaffected.
     JacocoPrint,
-    /// LLM reads the three per-category file lists produced by the git-diff
-    /// step and prints them grouped (unstaged / staged / unpushed) to the
-    /// terminal. Pipeline flow unaffected.
+    /// LLM reads the deduplicated changed-files list (diff.txt) produced by
+    /// the git-diff step and prints a grouped summary to the terminal.
+    /// If the context also carries `base-ref.txt` (i.e. the user passed
+    /// `--git-diff-from-remote-branch=<ref>`), the LLM additionally runs the
+    /// bundled `gen_diff_html.py` tool to produce a self-contained
+    /// `diff.html` review artifact. Pipeline flow is unaffected in either case.
     GitDiffReport,
 }
 
