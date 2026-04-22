@@ -81,7 +81,7 @@ class TestSkeleton(unittest.TestCase):
             self.assertIn("<!DOCTYPE html>", html)
             self.assertIn("origin/main", html)
             self.assertIn('class="toc"', html)
-            self.assertNotIn("<li>", html)
+            self.assertNotIn("<li><a", html)  # no TOC entry <li>s (CSS .toc li is fine)
 
 
 class TestTrackedFileRender(unittest.TestCase):
@@ -438,6 +438,56 @@ class TestAnchorCollision(unittest.TestCase):
             html_out = (tmp / "diff.html").read_text()
             self.assertIn('id="f-a-b-rs"', html_out)
             self.assertIn('id="f-a-b-rs-2"', html_out)
+
+
+class TestStylingAndHeader(unittest.TestCase):
+    def _bootstrap(self, tmp: Path):
+        (tmp / "diff.txt").write_text("")
+        (tmp / "base-ref.txt").write_text("origin/main\n")
+
+    def _run(self, tmp: Path):
+        def fake_run(cmd, *a, **kw):
+            from types import SimpleNamespace
+            # Pretend we're in a git repo with a known HEAD
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return SimpleNamespace(returncode=0, stdout="feat/demo\n", stderr="")
+            if cmd[:3] == ["git", "rev-parse", "--short"]:
+                return SimpleNamespace(returncode=0, stdout="abc1234\n", stderr="")
+            if cmd[:2] == ["git", "ls-files"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch("subprocess.run", side_effect=fake_run):
+            import importlib
+            import gen_diff_html as mod
+            importlib.reload(mod)
+            return mod.main([
+                "--input", str(tmp / "diff.txt"),
+                "--base-ref-file", str(tmp / "base-ref.txt"),
+                "--output", str(tmp / "diff.html"),
+                "--cwd", str(tmp),
+            ])
+
+    def test_inline_css_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._bootstrap(tmp)
+            self.assertEqual(self._run(tmp), 0)
+            html_out = (tmp / "diff.html").read_text()
+            # Substantive inline CSS — not just an empty <style> block
+            self.assertIn("<style>", html_out)
+            self.assertIn("#0d1117", html_out)  # page bg color
+            self.assertIn(".line.add", html_out)
+            self.assertIn(".line.del", html_out)
+            self.assertIn(".hunk-header", html_out)
+
+    def test_header_shows_branch_and_sha(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._bootstrap(tmp)
+            self.assertEqual(self._run(tmp), 0)
+            html_out = (tmp / "diff.html").read_text()
+            self.assertIn("feat/demo", html_out)
+            self.assertIn("abc1234", html_out)
 
 
 if __name__ == "__main__":

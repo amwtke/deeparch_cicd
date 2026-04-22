@@ -160,6 +160,42 @@ def count_file_lines(path: str, cwd: Path) -> int:
         return 0
 
 
+CSS = """
+:root {
+  --bg: #0d1117;
+  --fg: #c9d1d9;
+  --add: #033a16;
+  --del: #67060c;
+  --ctx-border: #21262d;
+  --hunk: #1f6feb;
+  --muted: #8b949e;
+}
+body { background: var(--bg); color: var(--fg); font-family: ui-monospace, Menlo, Consolas, monospace; margin: 24px; }
+h1 { margin-top: 0; font-size: 22px; }
+h2 { font-size: 16px; border-bottom: 1px solid var(--ctx-border); padding-bottom: 4px; }
+.meta { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+.meta code { background: #161b22; padding: 1px 6px; border-radius: 4px; }
+.toc ul { list-style: none; padding-left: 0; }
+.toc li { padding: 3px 0; }
+.toc a { color: var(--fg); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.stat { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.badge-new { color: #3fb950; }
+details { border: 1px solid var(--ctx-border); border-radius: 6px; margin: 8px 0; background: #161b22; }
+summary { padding: 8px 12px; cursor: pointer; user-select: none; }
+summary .path { font-weight: 600; }
+.diff-body { border-top: 1px solid var(--ctx-border); }
+.hunk-header { background: var(--hunk); color: white; padding: 4px 12px; font-size: 12px; }
+pre.code { margin: 0; padding: 0; overflow-x: auto; }
+pre.code code { display: block; }
+.line { display: flex; padding: 0 12px; white-space: pre; }
+.line .gutter { color: var(--muted); padding-right: 12px; user-select: none; }
+.line.add { background: var(--add); }
+.line.del { background: var(--del); }
+.line.ctx { background: transparent; }
+.line .content { flex: 1; }
+"""
+
 BINARY_MARKER = "Binary files "
 
 
@@ -270,8 +306,18 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
     return toc, det
 
 
+def get_head_info(cwd: Path) -> tuple[str, str]:
+    """Return (branch, short_sha). Empty strings if git fails."""
+    rc1, branch, _ = git_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd)
+    rc2, sha, _ = git_output(["git", "rev-parse", "--short", "HEAD"], cwd)
+    return (branch.strip() if rc1 == 0 else ""), (sha.strip() if rc2 == 0 else "")
+
+
 def render_html(base_ref: str, paths: list[str], cwd: Path) -> str:
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    branch, sha = get_head_info(cwd)
+    head_label = f"{branch} @ {sha}" if branch and sha else (branch or sha or "(unknown)")
+
     # Collision dedup: suffix -2, -3, … on repeated slug.
     seen = {}
     files = []
@@ -284,23 +330,30 @@ def render_html(base_ref: str, paths: list[str], cwd: Path) -> str:
 
     toc_items = []
     file_blocks = []
+    total_add, total_del = 0, 0
     for path, anchor in files:
         toc_li, det = render_file_block(path, anchor, base_ref, cwd)
         toc_items.append(toc_li)
         file_blocks.append(det)
+        # Extract per-file stats from toc_li text if available — best-effort.
+        m = re.search(r"\+(\d+) &minus;(\d+)", toc_li)
+        if m:
+            total_add += int(m.group(1))
+            total_del += int(m.group(2))
 
     parts = [
         "<!DOCTYPE html>",
         '<html lang="zh-CN"><head><meta charset="utf-8">',
-        f"<title>git-diff report vs {html.escape(base_ref)}</title>",
-        "<style>/* inline CSS added in Task 10 */</style>",
+        f"<title>git-diff report — {html.escape(head_label)} vs {html.escape(base_ref)}</title>",
+        f"<style>{CSS}</style>",
         "</head><body>",
         "<header>",
         "<h1>git-diff report</h1>",
         '<div class="meta">',
         f"<div>Base: <code>{html.escape(base_ref)}</code></div>",
+        f"<div>HEAD: <code>{html.escape(head_label)}</code></div>",
         f"<div>Generated: {html.escape(now)}</div>",
-        f"<div>Files: {len(files)}</div>",
+        f"<div>Files changed: {len(files)} &middot; +{total_add} &minus;{total_del}</div>",
         "</div>",
         "</header>",
         '<section class="toc"><h2>Files</h2><ul>',
