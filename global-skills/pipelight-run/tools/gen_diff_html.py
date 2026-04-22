@@ -40,11 +40,6 @@ def die(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
-def require_pygments():
-    """No-op: Pygments is imported at module top; a missing import raises ImportError
-    with a clear hint handled in main()."""
-
-
 def parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--input", required=True, help="path to diff.txt")
@@ -137,17 +132,19 @@ def pick_lexer(path: str):
     try:
         return get_lexer_for_filename(path, stripnl=False)
     except ClassNotFound:
+        # Content-based guess_lexer deferred — TextLexer is safer (never
+        # mis-highlights) and the file list is already path-oriented.
         return get_lexer_by_name("text", stripnl=False)
 
 
-def highlight_content(content: str, lexer) -> str:
+def highlight_content(content: str, lexer, formatter) -> str:
     """Highlight a single logical line. Returns inline HTML without wrapping <pre>."""
-    formatter = HtmlFormatter(nowrap=True)
     return highlight(content, lexer, formatter).rstrip("\n")
 
 
 def render_tracked_body(path: str, hunks: list[dict]) -> str:
     lexer = pick_lexer(path)
+    formatter = HtmlFormatter(nowrap=True)
     out = ['<div class="diff-body">']
     for h in hunks:
         out.append('<div class="hunk">')
@@ -155,7 +152,7 @@ def render_tracked_body(path: str, hunks: list[dict]) -> str:
         out.append('<pre class="code"><code>')
         for kind, content in h["lines"]:
             prefix = {"add": "+", "del": "-", "ctx": " "}[kind]
-            highlighted = highlight_content(content, lexer)
+            highlighted = highlight_content(content, lexer, formatter)
             out.append(
                 f'<div class="line {kind}">'
                 f'<span class="gutter">{prefix}</span>'
@@ -257,7 +254,6 @@ def render_html(base_ref: str, paths: list[str], cwd: Path) -> str:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    require_pygments()
     input_path = Path(args.input)
     base_ref_path = Path(args.base_ref_file)
     output_path = Path(args.output)
