@@ -6,7 +6,11 @@
 
 **Architecture:** The `git-diff` step script is rewritten to support two base-ref variants (default `@{upstream}`, or an explicit literal like `origin/main`). When the new flag is set, `cmd_run` finds the `git-diff` step in the in-memory pipeline and overwrites its `commands[0]` with the literal variant. The value is persisted into `RunState` so retries inherit it. Downstream PMD / SpotBugs / JaCoCo steps continue to work unchanged—they already read via the shared helper `git_changed_files_snippet`, which is simplified to read the single `diff.txt`.
 
-**Tech Stack:** Rust, clap, serde, tokio. Tests use `cargo test -p pipelight --lib`.
+**Tech Stack:** Rust, clap, serde, tokio. Tests use `cargo test -p pipelight`.
+
+> **Note on `cargo test` invocations:**
+> - `pipelight` is a binary-only crate. Do NOT pass `--lib` to `cargo test` — it errors with "no library targets found". Use `cargo test -p pipelight <filter>` directly.
+> - `cargo test` accepts only ONE positional filter. Where this plan lists multiple filters on a single line (e.g. `test_a test_b test_c`), collapse them to the shared parent-module prefix (e.g. `ci::pipeline_builder::base::git_diff_step`) which catches all listed tests in one run, or invoke `cargo test` once per filter.
 
 **Spec reference:** `docs/superpowers/specs/2026-04-21-git-diff-from-remote-branch-design.md`
 
@@ -72,7 +76,7 @@ fn test_run_state_git_diff_base_legacy_deserialize_missing_field() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p pipelight --lib run_state::tests::test_run_state_git_diff_base -- --nocapture`
+Run: `cargo test -p pipelight run_state::tests::test_run_state_git_diff_base -- --nocapture`
 Expected: 3 compile errors — `no field 'git_diff_base' on type RunState`.
 
 - [ ] **Step 3: Add the field and default**
@@ -120,12 +124,12 @@ impl RunState {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p pipelight --lib run_state::tests::test_run_state_git_diff_base -- --nocapture`
+Run: `cargo test -p pipelight run_state::tests::test_run_state_git_diff_base -- --nocapture`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Run the full run_state suite to make sure nothing regressed**
 
-Run: `cargo test -p pipelight --lib run_state`
+Run: `cargo test -p pipelight run_state`
 Expected: all pass.
 
 - [ ] **Step 6: Commit**
@@ -169,7 +173,7 @@ fn test_with_base_ref_none_equals_new() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_new_has_none_base_ref`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_new_has_none_base_ref`
 Expected: FAIL — compile error `no field 'base_ref'`.
 
 - [ ] **Step 3: Modify struct and constructors**
@@ -208,12 +212,12 @@ impl GitDiffStep {
 
 - [ ] **Step 4: Run the three new tests**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_new_has_none_base_ref ci::pipeline_builder::base::git_diff_step::tests::test_with_base_ref_some_stores_value ci::pipeline_builder::base::git_diff_step::tests::test_with_base_ref_none_equals_new`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_new_has_none_base_ref ci::pipeline_builder::base::git_diff_step::tests::test_with_base_ref_some_stores_value ci::pipeline_builder::base::git_diff_step::tests::test_with_base_ref_none_equals_new`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Run existing git_diff_step suite to spot anything that still compiles**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step`
 Expected: existing tests still pass (script body hasn't been rewritten yet). If any fail due to implicit `Self { }` vs `Self { base_ref: None }` moves, they'll be fixed in Task 3.
 
 - [ ] **Step 6: Do NOT commit yet** — Task 3 rewrites the script and changes exception mapping; commit once the full refactor compiles cleanly.
@@ -300,7 +304,7 @@ fn test_script_still_detects_untracked_files() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_script_writes_single_diff_txt ci::pipeline_builder::base::git_diff_step::tests::test_new_variant_uses_upstream ci::pipeline_builder::base::git_diff_step::tests::test_literal_variant_uses_given_ref ci::pipeline_builder::base::git_diff_step::tests::test_script_sentinel_present`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_script_writes_single_diff_txt ci::pipeline_builder::base::git_diff_step::tests::test_new_variant_uses_upstream ci::pipeline_builder::base::git_diff_step::tests::test_literal_variant_uses_given_ref ci::pipeline_builder::base::git_diff_step::tests::test_script_sentinel_present`
 Expected: FAIL on the first 4 (old script writes 4 files, no sentinel); last test may still pass on the old script.
 
 - [ ] **Step 3: Replace `config()` with new script**
@@ -424,7 +428,7 @@ exit 1"#;
 
 - [ ] **Step 4: Run Task 3 tests**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_script_writes_single_diff_txt ci::pipeline_builder::base::git_diff_step::tests::test_new_variant_uses_upstream ci::pipeline_builder::base::git_diff_step::tests::test_literal_variant_uses_given_ref ci::pipeline_builder::base::git_diff_step::tests::test_script_sentinel_present ci::pipeline_builder::base::git_diff_step::tests::test_script_still_detects_untracked_files`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_script_writes_single_diff_txt ci::pipeline_builder::base::git_diff_step::tests::test_new_variant_uses_upstream ci::pipeline_builder::base::git_diff_step::tests::test_literal_variant_uses_given_ref ci::pipeline_builder::base::git_diff_step::tests::test_script_sentinel_present ci::pipeline_builder::base::git_diff_step::tests::test_script_still_detects_untracked_files`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Remove the obsolete `test_context_paths_include_untracked` test**
@@ -501,7 +505,7 @@ Find the existing test and update the stdout simulation string from `"git-diff: 
 
 - [ ] **Step 10: Run full git_diff_step test suite**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step`
 Expected: all tests pass (including the 5 new + existing updated).
 
 - [ ] **Step 11: Run full build + clippy to catch type churn**
@@ -579,7 +583,7 @@ fn test_match_exception_no_match_on_clean() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_exception_mapping_base_not_found_entry_exists ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_base_not_found_priority`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_exception_mapping_base_not_found_entry_exists ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_base_not_found_priority`
 Expected: FAIL — `git_diff_base_not_found` key missing from mapping; `match_exception` returns `git_diff_changes_found` instead of `git_diff_base_not_found` for exit=2.
 
 - [ ] **Step 3: Replace `exception_mapping` with final version**
@@ -626,7 +630,7 @@ fn match_exception(&self, exit_code: i64, stdout: &str, stderr: &str) -> Option<
 
 - [ ] **Step 5: Run the four new tests**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_exception_mapping_base_not_found_entry_exists ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_base_not_found_priority ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_changes_found_on_exit_1 ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_match_on_clean`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_exception_mapping_base_not_found_entry_exists ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_base_not_found_priority ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_changes_found_on_exit_1 ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_match_on_clean`
 Expected: PASS (4 tests).
 
 - [ ] **Step 6: Verify `RuntimeError` registry action wiring**
@@ -644,12 +648,12 @@ fn test_registry_action_for_base_not_found_is_runtime_error() {
 }
 ```
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_registry_action_for_base_not_found_is_runtime_error`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_registry_action_for_base_not_found_is_runtime_error`
 Expected: PASS.
 
 - [ ] **Step 7: Run full git_diff_step suite**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step`
 Expected: all pass.
 
 - [ ] **Step 8: Commit**
@@ -684,7 +688,7 @@ fn test_match_exception_no_longer_matches_legacy_string() {
 
 - [ ] **Step 2: Run it to confirm it fails**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_longer_matches_legacy_string`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_longer_matches_legacy_string`
 Expected: FAIL — Task 3's `match_exception` still accepts the legacy string.
 
 - [ ] **Step 3: Tighten `match_exception`**
@@ -752,12 +756,12 @@ fn test_output_report_str_base_not_found() {
 
 - [ ] **Step 6: Run the two updated/new tests**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_longer_matches_legacy_string ci::pipeline_builder::base::git_diff_step::tests::test_output_report_str_base_not_found`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step::tests::test_match_exception_no_longer_matches_legacy_string ci::pipeline_builder::base::git_diff_step::tests::test_output_report_str_base_not_found`
 Expected: PASS (2 tests).
 
 - [ ] **Step 7: Run full git_diff_step suite**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::base::git_diff_step`
+Run: `cargo test -p pipelight ci::pipeline_builder::base::git_diff_step`
 Expected: all pass.
 
 - [ ] **Step 8: Commit**
@@ -826,7 +830,7 @@ fn test_snippet_preserves_multi_ext_filter() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::tests::test_snippet_reads_single_diff_txt ci::pipeline_builder::tests::test_snippet_drops_redundant_sort_u`
+Run: `cargo test -p pipelight ci::pipeline_builder::tests::test_snippet_reads_single_diff_txt ci::pipeline_builder::tests::test_snippet_drops_redundant_sort_u`
 Expected: FAIL (snippet still cats 4 files and has `sort -u`).
 
 - [ ] **Step 3: Rewrite `git_changed_files_snippet`**
@@ -866,12 +870,12 @@ pub fn git_changed_files_snippet(globs: &[&str], subdir: Option<&str>) -> String
 
 - [ ] **Step 4: Run the 4 new tests**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder::tests::test_snippet_reads_single_diff_txt ci::pipeline_builder::tests::test_snippet_drops_redundant_sort_u ci::pipeline_builder::tests::test_snippet_preserves_subdir_strip ci::pipeline_builder::tests::test_snippet_preserves_multi_ext_filter`
+Run: `cargo test -p pipelight ci::pipeline_builder::tests::test_snippet_reads_single_diff_txt ci::pipeline_builder::tests::test_snippet_drops_redundant_sort_u ci::pipeline_builder::tests::test_snippet_preserves_subdir_strip ci::pipeline_builder::tests::test_snippet_preserves_multi_ext_filter`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Run full pipeline_builder suite + downstream steps**
 
-Run: `cargo test -p pipelight --lib ci::pipeline_builder`
+Run: `cargo test -p pipelight ci::pipeline_builder`
 Expected: all tests pass. If any PMD/SpotBugs/JaCoCo step test asserts on the exact text of the shell snippet, update that test to match the new single-file form (e.g. search for tests that grep for `unstaged.txt` in step scripts).
 
 - [ ] **Step 6: Commit**
@@ -1000,7 +1004,7 @@ The line in Step 5 uses `crate::ci::pipeline_builder::base::GitDiffStep`. Verify
 Run: `cargo build -p pipelight`
 Expected: clean build.
 
-Run: `cargo test -p pipelight --lib`
+Run: `cargo test -p pipelight`
 Expected: all pass.
 
 - [ ] **Step 9: Add a focused unit test in `cli/mod.rs`**
@@ -1040,7 +1044,7 @@ fn test_cli_git_diff_flag_defaults_to_none() {
 }
 ```
 
-Run: `cargo test -p pipelight --lib cli::tests::test_cli_parses_git_diff_from_remote_branch_flag cli::tests::test_cli_git_diff_flag_defaults_to_none`
+Run: `cargo test -p pipelight cli::tests::test_cli_parses_git_diff_from_remote_branch_flag cli::tests::test_cli_git_diff_flag_defaults_to_none`
 
 *(If the test module is not named `tests` in `cli/mod.rs`, adjust the test path. Search for `#[cfg(test)]` inside that file to find the correct module name.)*
 
@@ -1190,12 +1194,12 @@ fn test_cli_retry_without_git_diff_flag() {
 
 - [ ] **Step 8: Build + run tests**
 
-Run: `cargo build -p pipelight && cargo test -p pipelight --lib cli::tests::test_cli_retry_parses_git_diff_flag cli::tests::test_cli_retry_without_git_diff_flag`
+Run: `cargo build -p pipelight && cargo test -p pipelight cli::tests::test_cli_retry_parses_git_diff_flag cli::tests::test_cli_retry_without_git_diff_flag`
 Expected: PASS (2 tests).
 
 - [ ] **Step 9: Run full suite**
 
-Run: `cargo test -p pipelight --lib`
+Run: `cargo test -p pipelight`
 Expected: all pass.
 
 - [ ] **Step 10: Commit**
@@ -1357,7 +1361,7 @@ If anything diverges from expectations, file an issue comment or update the spec
 
 ## Success Criteria
 
-1. `cargo test -p pipelight --lib` passes cleanly on all touched modules.
+1. `cargo test -p pipelight` passes cleanly on all touched modules.
 2. `cargo clippy -p pipelight --all-targets -- -D warnings` is clean.
 3. On a real project with feature branch off `origin/main`, running `pipelight run --git-diff-from-remote-branch=origin/main` produces a `diff.txt` covering all files changed since the branch was cut, and PMD/SpotBugs/JaCoCo scan those files.
 4. The default behavior (no flag) matches the pre-change behavior: `diff.txt` collects uncommitted + unpushed (vs `@{upstream}`) files only.
