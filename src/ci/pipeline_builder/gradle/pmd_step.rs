@@ -8,9 +8,12 @@ const PMD_CLI_VERSION: &str = "7.9.0";
 
 /// Incremental PMD step (tag = "non-full").
 ///
-/// Scans only source changes on the current branch that aren't yet pushed.
-/// Skips when there's no git repo or no pending changes. Violations trigger
-/// an `auto_fix` callback. Full-repo scans live in `pmd_full_step`.
+/// Scans only files listed in `pipelight-misc/git-diff-report/diff.txt` —
+/// a deduplicated union of unstaged, staged, untracked, and branch-ahead
+/// changes. The branch-ahead base defaults to `@{upstream}` but can be
+/// switched via `--git-diff-from-remote-branch=<ref>`. Skips when there's
+/// no git repo or no pending changes. Violations trigger an `auto_fix`
+/// callback. Full-repo scans live in `pmd_full_step`.
 pub struct PmdStep {
     image: String,
     source_paths: Vec<String>,

@@ -2,16 +2,19 @@ use crate::ci::callback::command::CallbackCommand;
 use crate::ci::callback::exception::{ExceptionEntry, ExceptionMapping};
 use crate::ci::pipeline_builder::{StepConfig, StepDef};
 
-/// Reports the four categories of local-but-not-yet-pushed changes:
-/// unstaged working tree edits, staged (uncommitted) changes, untracked
-/// (new) files, and local commits ahead of `@{upstream}`. Writes each list
-/// to its own file under `pipelight-misc/git-diff-report/` and fires
-/// `GitDiffCommand` when any category is non-empty so the LLM can render
-/// a grouped report.
+/// Reports the set of files that changed on the current branch as a
+/// single deduplicated list under `pipelight-misc/git-diff-report/diff.txt`.
+/// The list is a union of unstaged working-tree edits, staged changes,
+/// untracked (new) files, and commits ahead of the branch-ahead base.
+/// The base defaults to `@{upstream}` but can be switched via the
+/// `base_ref` field (set from `--git-diff-from-remote-branch=<ref>`).
+/// Fires `GitDiffCommand` when any category is non-empty so the LLM can
+/// render a grouped report.
 ///
-/// Exits 0 (skipped) when:
-/// - not a git repository
-/// - working tree is clean AND no untracked files AND no commits ahead of upstream
+/// Exits 0 (skipped) when not a git repository, or the working tree is
+/// clean AND there are no commits ahead of the configured base.
+/// Exits 2 (runtime error) when a literal base ref was requested but
+/// does not exist locally — the user must `git fetch` first.
 pub struct GitDiffStep {
     /// `None` → use `@{upstream}` (original behavior).
     /// `Some("origin/main")` → use the given literal ref as branch-ahead base.

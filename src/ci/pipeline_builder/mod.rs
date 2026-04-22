@@ -359,8 +359,10 @@ pub fn write_step_report(misc_dir: &Path, step_name: &str, stdout: &str, stderr:
 ///
 /// The git-diff step (which runs before all strategy steps in the DAG) writes
 /// a single pre-sorted, deduplicated `diff.txt` containing the union of
-/// unstaged, staged, untracked, and unpushed changes. This function reads that
-/// file, optionally strips a subdir prefix, filters by glob, and checks file
+/// unstaged, staged, untracked, and branch-ahead changes (where the
+/// branch-ahead base defaults to `@{upstream}` but can be switched via
+/// `--git-diff-from-remote-branch=<ref>`). This function reads that file,
+/// optionally strips a subdir prefix, filters by glob, and checks file
 /// existence.
 ///
 /// `globs` are file extension patterns (e.g. `["*.java", "*.kt"]`), converted

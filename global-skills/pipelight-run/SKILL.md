@@ -62,8 +62,21 @@ digraph pipelight {
 | `--clean` | Remove pipeline.yml and pipelight-misc/ from current project | `/pipelight-run --clean` |
 | `--ping-pong` | Enable ping-pong communication test step (inactive by default) | `/pipelight-run --ping-pong` |
 | `--full-report-only` | Force full-scan + report-only mode for lint/scan steps (e.g. PMD). Bypasses incremental git-diff; violations do NOT trigger auto_fix | `/pipelight-run --full-report-only` |
+| `--git-diff-from-remote-branch=<remote-branch>` | 指定远程分支作为 branch-ahead 对比基准（如 `origin/main`），替代默认的 `@{upstream}`。详见下方说明 | `/pipelight-run --git-diff-from-remote-branch=origin/main` |
 
 Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
+
+### `--git-diff-from-remote-branch=<remote-branch>`
+
+- `--git-diff-from-remote-branch=<remote-branch>`: 指定远程分支作为 branch-ahead
+  对比基准（如 `origin/main`），替代默认的 `@{upstream}`。用于在"从主分支切出的
+  feature 分支"上只对自迁出以来改动过的文件运行代码质量扫描（PMD / SpotBugs /
+  JaCoCo）。不传此 flag 时 pipelight 使用 `@{upstream}`，与原行为一致。
+  - 典型用法：`pipelight run --git-diff-from-remote-branch=origin/main`
+  - 要求 ref 本地已 fetch；不存在时 pipeline 终止并触发 `runtime_error` 回调，
+    提示用户运行 `git fetch` 后重试
+  - 值必须是完整的 remote ref（`origin/<branch>`），不要裸写分支名
+  - `retry` 子命令也支持同名 flag；若不传，则继承原 run 持久化的值
 
 ## Full-Scan Mode (`--full-report-only`)
 
@@ -435,31 +448,34 @@ Total: 4 files — 3 pass, 1 fail — avg 82.9%
 
 #### `git_diff_report` 详细流程
 
-`git_diff_report` 是 `git-diff` step 的 post-run 打印型 action（由 `git_diff_command` 触发）。当工作区或本地有未推送的改动时 pipelight 把三份按类别划分的文件清单写进 `on_failure.context_paths`，LLM 只做分类汇报，**不修代码、不 retry**。
+`git_diff_report` 是 `git-diff` step 的 post-run 打印型 action（由 `git_diff_command` 触发）。当工作区或本地有改动时 pipelight 把单一汇总清单写进 `on_failure.context_paths`，LLM 只做汇报，**不修代码、不 retry**。
 
-若 step 因 "not a git repository" 或 "working tree clean" 而 skipped，`on_failure` 仍为 null（不会触发本 action）。
+若 step 因 "not a git repository" 或 "working tree clean and no branch-ahead commits" 而 skipped，`on_failure` 仍为 null（不会触发本 action）。
 
-1. 从 `on_failure.context_paths` 读三份清单（每行一个路径）：
-   - `pipelight-misc/git-diff-report/unstaged.txt` — 工作区改动但未 `git add`
-   - `pipelight-misc/git-diff-report/staged.txt` — 已 `git add` 但未 commit
-   - `pipelight-misc/git-diff-report/unpushed.txt` — 本地 commit 但未 push（ahead of `@{upstream}`）
-2. 打印三段按类别分组的文件列表，每段前加标题；空类别跳过（不要打印空表）。建议用 Markdown 列表或表格，示例：
+1. 从 `on_failure.context_paths` 读单一清单（每行一个路径）：
+   - `pipelight-misc/git-diff-report/diff.txt` — 单一汇总文档，包含当前分支所有变更文件
+     的去重路径列表（`sort -u` 后），是 unstaged / staged / untracked / branch-ahead
+     四类变更的并集。LLM 阅读该文件即可了解本次扫描目标集合。
+2. step stdout 仍会打印分类统计（unstaged / staged / untracked / branch-ahead）供人类
+   阅读，LLM 可直接引用 stdout 的数字；`diff.txt` 本身不带分类标注。
+3. 打印一段文件清单，示例：
 
 ```markdown
-### git-diff: 5 change record(s) on current branch
+### git-diff: 5 unique file(s) changed on current branch
 
-**① 未暂存 (unstaged, 2 file)**
+- unstaged: 2
+- staged: 1
+- untracked: 0
+- branch-ahead (vs origin/main): 2
+
+**Files:**
 - src/foo.rs
 - src/bar.rs
-
-**② 已暂存未提交 (staged, 1 file)**
 - src/baz.rs
-
-**③ 已提交未推送 (unpushed, ahead of origin/main, 2 file)**
 - src/quux.rs
 - Cargo.toml
 ```
-3. **不修代码、不 retry**，打印完继续下一 step 的分发。
+4. **不修代码、不 retry**，打印完继续下一 step 的分发。
 
 ### Success Report (after retries)
 
