@@ -160,6 +160,13 @@ def count_file_lines(path: str, cwd: Path) -> int:
         return 0
 
 
+BINARY_MARKER = "Binary files "
+
+
+def is_binary_diff(diff_text: str) -> bool:
+    return BINARY_MARKER in diff_text and "@@" not in diff_text
+
+
 def render_tracked_body(path: str, hunks: list[dict]) -> str:
     lexer = pick_lexer(path)
     formatter = HtmlFormatter(nowrap=True)
@@ -200,6 +207,19 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
                 f'</details>'
             )
             return toc, det
+        if is_binary_diff(diff_text):
+            toc = (
+                f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '
+                f'<span class="stat">binary</span></li>'
+            )
+            det = (
+                f'<details id="{html.escape(anchor)}">'
+                f'<summary><span class="path">{html.escape(path)}</span>'
+                f' <span class="stat">binary</span></summary>'
+                f'<div class="diff-body"><p>binary file, diff omitted</p></div>'
+                f'</details>'
+            )
+            return toc, det
         hunks = parse_unified_diff(diff_text)
         add, dele = count_stats(hunks)
         body = render_tracked_body(path, hunks)
@@ -215,7 +235,7 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
             f'</details>'
         )
         return toc, det
-    # Untracked: summary-only block with line count.
+    # Untracked branch (from Task 6): name + line count only, no body.
     line_count = count_file_lines(path, cwd)
     toc = (
         f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '

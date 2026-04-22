@@ -284,5 +284,42 @@ class TestUntrackedFile(unittest.TestCase):
             self.assertNotIn("diff-body", block, "untracked block must not have diff body")
 
 
+class TestBinaryFile(unittest.TestCase):
+    def test_binary_file_detected_and_omitted(self):
+        fake_diff = (
+            "diff --git a/logo.png b/logo.png\n"
+            "index abc..def 100644\n"
+            "Binary files a/logo.png and b/logo.png differ\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "diff.txt").write_text("logo.png\n")
+            (tmp / "base-ref.txt").write_text("origin/main\n")
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=0, stdout="logo.png\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            self.assertIn("binary file, diff omitted", html_out)
+            # No hunk header should appear
+            self.assertNotIn("@@", html_out.split('<details id="f-logo-png"')[1].split("</details>")[0])
+
+
 if __name__ == "__main__":
     unittest.main()
