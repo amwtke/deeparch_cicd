@@ -225,6 +225,21 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
                 f'</details>'
             )
             return toc, det
+        diff_bytes = len(diff_text.encode("utf-8"))
+        if diff_bytes > MAX_DIFF_BYTES:
+            kb = diff_bytes // 1024
+            toc = (
+                f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '
+                f'<span class="stat">truncated</span></li>'
+            )
+            det = (
+                f'<details id="{html.escape(anchor)}">'
+                f'<summary><span class="path">{html.escape(path)}</span>'
+                f' <span class="stat">truncated</span></summary>'
+                f'<div class="diff-body"><p>diff too large ({kb} KB, omitted)</p></div>'
+                f'</details>'
+            )
+            return toc, det
         hunks = parse_unified_diff(diff_text)
         add, dele = count_stats(hunks)
         body = render_tracked_body(path, hunks)

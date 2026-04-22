@@ -321,5 +321,50 @@ class TestBinaryFile(unittest.TestCase):
             self.assertNotIn("@@", html_out.split('<details id="f-logo-png"')[1].split("</details>")[0])
 
 
+class TestOversizeDiff(unittest.TestCase):
+    def test_diff_exceeding_threshold_truncated(self):
+        # Build a diff body that exceeds MAX_DIFF_BYTES (500KB default).
+        # Create one big hunk with many add lines.
+        header = (
+            "diff --git a/big.txt b/big.txt\n"
+            "--- a/big.txt\n"
+            "+++ b/big.txt\n"
+            "@@ -0,0 +1,1 @@\n"
+        )
+        # ~600KB of + lines
+        big_body = "+x" * (600 * 1024 // 2) + "\n"
+        fake_diff = header + big_body
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "diff.txt").write_text("big.txt\n")
+            (tmp / "base-ref.txt").write_text("origin/main\n")
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=0, stdout="big.txt\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            self.assertIn("diff too large", html_out)
+            self.assertIn("KB, omitted", html_out)
+            # The 600KB of "xxx...xxx" content must NOT appear in the HTML
+            self.assertNotIn("x" * 10000, html_out)
+
+
 if __name__ == "__main__":
     unittest.main()
