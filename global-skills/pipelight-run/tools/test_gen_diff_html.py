@@ -406,5 +406,39 @@ class TestOversizeDiff(unittest.TestCase):
             self.assertIn('class="line del"', html_out)
 
 
+class TestAnchorCollision(unittest.TestCase):
+    def test_paths_with_same_slug_get_numeric_suffix(self):
+        # _make_anchor replaces all non-alphanumeric chars with "-":
+        #   "a/b.rs"  → "f-a-b-rs"
+        #   "a-b.rs"  → "f-a-b-rs"   (collision!)
+        # The second must receive the dedup suffix → "f-a-b-rs-2".
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "diff.txt").write_text("a/b.rs\na-b.rs\n")
+            (tmp / "base-ref.txt").write_text("origin/main\n")
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                # Both paths untracked to keep test simple
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            self.assertIn('id="f-a-b-rs"', html_out)
+            self.assertIn('id="f-a-b-rs-2"', html_out)
+
+
 if __name__ == "__main__":
     unittest.main()
