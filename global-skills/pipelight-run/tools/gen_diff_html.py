@@ -75,9 +75,126 @@ def _make_anchor(path: str) -> str:
     return "f-" + re.sub(r"[^A-Za-z0-9]+", "-", path).strip("-").lower()
 
 
-def render_html(base_ref: str, files: list[dict]) -> str:
+def git_output(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
+    """Run a git command; return (returncode, stdout, stderr). Never raises."""
+    r = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+    return r.returncode, r.stdout, r.stderr
+
+
+def is_tracked(path: str, base_ref: str, cwd: Path) -> bool:
+    """True if git knows this path at HEAD or in the base ref."""
+    rc, out, _ = git_output(["git", "ls-files", "--error-unmatch", "--", path], cwd)
+    return rc == 0
+
+
+def get_diff(path: str, base_ref: str, cwd: Path) -> tuple[str, str]:
+    """Return (stdout, stderr) from `git diff <base> -- <path>`."""
+    _rc, out, err = git_output(["git", "diff", base_ref, "--", path], cwd)
+    return out, err
+
+
+def parse_unified_diff(diff_text: str) -> list[dict]:
+    """Parse a unified-diff text into a list of hunks.
+
+    Each hunk: {"header": "@@ ...", "lines": [("add"|"del"|"ctx", "...content..."), ...]}
+    """
+    hunks = []
+    current = None
+    for line in diff_text.splitlines():
+        if line.startswith("@@"):
+            if current:
+                hunks.append(current)
+            current = {"header": line, "lines": []}
+            continue
+        if current is None:
+            # Skip diff --git / index / --- / +++ headers
+            continue
+        if line.startswith("+"):
+            current["lines"].append(("add", line[1:]))
+        elif line.startswith("-"):
+            current["lines"].append(("del", line[1:]))
+        else:
+            current["lines"].append(("ctx", line[1:] if line.startswith(" ") else line))
+    if current:
+        hunks.append(current)
+    return hunks
+
+
+def count_stats(hunks: list[dict]) -> tuple[int, int]:
+    add = sum(1 for h in hunks for kind, _ in h["lines"] if kind == "add")
+    dele = sum(1 for h in hunks for kind, _ in h["lines"] if kind == "del")
+    return add, dele
+
+
+def render_tracked_body(hunks: list[dict]) -> str:
+    out = ['<div class="diff-body">']
+    for h in hunks:
+        out.append('<div class="hunk">')
+        out.append(f'<div class="hunk-header">{html.escape(h["header"])}</div>')
+        out.append('<pre class="code"><code>')
+        for kind, content in h["lines"]:
+            prefix = {"add": "+", "del": "-", "ctx": " "}[kind]
+            out.append(
+                f'<div class="line {kind}">'
+                f'<span class="gutter">{prefix}</span>'
+                f'<span class="content">{html.escape(content)}</span>'
+                f'</div>'
+            )
+        out.append("</code></pre>")
+        out.append("</div>")
+    out.append("</div>")
+    return "".join(out)
+
+
+def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple[str, str]:
+    """Return (toc_li_html, details_block_html) for one file."""
+    if is_tracked(path, base_ref, cwd):
+        diff_text, _err = get_diff(path, base_ref, cwd)
+        hunks = parse_unified_diff(diff_text)
+        add, dele = count_stats(hunks)
+        body = render_tracked_body(hunks)
+        toc = (
+            f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '
+            f'<span class="stat">+{add} &minus;{dele}</span></li>'
+        )
+        det = (
+            f'<details id="{html.escape(anchor)}">'
+            f'<summary><span class="path">{html.escape(path)}</span>'
+            f' <span class="stat">+{add} &minus;{dele}</span></summary>'
+            f'{body}'
+            f'</details>'
+        )
+        return toc, det
+    # Untracked, binary, oversize branches come in later tasks. For now,
+    # fall through to an untracked-style placeholder so Task 4 is self-consistent.
+    toc = f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a></li>'
+    det = (
+        f'<details id="{html.escape(anchor)}">'
+        f'<summary><span class="path">{html.escape(path)}</span></summary>'
+        f'</details>'
+    )
+    return toc, det
+
+
+def render_html(base_ref: str, paths: list[str], cwd: Path) -> str:
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    # Minimal skeleton for Task 3; later tasks fill in CSS, TOC, file blocks.
+    # Anchor collision handling will be added in Task 9; for now, slug-only.
+    seen = {}
+    files = []
+    for p in paths:
+        slug = _make_anchor(p)
+        seen[slug] = seen.get(slug, 0) + 1
+        if seen[slug] > 1:
+            slug = f"{slug}-{seen[slug]}"
+        files.append((p, slug))
+
+    toc_items = []
+    file_blocks = []
+    for path, anchor in files:
+        toc_li, det = render_file_block(path, anchor, base_ref, cwd)
+        toc_items.append(toc_li)
+        file_blocks.append(det)
+
     parts = [
         "<!DOCTYPE html>",
         '<html lang="zh-CN"><head><meta charset="utf-8">',
@@ -93,14 +210,11 @@ def render_html(base_ref: str, files: list[dict]) -> str:
         "</div>",
         "</header>",
         '<section class="toc"><h2>Files</h2><ul>',
-    ]
-    for f in files:
-        parts.append(
-            f'<li><a href="#{html.escape(f["anchor"])}">{html.escape(f["path"])}</a></li>'
-        )
-    parts += [
+        *toc_items,
         "</ul></section>",
-        '<section class="files"></section>',  # real blocks rendered from Task 4
+        '<section class="files">',
+        *file_blocks,
+        "</section>",
         "</body></html>",
     ]
     return "\n".join(parts)
@@ -112,15 +226,13 @@ def main(argv=None) -> int:
     input_path = Path(args.input)
     base_ref_path = Path(args.base_ref_file)
     output_path = Path(args.output)
-    cwd = Path(args.cwd)  # noqa: F841 — used by later tasks
+    cwd = Path(args.cwd)
 
     base_ref = read_base_ref(base_ref_path)
     paths = read_diff_paths(input_path)
 
-    # Task 3 scope: just produce a skeleton with TOC of paths, no file bodies.
-    files = [{"path": p, "anchor": _make_anchor(p)} for p in paths]
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_html(base_ref, files), encoding="utf-8")
+    output_path.write_text(render_html(base_ref, paths, cwd), encoding="utf-8")
     return 0
 
 

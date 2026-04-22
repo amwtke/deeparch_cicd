@@ -84,5 +84,58 @@ class TestSkeleton(unittest.TestCase):
             self.assertNotIn("<li>", html)
 
 
+class TestTrackedFileRender(unittest.TestCase):
+    def _make_tmp(self, tmp: Path, diff_lines: list[str]):
+        (tmp / "diff.txt").write_text("\n".join(diff_lines) + "\n")
+        (tmp / "base-ref.txt").write_text("origin/main\n")
+
+    def test_tracked_file_renders_details_and_hunk(self):
+        fake_diff = (
+            "diff --git a/src/foo.py b/src/foo.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/src/foo.py\n"
+            "+++ b/src/foo.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " context line\n"
+            "-old line\n"
+            "+new line\n"
+            "+added line\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._make_tmp(tmp, ["src/foo.py"])
+            # Patch subprocess.run to fake both `git ls-files` (tracked check)
+            # and `git diff` (content). Use side_effect to branch per-call.
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    # tracked file present
+                    return SimpleNamespace(returncode=0, stdout="src/foo.py\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            self.assertIn('<details id="f-src-foo-py"', html_out)
+            self.assertIn("src/foo.py", html_out)
+            # Hunk header preserved
+            self.assertIn("@@ -1,3 +1,4 @@", html_out)
+            # Line classes applied
+            self.assertIn('class="line add"', html_out)
+            self.assertIn('class="line del"', html_out)
+            self.assertIn('class="line ctx"', html_out)
+
+
 if __name__ == "__main__":
     unittest.main()
