@@ -466,8 +466,11 @@ mod tests {
     fn test_context_paths_one_path_when_none() {
         let step = GitDiffStep::new();
         let of = step.exception_mapping().to_on_failure();
-        assert_eq!(of.context_paths.len(), 1, "None variant must carry only diff.txt");
-        assert_eq!(of.context_paths[0], "pipelight-misc/git-diff-report/diff.txt");
+        assert_eq!(
+            of.context_paths,
+            vec!["pipelight-misc/git-diff-report/diff.txt"],
+            "None variant must carry only diff.txt"
+        );
     }
 
     #[test]
