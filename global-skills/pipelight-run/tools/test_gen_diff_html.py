@@ -166,5 +166,81 @@ class TestTrackedFileRender(unittest.TestCase):
             self.assertIn("fatal: bad revision", html_out)
 
 
+    def test_tracked_file_has_pygments_span(self):
+        fake_diff = (
+            "diff --git a/src/foo.py b/src/foo.py\n"
+            "--- a/src/foo.py\n"
+            "+++ b/src/foo.py\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-def old(): pass\n"
+            "+def new(): return 42\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._make_tmp(tmp, ["src/foo.py"])
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=0, stdout="src/foo.py\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            # Pygments emits <span class="..."> tokens for Python keywords
+            # ("def" gets `k` (keyword) class by default).
+            self.assertRegex(html_out, r'<span class="[^"]*\bk\b[^"]*">def</span>')
+
+    def test_unknown_extension_falls_back_to_text_lexer(self):
+        fake_diff = (
+            "diff --git a/x.unknown b/x.unknown\n"
+            "--- a/x.unknown\n"
+            "+++ b/x.unknown\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-aaa\n"
+            "+bbb\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._make_tmp(tmp, ["x.unknown"])
+
+            def fake_run(cmd, *a, **kw):
+                from types import SimpleNamespace
+                if cmd[:2] == ["git", "ls-files"]:
+                    return SimpleNamespace(returncode=0, stdout="x.unknown\n", stderr="")
+                if cmd[:2] == ["git", "diff"]:
+                    return SimpleNamespace(returncode=0, stdout=fake_diff, stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=fake_run):
+                import importlib
+                import gen_diff_html as mod
+                importlib.reload(mod)
+                rc = mod.main([
+                    "--input", str(tmp / "diff.txt"),
+                    "--base-ref-file", str(tmp / "base-ref.txt"),
+                    "--output", str(tmp / "diff.html"),
+                    "--cwd", str(tmp),
+                ])
+            self.assertEqual(rc, 0)
+            html_out = (tmp / "diff.html").read_text()
+            # Fallback: TextLexer still emits <span> but no language-specific classes.
+            # Simply assert that aaa and bbb show up (escaped) in the output.
+            self.assertIn("aaa", html_out)
+            self.assertIn("bbb", html_out)
+
+
 if __name__ == "__main__":
     unittest.main()

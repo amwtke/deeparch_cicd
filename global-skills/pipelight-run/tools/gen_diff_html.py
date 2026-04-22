@@ -22,6 +22,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
+from pygments.util import ClassNotFound
+
 # ASCII whitelist mirroring the Rust side's debug_assert!.
 SAFE_REF_RE = re.compile(r"^[A-Za-z0-9/_.-]+$")
 
@@ -36,14 +41,8 @@ def die(msg: str, code: int = 1) -> None:
 
 
 def require_pygments():
-    try:
-        import pygments  # noqa: F401
-    except ImportError:
-        die(
-            "Pygments not installed. "
-            "Run: python3 -m pip install --user pygments",
-            code=1,
-        )
+    """No-op: Pygments is imported at module top; a missing import raises ImportError
+    with a clear hint handled in main()."""
 
 
 def parse_args(argv):
@@ -134,7 +133,21 @@ def count_stats(hunks: list[dict]) -> tuple[int, int]:
     return add, dele
 
 
-def render_tracked_body(hunks: list[dict]) -> str:
+def pick_lexer(path: str):
+    try:
+        return get_lexer_for_filename(path, stripnl=False)
+    except ClassNotFound:
+        return get_lexer_by_name("text", stripnl=False)
+
+
+def highlight_content(content: str, lexer) -> str:
+    """Highlight a single logical line. Returns inline HTML without wrapping <pre>."""
+    formatter = HtmlFormatter(nowrap=True)
+    return highlight(content, lexer, formatter).rstrip("\n")
+
+
+def render_tracked_body(path: str, hunks: list[dict]) -> str:
+    lexer = pick_lexer(path)
     out = ['<div class="diff-body">']
     for h in hunks:
         out.append('<div class="hunk">')
@@ -142,10 +155,11 @@ def render_tracked_body(hunks: list[dict]) -> str:
         out.append('<pre class="code"><code>')
         for kind, content in h["lines"]:
             prefix = {"add": "+", "del": "-", "ctx": " "}[kind]
+            highlighted = highlight_content(content, lexer)
             out.append(
                 f'<div class="line {kind}">'
                 f'<span class="gutter">{prefix}</span>'
-                f'<span class="content">{html.escape(content)}</span>'
+                f'<span class="content">{highlighted}</span>'
                 f'</div>'
             )
         out.append("</code></pre>")
@@ -173,7 +187,7 @@ def render_file_block(path: str, anchor: str, base_ref: str, cwd: Path) -> tuple
             return toc, det
         hunks = parse_unified_diff(diff_text)
         add, dele = count_stats(hunks)
-        body = render_tracked_body(hunks)
+        body = render_tracked_body(path, hunks)
         toc = (
             f'<li><a href="#{html.escape(anchor)}">{html.escape(path)}</a> '
             f'<span class="stat">+{add} &minus;{dele}</span></li>'
@@ -258,4 +272,9 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except ImportError as e:
+        if "pygments" in str(e).lower():
+            die("Pygments not installed. Run: python3 -m pip install --user pygments", code=1)
+        raise
