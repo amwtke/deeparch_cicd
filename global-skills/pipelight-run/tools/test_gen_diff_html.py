@@ -81,7 +81,7 @@ class TestSkeleton(unittest.TestCase):
             self.assertIn("<!DOCTYPE html>", html)
             self.assertIn("origin/main", html)
             self.assertIn('class="toc"', html)
-            self.assertNotIn("<li><a", html)  # no TOC entry <li>s (CSS .toc li is fine)
+            self.assertNotIn("<li>", html)
 
 
 class TestTrackedFileRender(unittest.TestCase):
@@ -488,6 +488,16 @@ class TestStylingAndHeader(unittest.TestCase):
             html_out = (tmp / "diff.html").read_text()
             self.assertIn("feat/demo", html_out)
             self.assertIn("abc1234", html_out)
+
+    def test_pygments_dark_style_applied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._bootstrap(tmp)
+            self.assertEqual(self._run(tmp), 0)
+            html_out = (tmp / "diff.html").read_text()
+            # github-dark style emits token colors designed for dark bg.
+            # Python keyword color (.k) in github-dark is #ff7b72.
+            self.assertIn("#ff7b72", html_out)
 
 
 if __name__ == "__main__":

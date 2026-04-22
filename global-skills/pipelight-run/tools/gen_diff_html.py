@@ -210,7 +210,7 @@ def is_binary_diff(diff_text: str) -> bool:
 
 def render_tracked_body(path: str, hunks: list[dict]) -> str:
     lexer = pick_lexer(path)
-    formatter = HtmlFormatter(nowrap=True)
+    formatter = HtmlFormatter(nowrap=True, style="github-dark")
     out = ['<div class="diff-body">']
     for h in hunks:
         out.append('<div class="hunk">')
@@ -345,7 +345,7 @@ def render_html(base_ref: str, paths: list[str], cwd: Path) -> str:
         "<!DOCTYPE html>",
         '<html lang="zh-CN"><head><meta charset="utf-8">',
         f"<title>git-diff report — {html.escape(head_label)} vs {html.escape(base_ref)}</title>",
-        f"<style>{CSS}</style>",
+        f"<style>{CSS}\n{HtmlFormatter(style='github-dark').get_style_defs('')}</style>",
         "</head><body>",
         "<header>",
         "<h1>git-diff report</h1>",
