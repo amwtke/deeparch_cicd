@@ -83,6 +83,18 @@ impl GradleDetector {
         content.contains("pmd")
     }
 
+    /// Check if build file contains jacoco plugin (id 'jacoco' / id("jacoco") / apply plugin).
+    /// Note: must not match bare "jacoco" inside words like "tjacoco" — bound with
+    /// quotes/parens to avoid false positives.
+    fn has_jacoco(content: &str) -> bool {
+        content.contains("id 'jacoco'")
+            || content.contains("id \"jacoco\"")
+            || content.contains("id(\"jacoco\")")
+            || content.contains("id('jacoco')")
+            || content.contains("apply plugin: 'jacoco'")
+            || content.contains("apply plugin: \"jacoco\"")
+    }
+
     /// Map JDK version string to the nearest supported Gradle Docker image.
     fn jdk_to_image(version: &str) -> String {
         let v: u32 = version.parse().unwrap_or(17);
@@ -147,6 +159,9 @@ impl ProjectDetector for GradleDetector {
         }
         if Self::has_pmd(&content) {
             quality_plugins.push("pmd".to_string());
+        }
+        if Self::has_jacoco(&content) {
+            quality_plugins.push("jacoco".to_string());
         }
 
         Ok(ProjectInfo {
@@ -390,5 +405,41 @@ sourceCompatibility = '11'
     fn test_image_mapping_jdk21() {
         assert_eq!(GradleDetector::jdk_to_image("21"), "gradle:8-jdk21");
         assert_eq!(GradleDetector::jdk_to_image("22"), "gradle:8-jdk21");
+    }
+
+    #[test]
+    fn test_jacoco_detection_groovy_id() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("build.gradle"), "plugins { id 'jacoco' }").unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert!(info.quality_plugins.contains(&"jacoco".to_string()));
+    }
+
+    #[test]
+    fn test_jacoco_detection_kts_id() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("build.gradle.kts"),
+            "plugins { id(\"jacoco\") }",
+        )
+        .unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert!(info.quality_plugins.contains(&"jacoco".to_string()));
+    }
+
+    #[test]
+    fn test_jacoco_detection_apply_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("build.gradle"), "apply plugin: 'jacoco'").unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert!(info.quality_plugins.contains(&"jacoco".to_string()));
+    }
+
+    #[test]
+    fn test_jacoco_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("build.gradle"), "apply plugin: 'java'").unwrap();
+        let info = GradleDetector.analyze(dir.path()).unwrap();
+        assert!(!info.quality_plugins.contains(&"jacoco".to_string()));
     }
 }

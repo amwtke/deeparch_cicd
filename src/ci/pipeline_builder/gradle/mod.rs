@@ -1,4 +1,6 @@
 pub mod checkstyle_step;
+pub mod jacoco_full_step;
+pub mod jacoco_step;
 pub mod pmd_full_step;
 pub mod pmd_step;
 pub mod spotbugs_full_step;
@@ -196,9 +198,32 @@ impl PipelineStrategy for GradleStrategy {
                 ],
                 "Tests had failures (report-only)",
             );
-        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+        // Decide JaCoCo mode from detector output.
+        let jacoco_mode = if info.quality_plugins.iter().any(|p| p == "jacoco") {
+            crate::ci::pipeline_builder::base::JacocoMode::GradlePlugin
+        } else {
+            crate::ci::pipeline_builder::base::JacocoMode::Standalone
+        };
+        let wrapped_test = crate::ci::pipeline_builder::base::JacocoAgentTestStep::new(
             Box::new(test_step),
+            jacoco_mode,
+        );
+        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+            Box::new(wrapped_test),
             vec![prev],
+        )));
+        prev = "test".into();
+
+        // JaCoCo incremental + full
+        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+            Box::new(jacoco_step::GradleJacocoStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "jacoco".into();
+
+        steps.push(Box::new(GradleCachedStep::wrap_with_deps(
+            Box::new(jacoco_full_step::GradleJacocoFullStep::new(info)),
+            vec![prev.clone()],
         )));
 
         steps
@@ -266,6 +291,8 @@ mod tests {
                 "pmd",
                 "pmd_full",
                 "test",
+                "jacoco",
+                "jacoco_full",
             ]
         );
         let by_name: std::collections::HashMap<String, Vec<String>> = steps
@@ -281,6 +308,8 @@ mod tests {
         assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
         assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
         assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
+        assert_eq!(by_name["jacoco"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco_full"], vec!["jacoco".to_string()]);
     }
 
     #[test]
@@ -299,6 +328,8 @@ mod tests {
                 "pmd",
                 "pmd_full",
                 "test",
+                "jacoco",
+                "jacoco_full",
             ]
         );
         let by_name: std::collections::HashMap<String, Vec<String>> = steps
@@ -313,6 +344,8 @@ mod tests {
         assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
         assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
         assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
+        assert_eq!(by_name["jacoco"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco_full"], vec!["jacoco".to_string()]);
     }
 
     #[test]
@@ -606,11 +639,8 @@ mod tests {
             .unwrap()
             .config();
         let cmd = &pmd_cfg.commands[0];
-        // Now reads from git-diff step's report files instead of running git diff
-        assert!(cmd.contains("pipelight-misc/git-diff-report/unstaged.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/staged.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/untracked.txt"));
-        assert!(cmd.contains("pipelight-misc/git-diff-report/unpushed.txt"));
+        // Now reads from git-diff step's unified diff.txt instead of running git diff
+        assert!(cmd.contains("pipelight-misc/git-diff-report/diff.txt"));
         assert!(cmd.contains("grep -E"));
         assert!(cmd.contains("java|kt"));
         assert!(cmd.contains("no changed source files"));
@@ -740,5 +770,77 @@ mod tests {
     #[test]
     fn test_parse_gradle_test_no_match() {
         assert!(parse_gradle_test("BUILD SUCCESSFUL").is_none());
+    }
+
+    #[test]
+    fn test_gradle_steps_include_jacoco_at_tail() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "build",
+                "checkstyle",
+                "spotbugs",
+                "spotbugs_full",
+                "pmd",
+                "pmd_full",
+                "test",
+                "jacoco",
+                "jacoco_full",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_gradle_jacoco_depends_on_test() {
+        let info = make_gradle_info_with_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let by_name: std::collections::HashMap<String, Vec<String>> = steps
+            .iter()
+            .map(|s| (s.config().name, s.config().depends_on))
+            .collect();
+        assert_eq!(by_name["jacoco"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco_full"], vec!["jacoco".to_string()]);
+    }
+
+    #[test]
+    fn test_gradle_jacoco_mode_standalone_by_default() {
+        let info = make_gradle_info_without_lint();
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let test = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        let combined = test.commands.join(" && ");
+        assert!(
+            combined.contains("JAVA_TOOL_OPTIONS") && combined.contains("jacocoagent.jar"),
+            "gradle without jacoco plugin must use standalone agent, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn test_gradle_jacoco_mode_plugin_when_present() {
+        let mut info = make_gradle_info_with_lint();
+        info.quality_plugins.push("jacoco".to_string());
+        let strategy = GradleStrategy;
+        let steps = strategy.steps(&info);
+        let test = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        let combined = test.commands.join(" && ");
+        assert!(
+            combined.contains("jacocoTestReport") && combined.contains("cp build/jacoco/test.exec"),
+            "gradle with jacoco plugin must append jacocoTestReport + copy fallback, got: {}",
+            combined
+        );
     }
 }

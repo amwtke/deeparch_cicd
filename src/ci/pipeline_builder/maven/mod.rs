@@ -1,4 +1,6 @@
 pub mod checkstyle_step;
+pub mod jacoco_full_step;
+pub mod jacoco_step;
 pub mod package_step;
 pub mod pmd_full_step;
 pub mod pmd_step;
@@ -179,7 +181,7 @@ impl PipelineStrategy for MavenStrategy {
                 }
             })
             .collect();
-        let test_step = TestStep::new(&test_info)
+        let test_step_inner = TestStep::new(&test_info)
             .with_parser(parse_maven_test)
             .with_allow_failure(true)
             .with_test_report_globs(vec![
@@ -190,15 +192,42 @@ impl PipelineStrategy for MavenStrategy {
                 vec!["BUILD FAILURE".into(), "There are test failures".into()],
                 "Tests had failures (report-only)",
             );
+
+        // Decide JaCoCo mode from detector output: plugin if project pom has
+        // jacoco-maven-plugin, standalone otherwise.
+        let jacoco_mode = if info.quality_plugins.iter().any(|p| p == "jacoco") {
+            crate::ci::pipeline_builder::base::JacocoMode::MavenPlugin
+        } else {
+            crate::ci::pipeline_builder::base::JacocoMode::Standalone
+        };
+        let wrapped_test = crate::ci::pipeline_builder::base::JacocoAgentTestStep::new(
+            Box::new(test_step_inner),
+            jacoco_mode,
+        );
         steps.push(Box::new(MavenCachedStep::wrap_with_deps(
-            Box::new(test_step),
+            Box::new(wrapped_test),
             vec![prev],
         )));
+        prev = "test".into();
 
-        // Package still declared via PackageStep (depends_on defaults to ["test"]).
-        steps.push(Box::new(MavenCachedStep::wrap(Box::new(
-            package_step::PackageStep::new(info),
-        ))));
+        // JaCoCo incremental + full
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(jacoco_step::MavenJacocoStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "jacoco".into();
+
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(jacoco_full_step::MavenJacocoFullStep::new(info)),
+            vec![prev.clone()],
+        )));
+        prev = "jacoco_full".into();
+
+        // Package depends on jacoco_full (override default ["test"])
+        steps.push(Box::new(MavenCachedStep::wrap_with_deps(
+            Box::new(package_step::PackageStep::new(info)),
+            vec![prev],
+        )));
 
         steps
     }
@@ -261,6 +290,8 @@ mod tests {
                 "pmd",
                 "pmd_full",
                 "test",
+                "jacoco",
+                "jacoco_full",
                 "package",
             ]
         );
@@ -277,7 +308,9 @@ mod tests {
         assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
         assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
         assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
-        assert_eq!(by_name["package"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco_full"], vec!["jacoco".to_string()]);
+        assert_eq!(by_name["package"], vec!["jacoco_full".to_string()]);
     }
 
     #[test]
@@ -295,6 +328,8 @@ mod tests {
                 "pmd",
                 "pmd_full",
                 "test",
+                "jacoco",
+                "jacoco_full",
                 "package",
             ]
         );
@@ -310,7 +345,9 @@ mod tests {
         assert_eq!(by_name["pmd"], vec!["spotbugs_full".to_string()]);
         assert_eq!(by_name["pmd_full"], vec!["pmd".to_string()]);
         assert_eq!(by_name["test"], vec!["pmd_full".to_string()]);
-        assert_eq!(by_name["package"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco"], vec!["test".to_string()]);
+        assert_eq!(by_name["jacoco_full"], vec!["jacoco".to_string()]);
+        assert_eq!(by_name["package"], vec!["jacoco_full".to_string()]);
     }
 
     #[test]
@@ -576,5 +613,93 @@ Tests run: 5, Failures: 0, Errors: 0, Skipped: 0";
     #[test]
     fn test_parse_maven_test_no_match() {
         assert!(parse_maven_test("BUILD SUCCESS").is_none());
+    }
+
+    #[test]
+    fn test_maven_steps_include_jacoco_after_test_before_package() {
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let names: Vec<String> = steps.iter().map(|s| s.config().name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "build",
+                "checkstyle",
+                "spotbugs",
+                "spotbugs_full",
+                "pmd",
+                "pmd_full",
+                "test",
+                "jacoco",
+                "jacoco_full",
+                "package",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_package_depends_on_jacoco_full_in_strategy() {
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let pkg = steps
+            .iter()
+            .find(|s| s.config().name == "package")
+            .unwrap()
+            .config();
+        assert_eq!(pkg.depends_on, vec!["jacoco_full".to_string()]);
+    }
+
+    #[test]
+    fn test_jacoco_full_inactive_by_default() {
+        let info = make_maven_info_with_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let jf = steps
+            .iter()
+            .find(|s| s.config().name == "jacoco_full")
+            .unwrap()
+            .config();
+        assert!(!jf.active);
+        assert_eq!(jf.tag, "full");
+        assert!(jf.allow_failure);
+    }
+
+    #[test]
+    fn test_jacoco_mode_standalone_when_plugin_absent() {
+        let info = make_maven_info_without_lint();
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let test = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        let combined = test.commands.join(" && ");
+        assert!(
+            combined.contains("MAVEN_OPTS") && combined.contains("jacocoagent.jar"),
+            "without jacoco plugin, test step must inject standalone agent, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn test_jacoco_mode_plugin_when_plugin_present() {
+        let mut info = make_maven_info_with_lint();
+        info.quality_plugins.push("jacoco".to_string());
+        let strategy = MavenStrategy;
+        let steps = strategy.steps(&info);
+        let test = steps
+            .iter()
+            .find(|s| s.config().name == "test")
+            .unwrap()
+            .config();
+        let combined = test.commands.join(" && ");
+        assert!(
+            combined.contains("jacoco:prepare-agent"),
+            "with jacoco plugin, test step must use prepare-agent, got: {}",
+            combined
+        );
     }
 }

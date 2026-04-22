@@ -73,6 +73,11 @@ pub struct RunState {
     /// persisted so retries inherit the same scan semantics.
     #[serde(default, alias = "full")]
     pub full_report_only: bool,
+    /// Remote ref used as the branch-ahead base for `git-diff` (e.g. `origin/main`).
+    /// `None` means use `@{upstream}` (original behavior). Set by
+    /// `pipelight run --git-diff-from-remote-branch`; persisted so retries inherit it.
+    #[serde(default)]
+    pub git_diff_base: Option<String>,
 }
 
 impl RunState {
@@ -84,6 +89,7 @@ impl RunState {
             duration_ms: None,
             steps: Vec::new(),
             full_report_only: false,
+            git_diff_base: None,
         }
     }
 
@@ -769,5 +775,32 @@ mod tests {
             StepStatus::Skipped
         );
         assert_eq!(state.steps.len(), 5);
+    }
+
+    #[test]
+    fn test_run_state_git_diff_base_default_none() {
+        let state = RunState::new("r1", "p1");
+        assert_eq!(state.git_diff_base, None);
+    }
+
+    #[test]
+    fn test_run_state_git_diff_base_roundtrip() {
+        let mut state = RunState::new("r1", "p1");
+        state.git_diff_base = Some("origin/main".into());
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: RunState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.git_diff_base, Some("origin/main".into()));
+    }
+
+    #[test]
+    fn test_run_state_git_diff_base_legacy_deserialize_missing_field() {
+        // JSON produced by an older pipelight that didn't know about this field
+        // must still deserialize, with git_diff_base defaulting to None.
+        let legacy = r#"{
+            "run_id":"r1","pipeline":"p1","status":"running",
+            "duration_ms":null,"steps":[],"full_report_only":false
+        }"#;
+        let state: RunState = serde_json::from_str(legacy).unwrap();
+        assert_eq!(state.git_diff_base, None);
     }
 }

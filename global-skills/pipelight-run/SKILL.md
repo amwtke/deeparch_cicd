@@ -62,8 +62,21 @@ digraph pipelight {
 | `--clean` | Remove pipeline.yml and pipelight-misc/ from current project | `/pipelight-run --clean` |
 | `--ping-pong` | Enable ping-pong communication test step (inactive by default) | `/pipelight-run --ping-pong` |
 | `--full-report-only` | Force full-scan + report-only mode for lint/scan steps (e.g. PMD). Bypasses incremental git-diff; violations do NOT trigger auto_fix | `/pipelight-run --full-report-only` |
+| `--git-diff-from-remote-branch=<remote-branch>` | 指定远程分支作为 branch-ahead 对比基准（如 `origin/main`），替代默认的 `@{upstream}`。详见下方说明 | `/pipelight-run --git-diff-from-remote-branch=origin/main` |
 
 Arguments can be combined: `/pipelight-run --reinit --skip pmd --verbose`
+
+### `--git-diff-from-remote-branch=<remote-branch>`
+
+- `--git-diff-from-remote-branch=<remote-branch>`: 指定远程分支作为 branch-ahead
+  对比基准（如 `origin/main`），替代默认的 `@{upstream}`。用于在"从主分支切出的
+  feature 分支"上只对自迁出以来改动过的文件运行代码质量扫描（PMD / SpotBugs /
+  JaCoCo）。不传此 flag 时 pipelight 使用 `@{upstream}`，与原行为一致。
+  - 典型用法：`pipelight run --git-diff-from-remote-branch=origin/main`
+  - 要求 ref 本地已 fetch；不存在时 pipeline 终止并触发 `runtime_error` 回调，
+    提示用户运行 `git fetch` 后重试
+  - 值必须是完整的 remote ref（`origin/<branch>`），不要裸写分支名
+  - `retry` 子命令也支持同名 flag；若不传，则继承原 run 持久化的值
 
 ## Full-Scan Mode (`--full-report-only`)
 
@@ -219,6 +232,8 @@ Pipeline failed but auto-fix is configured.**先查回调命令处理表确定 L
 | `pmd_print_command` | pmd_print | 见下方 **`pmd_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `spotbugs_print_command` | spotbugs_print | 见下方 **`spotbugs_print` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_diff_command` | git_diff_report | 见下方 **`git_diff_report` 详细流程** | 打印完表格，pipeline 已继续，无 retry | — |
+| `auto_gen_jacoco_config` | retry | 在 `pipelight-misc/` 下生成 `jacoco-config.yml`（含 `threshold: 70` 和排除 glob 列表），然后 retry 该 step | step 通过 | 见下方 **`auto_gen_jacoco_config` 详细流程** |
+| `jacoco_print_command` | jacoco_print | 解析 `pipelight-misc/jacoco-full-report/jacoco.xml`，按 package 分组打印每个 source file 的 LINE 覆盖率百分比 + 总结统计（≥70% / <70% 数量） | 打印完表格，pipeline 已继续，无 retry | — |
 | `git_fail` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `fail_and_skip` | skip | 无操作（pipelight 已自动 skip） | pipeline 继续 | — |
 | `runtime_error` | runtime_error | 报告错误，不重试 | — | — |
@@ -304,6 +319,66 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 
 **注意：`pipelight-misc/` 必须位于目标项目根目录下**（即 `pipeline.yml` 所在目录），而非 pipelight 工具自身的目录。
 
+#### `auto_gen_jacoco_config` 详细流程
+
+1. **读上下文**：LLM 读 `on_failure.context_paths` 指向的 source_paths（项目源码目录），判断项目规模和框架类型。
+
+2. **识别项目约定**：扫描 `src/main/java/`（或 kotlin）下的文件命名模式，找出常见的 DTO/Config/Exception/Entity 类。典型模式：
+   - `*Dto.java` / `*DTO.java`（数据传输对象，仅 getter/setter，无业务逻辑）
+   - `*Config.java` / `*Configuration.java`（Spring 配置类）
+   - `*Exception.java`（异常类，仅构造器）
+   - `*Application.java`（Spring Boot 入口类）
+   - `**/generated/**`（构建时生成的代码）
+   - 可根据项目实际加入更多模式（如 `*Mapper.java`、`*Enum.java`、`*Controller.java`）
+
+3. **写配置**：生成 `pipelight-misc/jacoco-config.yml`，默认模板：
+
+   ```yaml
+   # JaCoCo 覆盖率检查配置
+   # 被 pipelight 的 jacoco / jacoco_full step 读取
+
+   # 每个文件的 LINE 覆盖率下限（百分比）
+   threshold: 70
+
+   # 排除在覆盖率检查外的文件 glob（相对项目根）
+   exclude:
+     - "**/*Dto.java"
+     - "**/*DTO.java"
+     - "**/*Config.java"
+     - "**/*Configuration.java"
+     - "**/*Exception.java"
+     - "**/*Application.java"
+     - "**/generated/**"
+   ```
+
+4. **LLM 打印**：`Generated pipelight-misc/jacoco-config.yml (threshold=70, N excludes).`
+
+5. **retry**：`pipelight retry --step jacoco`。
+
+#### `jacoco_print_command` 详细流程
+
+触发于 `jacoco_full` step（`--full-report-only` 模式），全仓扫描发现有文件 LINE 覆盖率 < threshold 时。report-only：不修代码、不 retry。
+
+1. **读 XML**：`pipelight-misc/jacoco-full-report/jacoco.xml`。
+2. **读 summary 文本**：`jacoco-summary.txt`（每行 `path X.Y%`）和 `threshold-fail.txt`（未达标文件）。
+3. **按 package 分组打印**：每行格式 `  <file>  <pct>%`，未达标的加 `⚠ below threshold` 标记。末尾给出汇总：总文件数、达标数、未达标数、平均覆盖率。
+
+示例输出：
+
+```
+=== JaCoCo Full Report (threshold=70%) ===
+
+com.foo.user:
+  UserService.java          82.5%
+  UserController.java       91.2%
+
+com.foo.order:
+  OrderService.java         63.1%  ⚠ below threshold
+  OrderRepository.java      95.0%
+
+Total: 4 files — 3 pass, 1 fail — avg 82.9%
+```
+
 #### `test_print` 详细流程
 
 `test_print` 是 post-run 打印型 action（由 `test_print_command` 触发），**每次 test step 跑完都会发出**（成功或失败），用于让 LLM 打印汇总。pipeline 已经判定完毕，**不 retry**。
@@ -373,31 +448,34 @@ pipelight retry --run-id <same-run-id> --step <failed-step-name> -f pipeline.yml
 
 #### `git_diff_report` 详细流程
 
-`git_diff_report` 是 `git-diff` step 的 post-run 打印型 action（由 `git_diff_command` 触发）。当工作区或本地有未推送的改动时 pipelight 把三份按类别划分的文件清单写进 `on_failure.context_paths`，LLM 只做分类汇报，**不修代码、不 retry**。
+`git_diff_report` 是 `git-diff` step 的 post-run 打印型 action（由 `git_diff_command` 触发）。当工作区或本地有改动时 pipelight 把单一汇总清单写进 `on_failure.context_paths`，LLM 只做汇报，**不修代码、不 retry**。
 
-若 step 因 "not a git repository" 或 "working tree clean" 而 skipped，`on_failure` 仍为 null（不会触发本 action）。
+若 step 因 "not a git repository" 或 "working tree clean and no branch-ahead commits" 而 skipped，`on_failure` 仍为 null（不会触发本 action）。
 
-1. 从 `on_failure.context_paths` 读三份清单（每行一个路径）：
-   - `pipelight-misc/git-diff-report/unstaged.txt` — 工作区改动但未 `git add`
-   - `pipelight-misc/git-diff-report/staged.txt` — 已 `git add` 但未 commit
-   - `pipelight-misc/git-diff-report/unpushed.txt` — 本地 commit 但未 push（ahead of `@{upstream}`）
-2. 打印三段按类别分组的文件列表，每段前加标题；空类别跳过（不要打印空表）。建议用 Markdown 列表或表格，示例：
+1. 从 `on_failure.context_paths` 读单一清单（每行一个路径）：
+   - `pipelight-misc/git-diff-report/diff.txt` — 单一汇总文档，包含当前分支所有变更文件
+     的去重路径列表（`sort -u` 后），是 unstaged / staged / untracked / branch-ahead
+     四类变更的并集。LLM 阅读该文件即可了解本次扫描目标集合。
+2. step stdout 仍会打印分类统计（unstaged / staged / untracked / branch-ahead）供人类
+   阅读，LLM 可直接引用 stdout 的数字；`diff.txt` 本身不带分类标注。
+3. 打印一段文件清单，示例：
 
 ```markdown
-### git-diff: 5 change record(s) on current branch
+### git-diff: 5 unique file(s) changed on current branch
 
-**① 未暂存 (unstaged, 2 file)**
+- unstaged: 2
+- staged: 1
+- untracked: 0
+- branch-ahead (vs origin/main): 2
+
+**Files:**
 - src/foo.rs
 - src/bar.rs
-
-**② 已暂存未提交 (staged, 1 file)**
 - src/baz.rs
-
-**③ 已提交未推送 (unpushed, ahead of origin/main, 2 file)**
 - src/quux.rs
 - Cargo.toml
 ```
-3. **不修代码、不 retry**，打印完继续下一 step 的分发。
+4. **不修代码、不 retry**，打印完继续下一 step 的分发。
 
 ### Success Report (after retries)
 
