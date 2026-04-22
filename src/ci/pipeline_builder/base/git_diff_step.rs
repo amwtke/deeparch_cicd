@@ -12,71 +12,115 @@ use crate::ci::pipeline_builder::{StepConfig, StepDef};
 /// Exits 0 (skipped) when:
 /// - not a git repository
 /// - working tree is clean AND no untracked files AND no commits ahead of upstream
-pub struct GitDiffStep;
+pub struct GitDiffStep {
+    /// `None` → use `@{upstream}` (original behavior).
+    /// `Some("origin/main")` → use the given literal ref as branch-ahead base.
+    base_ref: Option<String>,
+}
 
 impl GitDiffStep {
     pub fn new() -> Self {
-        Self
+        Self { base_ref: None }
+    }
+
+    // Used by Task 7+ CLI plumbing; callers tests cover it today.
+    #[allow(dead_code)]
+    pub fn with_base_ref(base_ref: Option<String>) -> Self {
+        Self { base_ref }
     }
 }
 
 impl StepDef for GitDiffStep {
     fn config(&self) -> StepConfig {
-        let script = r#"if ! git rev-parse --git-dir >/dev/null 2>&1; then echo 'git-diff: not a git repository — skipping'; exit 0; fi
+        // Prefix that switches branch-ahead BASE. Two variants:
+        //   None        → compute BASE from git @{upstream}
+        //   Some(ref)   → hardcode BASE to the given literal (e.g. "origin/main")
+        let base_prefix = match &self.base_ref {
+            None => r#"BASE=$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || true)
+BASE_LABEL="@{upstream}""#
+                .to_string(),
+            Some(r) => format!(
+                r#"BASE="{r}"
+BASE_LABEL="{r}""#,
+                r = r
+            ),
+        };
+
+        let body = r#"# pipelight:git-diff-step v2
+if ! git rev-parse --git-dir >/dev/null 2>&1; then echo 'git-diff: not a git repository — skipping'; exit 0; fi
 REPORT_DIR=pipelight-misc/git-diff-report
 mkdir -p "$REPORT_DIR"
-UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || true)
+__BASE_PREFIX__
+
 UNSTAGED=$(git diff --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
 UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
-UNPUSHED=""
-if [ -n "$UPSTREAM" ]; then
-  UNPUSHED=$(git diff "$UPSTREAM"..HEAD --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
+
+BRANCH_AHEAD=""
+BRANCH_AHEAD_ERR=0
+if [ -n "$BASE" ]; then
+  if ! git rev-parse --verify "$BASE" >/dev/null 2>&1; then
+    echo "git-diff: base ref '$BASE' not found — run 'git fetch' first" >&2
+    BRANCH_AHEAD_ERR=1
+  else
+    BRANCH_AHEAD=$(git diff "$BASE"..HEAD --name-only --diff-filter=ACMR 2>/dev/null | while read f; do [ -f "$f" ] && echo "$f"; done)
+  fi
 fi
-printf '%s\n' "$UNSTAGED"   | sed '/^$/d' > "$REPORT_DIR/unstaged.txt"
-printf '%s\n' "$STAGED"     | sed '/^$/d' > "$REPORT_DIR/staged.txt"
-printf '%s\n' "$UNTRACKED"  | sed '/^$/d' > "$REPORT_DIR/untracked.txt"
-printf '%s\n' "$UNPUSHED"   | sed '/^$/d' > "$REPORT_DIR/unpushed.txt"
-U=$(wc -l < "$REPORT_DIR/unstaged.txt"   | tr -d ' ')
-S=$(wc -l < "$REPORT_DIR/staged.txt"     | tr -d ' ')
-T=$(wc -l < "$REPORT_DIR/untracked.txt"  | tr -d ' ')
-P=$(wc -l < "$REPORT_DIR/unpushed.txt"   | tr -d ' ')
-TOTAL=$((U + S + T + P))
-if [ "$TOTAL" -eq 0 ]; then echo 'git-diff: working tree clean and no unpushed commits — skipping'; exit 0; fi
-echo "git-diff: $TOTAL change record(s) on current branch"
-echo "  unstaged: $U file(s)"
-echo "  staged: $S file(s)"
-echo "  untracked: $T file(s)"
-if [ -n "$UPSTREAM" ]; then echo "  unpushed (ahead of $UPSTREAM): $P file(s)"; else echo "  unpushed: n/a (no upstream configured)"; fi
+
+U=$(printf '%s\n' "$UNSTAGED"     | sed '/^$/d' | wc -l | tr -d ' ')
+S=$(printf '%s\n' "$STAGED"       | sed '/^$/d' | wc -l | tr -d ' ')
+T=$(printf '%s\n' "$UNTRACKED"    | sed '/^$/d' | wc -l | tr -d ' ')
+B=$(printf '%s\n' "$BRANCH_AHEAD" | sed '/^$/d' | wc -l | tr -d ' ')
+
+{ printf '%s\n' "$UNSTAGED"; printf '%s\n' "$STAGED"; printf '%s\n' "$UNTRACKED"; printf '%s\n' "$BRANCH_AHEAD"; } \
+  | sed '/^$/d' | sort -u \
+  | while read f; do [ -f "$f" ] && echo "$f"; done \
+  > "$REPORT_DIR/diff.txt"
+
+TOTAL=$(wc -l < "$REPORT_DIR/diff.txt" | tr -d ' ')
+
+if [ "$BRANCH_AHEAD_ERR" = "1" ]; then exit 2; fi
+
+if [ "$TOTAL" -eq 0 ]; then echo 'git-diff: working tree clean and no branch-ahead commits — skipping'; exit 0; fi
+
+echo "git-diff: $TOTAL unique file(s) changed on current branch"
+echo "  unstaged: $U"
+echo "  staged: $S"
+echo "  untracked: $T"
+if [ -n "$BASE" ]; then echo "  branch-ahead (vs $BASE_LABEL): $B"; else echo "  branch-ahead: n/a (no base ref configured)"; fi
 exit 1"#;
+
+        let script = body.replace("__BASE_PREFIX__", &base_prefix);
 
         StepConfig {
             name: "git-diff".into(),
             local: true,
-            commands: vec![script.into()],
+            commands: vec![script],
             allow_failure: true,
             ..Default::default()
         }
     }
 
+    // exception_mapping / match_exception / output_report_str unchanged for now;
+    // Task 4 + Task 5 update them.
+
     fn exception_mapping(&self) -> ExceptionMapping {
+        // TEMPORARY — rewritten in Task 4; leave single legacy entry so the
+        // compile succeeds and Task 3 tests can run.
         ExceptionMapping::new(CallbackCommand::GitDiffCommand).add(
             "git_diff_changes_found",
             ExceptionEntry {
                 command: CallbackCommand::GitDiffCommand,
                 max_retries: 0,
-                context_paths: vec![
-                    "pipelight-misc/git-diff-report/unstaged.txt".into(),
-                    "pipelight-misc/git-diff-report/staged.txt".into(),
-                    "pipelight-misc/git-diff-report/untracked.txt".into(),
-                    "pipelight-misc/git-diff-report/unpushed.txt".into(),
-                ],
+                context_paths: vec!["pipelight-misc/git-diff-report/diff.txt".into()],
             },
         )
     }
 
     fn match_exception(&self, _exit_code: i64, stdout: &str, _stderr: &str) -> Option<String> {
-        if stdout.contains("change record(s) on current branch") {
+        if stdout.contains("change record(s) on current branch")
+            || stdout.contains("unique file(s) changed on current branch")
+        {
             Some("git_diff_changes_found".into())
         } else {
             None
@@ -84,24 +128,16 @@ exit 1"#;
     }
 
     fn output_report_str(&self, success: bool, stdout: &str, stderr: &str) -> String {
+        // TEMPORARY — Task 5 tightens up the match strings; leave flexible for now.
         let output = format!("{}{}", stdout, stderr);
-        if output.contains("not a git repository") {
-            return "git-diff: skipped (no git repo)".into();
-        }
-        if output.contains("working tree clean") {
-            return "git-diff: skipped (tree clean)".into();
-        }
-        if let Some(line) = output
-            .lines()
-            .find(|l| l.contains("change record(s) on current branch"))
-        {
+        if output.contains("not a git repository") { return "git-diff: skipped (no git repo)".into(); }
+        if output.contains("working tree clean") { return "git-diff: skipped (tree clean)".into(); }
+        if let Some(line) = output.lines().find(|l|
+            l.contains("change record(s) on current branch")
+            || l.contains("unique file(s) changed on current branch")) {
             return line.trim().to_string();
         }
-        if success {
-            "git-diff: ok".into()
-        } else {
-            "git-diff: failed".into()
-        }
+        if success { "git-diff: ok".into() } else { "git-diff: failed".into() }
     }
 }
 
@@ -127,7 +163,7 @@ mod tests {
         let of = step.exception_mapping().to_on_failure();
         assert_eq!(of.callback_command, CallbackCommand::GitDiffCommand);
         assert_eq!(of.max_retries, 0);
-        assert_eq!(of.context_paths.len(), 4);
+        assert_eq!(of.context_paths.len(), 1);
     }
 
     #[test]
@@ -138,7 +174,7 @@ mod tests {
         };
         let resolved = step.exception_mapping().resolve(
             1,
-            "git-diff: 3 change record(s) on current branch\n",
+            "git-diff: 3 unique file(s) changed on current branch\n",
             "",
             Some(&match_fn),
         );
@@ -167,7 +203,7 @@ mod tests {
         let step = GitDiffStep::new();
         let r = step.output_report_str(
             true,
-            "git-diff: working tree clean and no unpushed commits — skipping\n",
+            "git-diff: working tree clean and no branch-ahead commits — skipping\n",
             "",
         );
         assert_eq!(r, "git-diff: skipped (tree clean)");
@@ -176,32 +212,94 @@ mod tests {
     #[test]
     fn test_report_has_changes() {
         let step = GitDiffStep::new();
-        let stdout = "git-diff: 6 change record(s) on current branch\n  unstaged: 2 file(s)\n  staged: 1 file(s)\n  untracked: 1 file(s)\n  unpushed (ahead of origin/main): 2 file(s)\n";
+        let stdout = "git-diff: 6 unique file(s) changed on current branch\n  unstaged: 2\n  staged: 1\n  untracked: 1\n  branch-ahead (vs origin/main): 2\n";
         let r = step.output_report_str(false, stdout, "");
-        assert_eq!(r, "git-diff: 6 change record(s) on current branch");
+        assert_eq!(r, "git-diff: 6 unique file(s) changed on current branch");
     }
 
     #[test]
-    fn test_script_detects_untracked_files() {
+    fn test_new_has_none_base_ref() {
+        let step = GitDiffStep::new();
+        assert_eq!(step.base_ref, None);
+    }
+
+    #[test]
+    fn test_with_base_ref_some_stores_value() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        assert_eq!(step.base_ref.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
+    fn test_with_base_ref_none_equals_new() {
+        let a = GitDiffStep::new();
+        let b = GitDiffStep::with_base_ref(None);
+        assert_eq!(a.base_ref, b.base_ref);
+    }
+
+    #[test]
+    fn test_script_writes_single_diff_txt() {
+        let step = GitDiffStep::new();
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains("> \"$REPORT_DIR/diff.txt\""),
+            "script should redirect unified output to diff.txt; got:\n{cmd}"
+        );
+        assert!(
+            !cmd.contains("unstaged.txt") && !cmd.contains("staged.txt")
+                && !cmd.contains("untracked.txt") && !cmd.contains("unpushed.txt"),
+            "script must not write legacy per-category files; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_new_variant_uses_upstream() {
+        let step = GitDiffStep::new();
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains("@{upstream}"),
+            "default variant must reference @{{upstream}}; got:\n{cmd}"
+        );
+        assert!(
+            cmd.contains("BASE_LABEL=\"@{upstream}\""),
+            "default variant must label BASE as @{{upstream}}; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_literal_variant_uses_given_ref() {
+        let step = GitDiffStep::with_base_ref(Some("origin/main".into()));
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains("BASE=\"origin/main\""),
+            "literal variant must hardcode the base ref; got:\n{cmd}"
+        );
+        assert!(
+            cmd.contains("BASE_LABEL=\"origin/main\""),
+            "literal variant must label BASE with the given ref; got:\n{cmd}"
+        );
+        assert!(
+            !cmd.contains("@{upstream}"),
+            "literal variant must NOT reference @{{upstream}}; got:\n{cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_sentinel_present() {
+        let step = GitDiffStep::new();
+        let cmd = &step.config().commands[0];
+        assert!(
+            cmd.contains("# pipelight:git-diff-step v2"),
+            "script should carry sentinel comment for future version detection"
+        );
+    }
+
+    #[test]
+    fn test_script_still_detects_untracked_files() {
         let step = GitDiffStep::new();
         let cmd = &step.config().commands[0];
         assert!(
             cmd.contains("git ls-files --others --exclude-standard"),
-            "script should use git ls-files to detect untracked files"
-        );
-        assert!(
-            cmd.contains("untracked.txt"),
-            "script should write untracked files to untracked.txt"
-        );
-    }
-
-    #[test]
-    fn test_context_paths_include_untracked() {
-        let step = GitDiffStep::new();
-        let of = step.exception_mapping().to_on_failure();
-        assert!(
-            of.context_paths.iter().any(|p| p.contains("untracked.txt")),
-            "context_paths should include untracked.txt"
+            "script should still use git ls-files for untracked detection"
         );
     }
 }
