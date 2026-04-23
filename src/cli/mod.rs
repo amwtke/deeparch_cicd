@@ -9,7 +9,6 @@ use crate::ci::output::tty::{PipelineProgressUI, PipelineReporter};
 use crate::ci::output::{json, plain};
 use crate::ci::output::{resolve_output_mode, OutputMode};
 use crate::ci::parser::{Pipeline, Step};
-use crate::ci::pipeline_builder::StepDef;
 use crate::ci::scheduler::Scheduler;
 use crate::run_state::{OnFailureState, PipelineStatus, RunState, StepState, StepStatus};
 
@@ -1022,6 +1021,14 @@ async fn cmd_retry(
     let misc_dir = project_dir.join("pipelight-misc");
     let _ = std::fs::create_dir_all(&misc_dir);
 
+    // Callback registry + StepDef map are shared by the main-path state
+    // update (below) AND the cascade loop further down. Both paths need
+    // to call `reresolve_on_failure` so cascaded steps also publish their
+    // callbacks (test_print, auto_gen_jacoco_config, etc.) — not just the
+    // primary retried step.
+    let callback_registry = CallbackCommandRegistry::new();
+    let step_def_map = crate::ci::pipeline_builder::step_defs_for_pipeline(&pipeline);
+
     // Update step state
     {
         let stdout = result.stdout_string();
@@ -1066,8 +1073,6 @@ async fn cmd_retry(
         // Re-resolve on_failure so the callback reflects THIS run's stdout/stderr,
         // not the state frozen from the initial failure. Preserve retries_remaining
         // (already decremented above); only refresh the other fields.
-        let registry = CallbackCommandRegistry::new();
-        let step_def_map = crate::ci::pipeline_builder::step_defs_for_pipeline(&pipeline);
         let sd = step_def_map.as_ref().and_then(|defs| defs.get(&step_name));
         let prev_remaining = state
             .get_step(&step_name)
@@ -1079,7 +1084,7 @@ async fn cmd_retry(
             &stdout,
             &stderr,
             prev_remaining,
-            &registry,
+            &callback_registry,
         );
         let ss = state
             .get_step_mut(&step_name)
@@ -1183,6 +1188,23 @@ async fn cmd_retry(
                 if step_test_summary.is_some() {
                     ss.test_summary = step_test_summary;
                 }
+
+                // Re-resolve on_failure so cascaded steps also surface their
+                // callbacks (e.g. `test_print_command` on test failures, or
+                // `auto_gen_jacoco_config` when jacoco emits the PIPELIGHT_CALLBACK
+                // marker). Without this, LLMs see `on_failure: null` on every step
+                // the retry cascade brings up from Skipped, and the callback
+                // dispatch rule in `pipelight-run` skill has nothing to act on.
+                let sd = step_def_map.as_ref().and_then(|defs| defs.get(skipped_name));
+                let new_on_failure = reresolve_on_failure(
+                    sd.map(|b| b.as_ref()),
+                    sr.exit_code,
+                    ss.stdout.as_deref().unwrap_or(""),
+                    ss.stderr.as_deref().unwrap_or(""),
+                    None, // cascaded step, no prior retries_remaining to preserve
+                    &callback_registry,
+                );
+                ss.on_failure = new_on_failure;
             }
             let _ = state.save(&base);
 
