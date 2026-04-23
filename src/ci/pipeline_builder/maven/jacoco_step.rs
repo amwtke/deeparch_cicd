@@ -47,16 +47,14 @@ impl StepDef for MavenJacocoStep {
                exit 0; \
              fi && \
              EXCLUDES=$(awk '/^exclude:/{{flag=1; next}} flag && /^[[:space:]]*-/ {{gsub(/^[[:space:]]*-[[:space:]]*\"?/,\"\"); gsub(/\"?[[:space:]]*$/,\"\"); print}} flag && /^[^[:space:]-]/ {{flag=0}}' /workspace/pipelight-misc/jacoco-config.yml) && \
-             FILTERED=\"\" && \
-             while IFS= read -r f; do \
+             FILTERED=$(printf '%s\\n' \"$CHANGED_FILES\" | while IFS= read -r f; do \
                [ -z \"$f\" ] && continue; \
                skip=0; \
                for pat in $EXCLUDES; do \
                  case \"$f\" in $pat) skip=1; break;; esac; \
                done; \
-               [ \"$skip\" -eq 0 ] && FILTERED=\"$FILTERED$f\\n\"; \
-             done <<< \"$CHANGED_FILES\" && \
-             FILTERED=$(printf '%b' \"$FILTERED\" | sed '/^$/d') && \
+               [ \"$skip\" -eq 0 ] && printf '%s\\n' \"$f\"; \
+             done | sed '/^$/d') && \
              if [ -z \"$FILTERED\" ]; then \
                echo 'jacoco: all changed files excluded by jacoco-config.yml — skipping'; \
                exit 0; \
@@ -489,5 +487,24 @@ mod tests {
             "",
         );
         assert_eq!(r, "jacoco: skipped (no exec file)");
+    }
+
+    #[test]
+    fn test_command_is_posix_sh_compatible() {
+        // Docker images like maven:3.9-eclipse-temurin-17 default /bin/sh to
+        // dash, which does NOT support the bash-only here-string (`<<<`).
+        // Regression guard: the generated command must never emit `<<<`.
+        let step = MavenJacocoStep::new(&make_info());
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            !cmd.contains("<<<"),
+            "jacoco shell must be POSIX — found bashism `<<<` in command:\n{}",
+            cmd
+        );
+        assert!(
+            cmd.contains("printf '%s\\n' \"$CHANGED_FILES\" | while IFS= read -r f"),
+            "POSIX replacement (pipe-into-while) missing; got:\n{}",
+            cmd
+        );
     }
 }
