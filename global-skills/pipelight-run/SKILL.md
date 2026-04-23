@@ -135,12 +135,40 @@ Review the generated file and adjust if needed.
 
 ## Step 2: Run Pipeline
 
+Two rules for every pipelight invocation:
+
+**Rule 1 — Globally-unique run-id.** Never hard-code `run-001`. Generate a unique id at call time so concurrent runs (or re-runs after a `clean`) never clobber each other's `~/.pipelight/runs/<run-id>/status.json`. Preferred recipe:
+
 ```bash
-pipelight run -f pipeline.yml --output json --run-id <short-id>
+RUN_ID=run-$(date +%s%N)
 ```
 
+`%s%N` gives epoch-seconds + nanoseconds — unique across processes on the same host. In CI contexts prefer `$CI_JOB_ID` / `$GITHUB_RUN_ID` if present, falling back to the date-based form. Remember the value — every subsequent `pipelight retry` must pass the same `--run-id` to reuse the persisted state.
+
+**Rule 2 — Launch in background + stream step progress.** `--output json` buffers the whole pipeline's output until completion, leaving the user in the dark during multi-minute runs. Always launch pipelight with `run_in_background: true` and immediately open a `Monitor` on the background task's output file filtered to step-start / completion lines:
+
+```bash
+# Run in background — MUST be a BARE command (NOT piped through tail/head/tee).
+# Piping would send only the pipe's output to the task file; pipelight's
+# stderr lines (`INFO Starting step step=...`) would be lost and Monitor
+# below would fire zero events.
+pipelight run -f pipeline.yml --output json --run-id $RUN_ID
+```
+
+```bash
+# In a parallel Monitor tool call (description: "pipelight step progress"):
+tail -f /tmp/claude-1000/**/tasks/<task-id>.output 2>/dev/null \
+  | grep --line-buffered -E 'Starting (local )?step|JaCoCo Total|PMD Total|SpotBugs Total|PIPELIGHT_CALLBACK|ERROR'
+```
+
+Each matching line becomes a chat notification, so the user sees `Starting step step=build image=gradle:8-jdk17` etc. as they happen, plus any step-summary markers (`PMD Total: N violations`, `JaCoCo Total: N files below 70%`) and callback triggers. The Monitor ends when pipelight exits and `tail` reaches EOF — you can also explicitly `TaskStop` it once you've read the final state JSON.
+
+When the background-task completion notification arrives, **read `~/.pipelight/runs/$RUN_ID/status.json` via the Read / jq tool for the structured state** — do NOT rely on stdout in the task output file, because massive Gradle/Maven output often truncates the trailing JSON blob.
+
+Full invocation checklist:
 - Always use `--output json` so output is machine-parseable
-- Always provide `--run-id` (e.g. `run-001`) to enable retry
+- Always set `--run-id $RUN_ID` (unique per invocation, see Rule 1)
+- Always launch with `run_in_background: true` + Monitor (see Rule 2)
 - Use `-f` to point to the correct pipeline file if not `pipeline.yml`
 - If `--skip` was passed, add `--skip <step1> <step2>` to skip those steps
 - If `--step` was passed, add `--step <name>` to run only that step
@@ -148,10 +176,13 @@ pipelight run -f pipeline.yml --output json --run-id <short-id>
 - If `--verbose` was passed, add `--verbose` to show full container output
 - If `--ping-pong` was passed, add `--ping-pong` to activate the ping-pong communication test step
 - If `--full-report-only` was passed, add `--full-report-only` to force full-scan + report-only mode on lint/scan steps
+- If `--git-diff-from-remote-branch=<ref>` was passed, forward the same flag on both the initial `run` and every subsequent `retry` (pipelight persists the value, but re-passing makes the invocation self-contained and re-readable)
 
 ## Step 3: Parse JSON Result
 
-**IMPORTANT: 每次收到 pipelight 的 JSON 输出（包括首次运行和每次 retry），都必须将完整 JSON 原文打印给用户。** 使用 JSON code block 展示，让用户能看到 LLM 与 pipelight 之间的每一次完整交互。如果 JSON 输出过大被截断，则从工具结果文件中提取关键字段（run_id, status, 每个 step 的 name/status/report_summary/stderr）并以 JSON 格式打印。
+**IMPORTANT: 每次收到 pipelight 的 JSON 输出（包括首次运行和每次 retry），都必须将完整 JSON 原文打印给用户。** 使用 JSON code block 展示，让用户能看到 LLM 与 pipelight 之间的每一次完整交互。
+
+**Reading the result.** Since Step 2 launches pipelight in the background + uses Monitor for progress, the canonical JSON is at `~/.pipelight/runs/$RUN_ID/status.json` — read that with `jq` (or Read). The background task's output file may contain the JSON too but is often polluted / truncated by Gradle/Maven stdout. If the state JSON is too verbose to display in full, extract and print the key fields (run_id, status, each step's name/status/report_summary/stderr/on_failure) as a JSON code block.
 
 JSON structure:
 
