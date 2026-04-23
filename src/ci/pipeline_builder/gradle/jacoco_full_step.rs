@@ -61,6 +61,7 @@ impl StepDef for GradleJacocoFullStep {
              REPORT=/workspace/pipelight-misc/jacoco-full-report && \
              : > $REPORT/jacoco-summary.txt && \
              : > $REPORT/threshold-fail.txt && \
+             sed 's|></|>\\n<|g' $REPORT/jacoco.xml > $REPORT/jacoco-pretty.xml && \
              awk -v threshold=\"$THRESHOLD\" \
                  -v summary=\"$REPORT/jacoco-summary.txt\" \
                  -v failed=\"$REPORT/threshold-fail.txt\" '\
@@ -75,7 +76,7 @@ impl StepDef for GradleJacocoFullStep {
                  if (pct<threshold) printf(\"%s %.1f%%\\n\", rel, pct) >> failed; \
                  sf=\"\"; \
                }} \
-             ' $REPORT/jacoco.xml && \
+             ' $REPORT/jacoco-pretty.xml && \
              FAIL_COUNT=$(wc -l < $REPORT/threshold-fail.txt | tr -d ' ') && \
              if [ \"$FAIL_COUNT\" -gt 0 ]; then \
                echo \"\" && echo \"JaCoCo Total: $FAIL_COUNT files below $THRESHOLD%\"; \
@@ -195,5 +196,31 @@ mod tests {
         let step = GradleJacocoFullStep::new(&make_info());
         let cmd = step.config().commands[0].clone();
         assert!(cmd.contains("JaCoCo Total:"));
+    }
+
+    #[test]
+    fn test_full_step_pretty_prints_xml_before_awk() {
+        // Same root cause as the incremental jacoco step: JaCoCo CLI emits
+        // 0-newline single-line XML, so awk's pattern matches only fire on
+        // the first tag. Full-report summary and threshold-fail stay empty.
+        // Regression guard: command must pretty-print into jacoco-pretty.xml
+        // and awk over that file.
+        let step = GradleJacocoFullStep::new(&make_info());
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("jacoco-pretty.xml"),
+            "command must produce jacoco-pretty.xml for awk, got: {}",
+            cmd
+        );
+        assert!(
+            cmd.contains("sed 's|></|>\\n<|g'"),
+            "command must pretty-print with sed before awk, got: {}",
+            cmd
+        );
+        assert!(
+            cmd.contains("' $REPORT/jacoco-pretty.xml &&"),
+            "awk's trailing file arg must be jacoco-pretty.xml, got: {}",
+            cmd
+        );
     }
 }

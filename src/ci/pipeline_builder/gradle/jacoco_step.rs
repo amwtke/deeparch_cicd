@@ -66,28 +66,43 @@ impl StepDef for GradleJacocoStep {
              fi && \
              JACOCO_CACHE=$HOME/.pipelight/cache && \
              JACOCO_DIR=$JACOCO_CACHE/jacoco-{ver} && \
-             if [ ! -f /workspace/pipelight-misc/jacoco-report/jacoco.xml ]; then \
-               if [ ! -f $JACOCO_DIR/lib/jacococli.jar ]; then \
-                 echo 'Downloading JaCoCo CLI...' && \
-                 mkdir -p $JACOCO_DIR && \
-                 curl -sL https://repo1.maven.org/maven2/org/jacoco/jacoco/{ver}/jacoco-{ver}.zip -o /tmp/jacoco.zip && \
-                 (cd $JACOCO_DIR && jar xf /tmp/jacoco.zip || unzip -o /tmp/jacoco.zip) && rm -f /tmp/jacoco.zip; \
-               fi && \
-               CLASS_DIRS=$(find . \\( -path '*/build/classes/java/main' -o -path '*/build/classes/kotlin/main' \\) -type d 2>/dev/null | tr '\\n' ' ') && \
-               SRC_DIRS=$(find . \\( -path '*/src/main/java' -o -path '*/src/main/kotlin' \\) -type d 2>/dev/null | tr '\\n' ' ') && \
-               CLASSFILES_ARGS=$(for d in $CLASS_DIRS; do echo -n \"--classfiles $d \"; done) && \
-               SOURCES_ARGS=$(for d in $SRC_DIRS; do echo -n \"--sourcefiles $d \"; done) && \
-               java -jar $JACOCO_DIR/lib/jacococli.jar report \
-                 /workspace/pipelight-misc/jacoco-report/jacoco.exec \
-                 $CLASSFILES_ARGS $SOURCES_ARGS \
-                 --xml /workspace/pipelight-misc/jacoco-report/jacoco.xml; \
+             if [ ! -f $JACOCO_DIR/lib/jacococli.jar ]; then \
+               echo 'Downloading JaCoCo CLI...' && \
+               mkdir -p $JACOCO_DIR && \
+               curl -sL https://repo1.maven.org/maven2/org/jacoco/jacoco/{ver}/jacoco-{ver}.zip -o /tmp/jacoco.zip && \
+               (cd $JACOCO_DIR && jar xf /tmp/jacoco.zip || unzip -o /tmp/jacoco.zip) && rm -f /tmp/jacoco.zip; \
              fi && \
+             CLASSFILES_LIST=/tmp/pipelight-classfiles-$$.txt && \
+             : > $CLASSFILES_LIST && \
+             printf '%s\\n' \"$FILTERED\" | while IFS= read -r src; do \
+               [ -z \"$src\" ] && continue; \
+               REL=$(echo \"$src\" | sed -E 's#.*/src/main/(java|kotlin)/##; s#\\.(java|kt)$##'); \
+               [ -z \"$REL\" ] && continue; \
+               PKG_DIR=$(dirname \"$REL\"); \
+               BASE=$(basename \"$REL\"); \
+               find . \\( -path \"*/build/classes/java/main/$PKG_DIR\" -o -path \"*/build/classes/kotlin/main/$PKG_DIR\" \\) -type d 2>/dev/null | while IFS= read -r clsdir; do \
+                 find \"$clsdir\" -maxdepth 1 \\( -name \"$BASE.class\" -o -name \"$BASE\\$*.class\" -o -name \"${{BASE}}Kt.class\" \\) 2>/dev/null; \
+               done >> $CLASSFILES_LIST; \
+             done && \
+             if [ ! -s $CLASSFILES_LIST ]; then \
+               echo 'jacoco: no compiled class files found for changed sources — skipping'; \
+               rm -f $CLASSFILES_LIST; exit 0; \
+             fi && \
+             SRC_DIRS=$(find . \\( -path '*/src/main/java' -o -path '*/src/main/kotlin' \\) -type d 2>/dev/null | tr '\\n' ' ') && \
+             SOURCES_ARGS=$(for d in $SRC_DIRS; do echo -n \"--sourcefiles $d \"; done) && \
+             CLASSFILES_ARGS=$(awk '{{printf \"--classfiles %s \", $0}}' $CLASSFILES_LIST) && \
+             rm -f $CLASSFILES_LIST && \
+             java -jar $JACOCO_DIR/lib/jacococli.jar report \
+               /workspace/pipelight-misc/jacoco-report/jacoco.exec \
+               $CLASSFILES_ARGS $SOURCES_ARGS \
+               --xml /workspace/pipelight-misc/jacoco-report/jacoco.xml && \
              THRESHOLD=$(awk '/^threshold:/{{print $2; exit}}' /workspace/pipelight-misc/jacoco-config.yml) && \
              THRESHOLD=${{THRESHOLD:-70}} && \
              REPORT=/workspace/pipelight-misc/jacoco-report && \
              : > $REPORT/jacoco-summary.txt && \
              : > $REPORT/uncovered.txt && \
              : > $REPORT/threshold-fail.txt && \
+             sed 's|></|>\\n<|g' $REPORT/jacoco.xml > $REPORT/jacoco-pretty.xml && \
              awk -v threshold=\"$THRESHOLD\" \
                  -v summary=\"$REPORT/jacoco-summary.txt\" \
                  -v failed=\"$REPORT/threshold-fail.txt\" \
@@ -121,7 +136,7 @@ impl StepDef for GradleJacocoStep {
                  }} \
                  current=\"\"; \
                }} \
-             ' $REPORT/jacoco.xml && \
+             ' $REPORT/jacoco-pretty.xml && \
              FAIL_COUNT=$(wc -l < $REPORT/threshold-fail.txt | tr -d ' ') && \
              if [ \"$FAIL_COUNT\" -gt 0 ]; then \
                echo \"\" && \
@@ -497,6 +512,83 @@ mod tests {
             cmd.contains("build/classes/java/main"),
             "Gradle step must look in Gradle's compiled output dir (first 500 chars): {}",
             &cmd.chars().take(500).collect::<String>()
+        );
+    }
+
+    #[test]
+    fn test_command_narrows_classfiles_to_filtered_sources() {
+        // jacococli's `--classfiles` governs which classes enter the XML report.
+        // If we pass whole `build/classes/{java,kotlin}/main` directories the
+        // report grows to 28MB+ in multi-module Gradle projects. The fix:
+        // derive `--classfiles` from FILTERED (the changed source files), so
+        // jacococli only analyses the classes we'll actually report on.
+        let step = GradleJacocoStep::new(&make_info());
+        let cmd = step.config().commands[0].clone();
+
+        // Derivation builds CLASSFILES_LIST from FILTERED via sed stripping.
+        assert!(
+            cmd.contains("CLASSFILES_LIST=/tmp/pipelight-classfiles-$$.txt"),
+            "command must use a per-run temp file for classfiles, got: {}",
+            cmd
+        );
+        assert!(
+            cmd.contains("sed -E 's#.*/src/main/(java|kotlin)/##"),
+            "command must strip src/main/{{java,kotlin}}/ from FILTERED entries, got: {}",
+            cmd
+        );
+
+        // Must match inner classes (Bar$Inner.class) and Kotlin file-classes (BarKt.class).
+        assert!(
+            cmd.contains("$BASE.class")
+                && cmd.contains("$BASE\\$*.class")
+                && cmd.contains("${BASE}Kt.class"),
+            "command must find <Base>.class, <Base>$..class (inner) AND <Base>Kt.class (Kotlin top-level), got: {}",
+            cmd
+        );
+
+        // Must self-skip when FILTERED matches no compiled class.
+        assert!(
+            cmd.contains("no compiled class files found for changed sources"),
+            "command must self-skip when no classes match, got: {}",
+            cmd
+        );
+
+        // CLASSFILES_ARGS must be derived from the list, not from wide dir globs.
+        assert!(
+            cmd.contains("awk '{printf \"--classfiles %s \", $0}' $CLASSFILES_LIST"),
+            "command must build --classfiles args from the narrow list, got: {}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_command_pretty_prints_xml_before_awk() {
+        // JaCoCo CLI emits the whole report on a single 0-newline line. awk
+        // processes input line-by-line, so without pretty-printing each
+        // pattern (/<package/, /<sourcefile/, /<counter.../) only fires once
+        // on the first tag — summary comes out empty regardless of coverage.
+        // Regression guard: the command must normalise element boundaries
+        // (`sed 's|></|>\n<|g'`) into `jacoco-pretty.xml` and run awk over
+        // that file, not the original.
+        let step = GradleJacocoStep::new(&make_info());
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            cmd.contains("jacoco-pretty.xml"),
+            "command must produce jacoco-pretty.xml for awk, got: {}",
+            cmd
+        );
+        assert!(
+            cmd.contains("sed 's|></|>\\n<|g'"),
+            "command must pretty-print with sed before awk, got: {}",
+            cmd
+        );
+        // The awk script ends with `' $REPORT/<file>` (closing quote + file
+        // arg). Assert that trailing arg is the pretty file, catching any
+        // future refactor that forgets to swap it.
+        assert!(
+            cmd.contains("' $REPORT/jacoco-pretty.xml &&"),
+            "awk's trailing file arg must be jacoco-pretty.xml (regression: single-line XML bug), got: {}",
+            cmd
         );
     }
 
