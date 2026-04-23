@@ -47,16 +47,14 @@ impl StepDef for GradleJacocoStep {
                exit 0; \
              fi && \
              EXCLUDES=$(awk '/^exclude:/{{flag=1; next}} flag && /^[[:space:]]*-/ {{gsub(/^[[:space:]]*-[[:space:]]*\"?/,\"\"); gsub(/\"?[[:space:]]*$/,\"\"); print}} flag && /^[^[:space:]-]/ {{flag=0}}' /workspace/pipelight-misc/jacoco-config.yml) && \
-             FILTERED=\"\" && \
-             while IFS= read -r f; do \
+             FILTERED=$(printf '%s\\n' \"$CHANGED_FILES\" | while IFS= read -r f; do \
                [ -z \"$f\" ] && continue; \
                skip=0; \
                for pat in $EXCLUDES; do \
                  case \"$f\" in $pat) skip=1; break;; esac; \
                done; \
-               [ \"$skip\" -eq 0 ] && FILTERED=\"$FILTERED$f\\n\"; \
-             done <<< \"$CHANGED_FILES\" && \
-             FILTERED=$(printf '%b' \"$FILTERED\" | sed '/^$/d') && \
+               [ \"$skip\" -eq 0 ] && printf '%s\\n' \"$f\"; \
+             done | sed '/^$/d') && \
              if [ -z \"$FILTERED\" ]; then \
                echo 'jacoco: all changed files excluded by jacoco-config.yml — skipping'; \
                exit 0; \
@@ -499,6 +497,28 @@ mod tests {
             cmd.contains("build/classes/java/main"),
             "Gradle step must look in Gradle's compiled output dir (first 500 chars): {}",
             &cmd.chars().take(500).collect::<String>()
+        );
+    }
+
+    #[test]
+    fn test_command_is_posix_sh_compatible() {
+        // Docker images like gradle:8-jdk17 default /bin/sh to dash, which does
+        // NOT support the bash-only here-string (`<<<`). Regression guard: the
+        // generated command must never emit `<<<`, otherwise the step exits
+        // with "Syntax error: redirection unexpected" in the container.
+        let step = GradleJacocoStep::new(&make_info());
+        let cmd = step.config().commands[0].clone();
+        assert!(
+            !cmd.contains("<<<"),
+            "jacoco shell must be POSIX — found bashism `<<<` in command:\n{}",
+            cmd
+        );
+        // Positive check: the POSIX replacement — piping CHANGED_FILES into the
+        // while loop via a command-substitution-collected FILTERED — is present.
+        assert!(
+            cmd.contains("printf '%s\\n' \"$CHANGED_FILES\" | while IFS= read -r f"),
+            "POSIX replacement (pipe-into-while) missing; got:\n{}",
+            cmd
         );
     }
 }
