@@ -34,7 +34,8 @@ impl GitDiffStep {
         if let Some(ref r) = base_ref {
             debug_assert!(
                 !r.is_empty()
-                    && r.chars().all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c)),
+                    && r.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "/_.-".contains(c)),
                 "with_base_ref: unsafe ref '{r}' — must be ASCII alphanumeric + /_.-",
             );
         }

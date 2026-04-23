@@ -1195,7 +1195,9 @@ async fn cmd_retry(
                 // marker). Without this, LLMs see `on_failure: null` on every step
                 // the retry cascade brings up from Skipped, and the callback
                 // dispatch rule in `pipelight-run` skill has nothing to act on.
-                let sd = step_def_map.as_ref().and_then(|defs| defs.get(skipped_name));
+                let sd = step_def_map
+                    .as_ref()
+                    .and_then(|defs| defs.get(skipped_name));
                 let new_on_failure = reresolve_on_failure(
                     sd.map(|b| b.as_ref()),
                     sr.exit_code,
